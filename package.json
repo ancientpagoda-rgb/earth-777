@@ -1,0 +1,22 @@
+{
+  "name": "earth-777",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "A scholarly grounded Free Earth simulation beginning at 777,000 BP.",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "data:ingest": "node scripts/ingest-paleo-forcing.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "three": "0.185.1",
+    "topojson-client": "3.1.0",
+    "world-atlas": "2.0.2"
+  },
+  "devDependencies": {
+    "vite": "7.3.6"
+  }
+}

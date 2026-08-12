@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07100d" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%2307100d' stroke='%2378a88f' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23d1a15c'/%3E%3C/svg%3E" />
+    <meta
+      name="description"
+      content="Earth 777 — a scholarly grounded Free Earth simulation beginning 777,000 years before present."
+    />
+    <title>Earth 777 — Free Earth</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <canvas id="earth" aria-label="Interactive reconstruction of Earth 777,000 years ago"></canvas>
+
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true">◉</span>
+          <div>
+            <strong>EARTH 777</strong>
+            <small>FREE EARTH / RUN 01</small>
+          </div>
+        </div>
+        <div class="epoch">
+          <span>SIMULATION DATE</span>
+          <strong id="year-readout">777,000 BP</strong>
+        </div>
+        <button class="quiet-button" id="sources-button" type="button">SOURCES</button>
+      </header>
+
+      <aside class="state-panel panel" aria-label="Earth system state">
+        <div class="panel__heading">
+          <div>
+            <small>GLOBAL STATE</small>
+            <strong id="stage-readout">Late MIS 19c</strong>
+          </div>
+          <span class="confidence confidence--mixed">mixed confidence</span>
+        </div>
+        <dl class="metrics">
+          <div><dt>CO₂</dt><dd id="co2-readout">245 ppm</dd></div>
+          <div><dt>Temperature</dt><dd id="temperature-readout">−1.27 K</dd></div>
+          <div><dt>Ice state</dt><dd id="ice-readout">incipient</dd></div>
+          <div><dt>Sea level</dt><dd id="sea-readout">−13 m</dd></div>
+          <div><dt>Orbit</dt><dd id="orbit-readout">23.3° tilt</dd></div>
+          <div><dt>Vegetation</dt><dd id="npp-readout">stable</dd></div>
+          <div><dt>Hominins</dt><dd id="hominin-readout">regional</dd></div>
+        </dl>
+        <div class="provenance-note">
+          <span class="datum datum--study"></span> study constrained
+          <span class="datum datum--model"></span> model derived
+          <span class="datum datum--prior"></span> provisional
+        </div>
+      </aside>
+
+      <aside class="location-panel panel" aria-label="Selected location">
+        <small>OBSERVATION</small>
+        <strong id="location-title">Global view</strong>
+        <p id="location-detail">Select the globe to inspect a regional climate and ecosystem state.</p>
+        <div class="location-coordinates" id="location-coordinates">—</div>
+        <button id="surface-button" class="primary-button" type="button" disabled>DESCEND TO REGION</button>
+      </aside>
+
+      <section class="timeline panel" aria-label="Simulation timeline">
+        <div class="timeline__row">
+          <button id="play-button" class="play-button" type="button" aria-label="Start simulation">▶</button>
+          <div class="time-control">
+            <label for="timeline-range">777,000 BP <span id="elapsed-readout">checkpoint</span></label>
+            <input id="timeline-range" type="range" min="0" max="777000" value="0" step="10" />
+          </div>
+          <div class="speed-control" aria-label="Simulation speed">
+            <button type="button" data-speed="1">1×</button>
+            <button type="button" data-speed="10">10×</button>
+            <button class="is-active" type="button" data-speed="100">100×</button>
+            <button type="button" data-speed="1000">1K×</button>
+          </div>
+        </div>
+        <div class="branch-row">
+          <span><i></i> CHECKPOINT 777 KA</span>
+          <span id="run-seed">SEED 777001</span>
+          <button id="branch-button" class="quiet-button" type="button">NEW BRANCH</button>
+        </div>
+      </section>
+
+      <aside class="journal panel" aria-live="polite">
+        <small>FIELD JOURNAL</small>
+        <ol id="journal-list">
+          <li><time>777,000 BP</time><span>Free Earth initialized from the MIS 19 checkpoint.</span></li>
+        </ol>
+      </aside>
+
+      <div class="hint">DRAG TO ORBIT · SCROLL TO ZOOM · SELECT A REGION</div>
+
+      <section class="modal" id="sources-modal" role="dialog" aria-modal="true" aria-labelledby="sources-title">
+        <div class="modal__card">
+          <div class="modal__heading">
+            <div>
+              <small>SCIENTIFIC PROVENANCE</small>
+              <h1 id="sources-title">What this world knows</h1>
+            </div>
+            <button id="sources-close" class="close-button" type="button" aria-label="Close sources">×</button>
+          </div>
+          <p class="modal__intro">Every layer distinguishes published constraints, derived model state, and provisional priors. Earth 777 is a plausible realization—not an exact replay.</p>
+          <div class="source-list" id="source-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

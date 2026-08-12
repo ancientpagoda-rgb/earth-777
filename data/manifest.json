@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/ingest-paleo-forcing.mjs",
+  "retrieved": "2026-08-12",
+  "coverage": {
+    "minimumKaBP": 0,
+    "maximumKaBP": 777,
+    "stepKa": 1,
+    "records": 778
+  },
+  "sources": [
+    {
+      "id": "la2004",
+      "file": "INSOLN.LA2004.BTL.ASC",
+      "url": "https://ssp.imcce.fr/insola/earth/online/earth/La2004/INSOLN.LA2004.BTL.ASC",
+      "sha256": "3f13b9f8e69085baf40bc67a2669e6f6af4148fef9218ed2158772aa91e35f8c",
+      "rawSha256": "3f13b9f8e69085baf40bc67a2669e6f6af4148fef9218ed2158772aa91e35f8c",
+      "fields": [
+        "eccentricity",
+        "obliquity (radians)",
+        "longitude of perihelion from moving equinox (radians)"
+      ],
+      "transform": "Select 0 to -777 ka; convert angles from radians to degrees."
+    },
+    {
+      "id": "spratt-lisiecki-2016",
+      "file": "spratt2016-noaa.txt",
+      "url": "https://www.ncei.noaa.gov/pub/data/paleo/contributions_by_author/spratt2016/spratt2016-noaa.txt",
+      "sha256": "02f56f02f709b70ac70fe5e403326272e19b42bf34ee9b1bba3b8322e1375dc1",
+      "rawSha256": "02f56f02f709b70ac70fe5e403326272e19b42bf34ee9b1bba3b8322e1375dc1",
+      "datasetDoi": "10.25921/rd66-5820",
+      "publicationDoi": "10.5194/cp-12-1079-2016",
+      "fields": [
+        "SeaLev_longPC1",
+        "SeaLev_longPC1_err_sig",
+        "SeaLev_longPC1_err_lo",
+        "SeaLev_longPC1_err_up"
+      ],
+      "transform": "Select the continuous five-record 0–798 ka stack and retain 0–777 ka."
+    }
+  ],
+  "outputs": [
+    {
+      "file": "src/data/generated/paleo-forcing.generated.js",
+      "sha256": "bc4d28005a4335acdb6f323a4725831f350a5be31ebc0244bcbb5b4616ced69b"
+    }
+  ]
+}
