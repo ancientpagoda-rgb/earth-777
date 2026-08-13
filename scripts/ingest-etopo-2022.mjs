@@ -31,6 +31,19 @@ function jsString(value) {
   return JSON.stringify(value);
 }
 
+function valueRange(values) {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const value of values) {
+    if (value < minimum) minimum = value;
+    if (value > maximum) maximum = value;
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
+    throw new Error("ETOPO elevation grid did not contain finite values");
+  }
+  return { minimum, maximum };
+}
+
 const response = await fetch(SOURCE_URL, {
   headers: { "user-agent": "earth-777-etopo-ingest/1.0" }
 });
@@ -46,8 +59,7 @@ if (expectedSha256 && expectedSha256 !== rawSha256) {
 
 const parsed = parseEtopoAscii(rawText);
 const base64 = encodeInt16Base64(parsed.elevations);
-const minimumElevation = Math.min(...parsed.elevations);
-const maximumElevation = Math.max(...parsed.elevations);
+const { minimum: minimumElevation, maximum: maximumElevation } = valueRange(parsed.elevations);
 const northLatitude = parsed.latitudes[0];
 const southLatitude = parsed.latitudes.at(-1);
 const westLongitude = parsed.longitudes[0];
