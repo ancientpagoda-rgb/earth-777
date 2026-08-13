@@ -23,17 +23,30 @@ ETOPO is modern bedrock, not a reconstructed 777 ka paleotopography. Closed depr
 
 ## Conservation
 
-For each land cell, annual local runoff depth is converted to volume using spherical cell area:
+For each climate-forced land cell, annual local runoff depth is converted to volume using spherical cell area:
 
 `local volume = runoff depth × cell area`
 
-The solver then propagates local plus upstream volume to the downstream cell. It simultaneously propagates upstream drainage area and contributing-cell count.
+The solver then propagates local plus upstream volume to the downstream cell. It simultaneously propagates total upstream drainage area, contributing-cell count, climate-forced upstream area, and climate-forced contributing-cell count.
 
 At the whole-network scale the invariant is:
 
-`sum(local runoff volume) = ocean discharge + closed-basin retention`
+`sum(generated local runoff volume) = ocean discharge + closed-basin retention`
 
 `accumulateRunoffNetwork()` reports the absolute and relative closure error and a boolean conservation check. Tests exercise both a synthetic network and the real 777 ka 4° ETOPO/Krapp network.
+
+## Climate-forcing coverage
+
+The ETOPO land mask and the published Krapp terrestrial climate mask are not identical, and the closed annual water balance requires valid climate for all twelve monthly fields. Consequently, some routed ETOPO land cells do not have sufficient Krapp forcing to generate a modeled runoff value.
+
+Those cells are **not described as fully constrained zero-runoff cells**. The network carries an explicit forcing mask and reports:
+
+- climate-forced land area and cell count globally;
+- global climate-forcing coverage as a fraction of routed ETOPO land area;
+- climate-forced upstream area and contributing-cell count for every network cell;
+- basin/upstream forcing coverage as `climate-forced upstream area / total upstream area`.
+
+Unforced cells contribute zero generated runoff numerically, but that zero means **missing hydrologic forcing**, not a scientific claim of zero runoff. River discharge is therefore complete only over the explicitly reported climate-forced fraction of its drainage area. The conservation invariant applies exactly to the runoff actually generated on that forced domain.
 
 ## CWF / browser resolution
 
@@ -52,8 +65,9 @@ For the coarse network cell containing the selected point:
 - local runoff depth and volume;
 - accumulated annual upstream volume;
 - mean discharge in m³/s;
-- upstream drainage area;
-- number of upstream grid cells;
+- total upstream drainage area;
+- climate-forced upstream drainage area and its coverage fraction;
+- total and climate-forced upstream grid-cell counts;
 - terminal outlet type and routed cell count;
 - whole-network conservation error.
 
