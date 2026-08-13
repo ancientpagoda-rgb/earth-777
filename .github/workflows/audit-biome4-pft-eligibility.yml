@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect official BIOME4 PFT eligibility tables
+      - name: Inspect exact official BIOME4 PFT tables and eligibility rules
         run: |
           set -euo pipefail
           curl -fL --retry 4 --retry-all-errors \
@@ -21,40 +21,23 @@ jobs:
             -o /tmp/biome41.tar.gz
           mkdir -p /tmp/biome4
           tar -xzf /tmp/biome41.tar.gz -C /tmp/biome4
-          echo '=== candidate source files ==='
-          grep -RliE 'pft|gdd|tcm|twarm|tcold|bioclim|phenology|tree|grass' /tmp/biome4 \
-            --include='*.f' --include='*.for' --include='*.f90' --include='*.inc' | sort
-          echo '=== PFT / climate-limit excerpts ==='
           python3 - <<'PY'
           from pathlib import Path
-          root=Path('/tmp/biome4')
-          terms=(
-              'pft','gdd','gdd5','tcmin','tcmax','tcm','twarm','tcold','tmin','tmax',
-              'bioclim','c3','c4','evergreen','deciduous','shrub','grass','tropical',
-              'temperate','boreal','woody'
-          )
-          files=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.f','.for','.f90','.inc','.dat','.txt'}]
-          for p in files:
-              lines=p.read_text(errors='ignore').splitlines()
-              hits=[]
-              for i,line in enumerate(lines):
-                  low=line.lower()
-                  if any(t in low for t in terms): hits.append(i)
-              if not hits: continue
-              # Print only compact neighborhoods that also contain assignments, DATA, PARAMETER, or IF logic.
-              spans=[]
-              for i in hits:
-                  lo=max(0,i-6); hi=min(len(lines),i+10)
-                  block='\n'.join(lines[lo:hi]).lower()
-                  if not any(k in block for k in ('data ','parameter','=', '.lt.', '.gt.', '<', '>', 'pft')):
-                      continue
-                  if spans and lo <= spans[-1][1]+1:
-                      spans[-1]=(spans[-1][0],max(spans[-1][1],hi))
-                  else:
-                      spans.append((lo,hi))
-              if not spans: continue
-              print(f'\n=== {p.relative_to(root)} ===')
-              for lo,hi in spans[:14]:
-                  print(f'--- lines {lo+1}-{hi} ---')
-                  for n in range(lo,hi): print(f'{n+1:5d}: {lines[n]}')
+          p=Path('/tmp/biome4/biome4.f')
+          lines=p.read_text(errors='ignore').splitlines()
+          starts=[]
+          for i,line in enumerate(lines):
+              low=line.lower().strip()
+              if low.startswith('subroutine pftdata') or low.startswith('subroutine constraints'):
+                  starts.append((i,low))
+          for start,name in starts:
+              end=len(lines)
+              for j in range(start+1,len(lines)):
+                  low=lines[j].lower().strip()
+                  if low.startswith('subroutine ') or low.startswith('function '):
+                      end=j
+                      break
+              print(f'=== {name} lines {start+1}-{end} ===')
+              for n in range(start,end):
+                  print(f'{n+1:5d}: {lines[n]}')
           PY
