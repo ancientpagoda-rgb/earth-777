@@ -146,6 +146,12 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.runoffPotential) && !Number.isFinite(region.surfaceRunoff)) climateDetails.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.npp)) climateDetails.push(`BIOME4 NPP ${region.npp.toFixed(1)} source units`);
   if (Number.isFinite(region.lai)) climateDetails.push(`LAI ${region.lai.toFixed(2)}`);
+  if (Array.isArray(region.climateEligiblePftIds) && region.climateEligiblePftIds.length) {
+    climateDetails.push(`PFT climate candidates ${region.climateEligiblePftIds.join("/")}`);
+  }
+  if (Array.isArray(region.climateUnresolvedPftIds) && region.climateUnresolvedPftIds.length) {
+    climateDetails.push(`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · snow physics pending`);
+  }
   if (Number.isFinite(region.vegetationTransitionPressure) && region.vegetationTransitionPressure > 0.02) {
     climateDetails.push(`vegetation transition pressure ${Math.round(region.vegetationTransitionPressure * 100)}%`);
   }

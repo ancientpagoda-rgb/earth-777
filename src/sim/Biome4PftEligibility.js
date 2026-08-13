@@ -140,7 +140,7 @@ export function deriveBiome4ClimateIndices(
   const monthly = requireMonthlyTemperatures(monthlyTemperatureCelsius);
   const coldestMonthCelsius = Math.min(...monthly);
   const warmestMonthCelsius = Math.max(...monthly);
-  const suppliedMinimum = Number(absoluteMinimumTemperatureCelsius);
+  const suppliedMinimum = absoluteMinimumTemperatureCelsius == null ? Number.NaN : Number(absoluteMinimumTemperatureCelsius);
   const hasUsableMinimum = Number.isFinite(suppliedMinimum) && suppliedMinimum <= coldestMonthCelsius;
   const absoluteMinimumCelsius = hasUsableMinimum ? suppliedMinimum : coldestMonthCelsius - 5;
   const daily = biome4DailyTemperatureInterpolation(monthly);
@@ -150,7 +150,7 @@ export function deriveBiome4ClimateIndices(
     gdd5 += Math.max(0, temperature - 5);
     gdd0 += Math.max(0, temperature);
   }
-  const snow = Number(maximumSnowDepthModelUnits);
+  const snow = maximumSnowDepthModelUnits == null ? Number.NaN : Number(maximumSnowDepthModelUnits);
   return Object.freeze({
     coldestMonthCelsius,
     warmestMonthCelsius,
