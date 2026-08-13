@@ -59,32 +59,52 @@ assert anchor in s, "optimizer category flag anchor not found"
 s = s.replace(anchor, '''    checkpointCategoryMutationEnabled: false,
     fireDrynessIntegrated: true,
     fireDryness: search.optimumEvaluation?.fireDryness ?? null,
+    fireDrynessStatus: search.optimumEvaluation?.fireDryness ? "resolved" : "nonproductive-no-optimum",
 ''', 1)
 s = s.replace(
     "The result is not yet a competitive occupancy decision and cannot change the published checkpoint biome category.",
-    "The optimized result now carries source-operational fire and top-layer dryness diagnostics, but is not yet a competitive occupancy decision and cannot change the published checkpoint biome category.",
+    "The optimized result carries source-operational fire and top-layer dryness diagnostics when findnpp selects a nonnegative growth trajectory; climate-eligible candidates that remain negative at every tested LAI are explicitly labeled nonproductive-no-optimum instead of receiving fabricated fire/dryness. No competitive occupancy decision or biome-category mutation is enabled.",
     1
 )
 p.write_text(s)
 
 p = Path("src/sim/SpatialVegetation.js")
 s = p.read_text()
-old = '''        virtualHydrology,
+old = '''      return Object.freeze({
+        ...diagnostic,
+        climateEligibilityStatus: isClimateEligible ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown",
+        virtualHydrology,
         laiNppOptimization
+      });
 '''
-new = '''        virtualHydrology,
+new = '''      const fireDryness = laiNppOptimization?.fireDryness ?? null;
+      const fireDrynessStatus = fireDryness
+        ? "resolved"
+        : laiNppOptimization
+          ? "nonproductive-no-optimum"
+          : "not-optimized";
+      return Object.freeze({
+        ...diagnostic,
+        climateEligibilityStatus: isClimateEligible ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown",
+        virtualHydrology,
         laiNppOptimization,
-        fireDryness: laiNppOptimization?.fireDryness ?? null
+        fireDryness,
+        fireDrynessStatus
+      });
 '''
 assert old in s, "SpatialVegetation candidate result anchor not found"
 s = s.replace(old, new, 1)
 anchor = '''      laiNppOptimizationEnabled: true,
       competitiveOccupancyEnabled: false,
+      optimizedCandidateCount: candidates.filter((candidate) => candidate.laiNppOptimization).length,
 '''
 assert anchor in s, "SpatialVegetation resolved flags anchor not found"
 s = s.replace(anchor, '''      laiNppOptimizationEnabled: true,
       fireDrynessDiagnosticsEnabled: true,
       competitiveOccupancyEnabled: false,
+      optimizedCandidateCount: candidates.filter((candidate) => candidate.laiNppOptimization).length,
+      fireDrynessResolvedCount: candidates.filter((candidate) => candidate.fireDrynessStatus === "resolved").length,
+      nonproductiveOptimizedCandidateCount: candidates.filter((candidate) => candidate.fireDrynessStatus === "nonproductive-no-optimum").length,
 ''', 1)
 anchor = '''      pftLaiNppOptimizationIntegrated: true,
       pftCompetitionEnabled: false,
@@ -96,7 +116,7 @@ s = s.replace(anchor, '''      pftLaiNppOptimizationIntegrated: true,
 ''', 1)
 s = s.replace(
     "selected-region source-operational LAI/NPP optimization for eligible candidates; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled",
-    "selected-region source-operational LAI/NPP optimization plus fire/top-layer-dryness diagnostics for eligible candidates; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled",
+    "selected-region source-operational LAI/NPP optimization plus fire/top-layer-dryness diagnostics for productive eligible candidates, with nonproductive eligible candidates explicitly unresolved for fire/dryness rather than fabricated; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled",
     1
 )
 p.write_text(s)
@@ -121,8 +141,13 @@ needle = '''  assert.equal(optimized.checkpointCategoryMutationEnabled, false);
 '''
 assert needle in s, "optimizer assertion anchor not found"
 s = s.replace(needle, needle + '''  assert.equal(optimized.fireDrynessIntegrated, true);
-  assert.ok(optimized.fireDryness);
-  assert.equal(optimized.fireDryness.categoricalBiomeTransitionsEnabled, false);
+  assert.equal(optimized.fireDrynessStatus, optimized.fireDryness ? "resolved" : "nonproductive-no-optimum");
+  if (optimized.fireDryness) {
+    assert.equal(optimized.fireDryness.categoricalBiomeTransitionsEnabled, false);
+  } else {
+    assert.equal(optimized.optimumEvaluation, null);
+    assert.equal(optimized.optimumNpp, 0);
+  }
 ''', 1)
 p.write_text(s)
 
@@ -136,8 +161,26 @@ s = s.replace(needle, needle + '''  assert.equal(diagnostics.fireDrynessDiagnost
 needle = '''      assert.ok(candidate.laiNppOptimization);
 '''
 assert needle in s, "eligible candidate optimization anchor not found"
-s = s.replace(needle, needle + '''      assert.ok(candidate.fireDryness);
-      assert.equal(candidate.fireDryness.occupancyFeedbackEnabled, false);
+s = s.replace(needle, needle + '''      if (candidate.fireDryness) {
+        assert.equal(candidate.fireDrynessStatus, "resolved");
+        assert.equal(candidate.fireDryness.occupancyFeedbackEnabled, false);
+      } else {
+        assert.equal(candidate.fireDrynessStatus, "nonproductive-no-optimum");
+        assert.equal(candidate.laiNppOptimization.fireDryness, null);
+        assert.equal(candidate.laiNppOptimization.optimumEvaluation, null);
+        assert.equal(candidate.laiNppOptimization.optimumNpp, 0);
+      }
+''', 1)
+needle = '''    } else {
+      assert.equal(candidate.laiNppOptimization, null);
+    }
+'''
+assert needle in s, "unresolved candidate assertion anchor not found"
+s = s.replace(needle, '''    } else {
+      assert.equal(candidate.laiNppOptimization, null);
+      assert.equal(candidate.fireDryness, null);
+      assert.equal(candidate.fireDrynessStatus, "not-optimized");
+    }
 ''', 1)
 needle = '''  assert.equal(info.pftLaiNppOptimizationIntegrated, true);
 '''
@@ -146,4 +189,4 @@ s = s.replace(needle, needle + '''  assert.equal(info.pftFireDrynessDiagnosticsI
 ''', 1)
 p.write_text(s)
 
-print("Integrated source-operational fire/dryness diagnostics into optimized PFT candidates.")
+print("Integrated source-operational fire/dryness diagnostics with explicit nonproductive candidate status.")
