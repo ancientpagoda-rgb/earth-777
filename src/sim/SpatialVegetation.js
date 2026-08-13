@@ -2,6 +2,7 @@ import { checkpointState, CHECKPOINT_777 } from "../data/checkpoint-777.js";
 import { evaluateBiome4PftClimateEligibility } from "./Biome4PftEligibility.js";
 import { biome4MaximumSnowDepth } from "./Biome4Snow.js";
 import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";
+import { runBiome4VirtualPftHydrologyTrial } from "./Biome4VirtualPftHydrology.js";
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -180,6 +181,7 @@ export class SpatialVegetation {
         biomeLabel: annual.biomeLabel,
         checkpointCategoryRetained: true,
         hydrologyFeedbackEnabled: false,
+        parallelVirtualHydrologyEnabled: false,
         candidateCount: candidateIds.length,
         resolvedCount: 0,
         candidatePftIds: Object.freeze(candidateIds),
@@ -193,15 +195,30 @@ export class SpatialVegetation {
       return unresolved;
     }
 
-    const candidates = candidateIds.map((pftId) => Object.freeze({
-      ...evaluateBiome4PftWaterPhenology(pftId, {
+    const soilProfile = this.hydrology.soil?.profileAt?.(trace.latitude, trace.longitude) ?? null;
+    const candidates = candidateIds.map((pftId) => {
+      const diagnostic = evaluateBiome4PftWaterPhenology(pftId, {
         latitude: trace.latitude,
         monthlyTemperatureCelsius: trace.monthlyTemperatureCelsius,
         monthlyCloudCoverPercent: trace.monthlyCloudCoverPercent,
         dailyWaterTrace: trace.dailyWaterTrace
-      }),
-      climateEligibilityStatus: climateEligible.has(pftId) ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown"
-    }));
+      });
+      let virtualHydrology = null;
+      if (diagnostic.status === "resolved-diagnostic" && soilProfile?.validSoil) {
+        virtualHydrology = runBiome4VirtualPftHydrologyTrial({
+          pftId,
+          lai: annual.lai ?? annual.checkpointLai ?? 0,
+          soilProfile,
+          baselineDailyWaterTrace: trace.dailyWaterTrace,
+          phenologyDaily: diagnostic.daily
+        });
+      }
+      return Object.freeze({
+        ...diagnostic,
+        climateEligibilityStatus: climateEligible.has(pftId) ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown",
+        virtualHydrology
+      });
+    });
     const raingreenDiscrepancyPftIds = candidates
       .filter((candidate) => candidate.raingreenThresholdDiscrepancy)
       .map((candidate) => candidate.pftId);
@@ -214,6 +231,7 @@ export class SpatialVegetation {
       biomeLabel: annual.biomeLabel,
       checkpointCategoryRetained: true,
       hydrologyFeedbackEnabled: false,
+      parallelVirtualHydrologyEnabled: true,
       candidateCount: candidates.length,
       resolvedCount: candidates.filter((candidate) => candidate.status === "resolved-diagnostic").length,
       candidatePftIds: Object.freeze(candidateIds),
@@ -221,7 +239,7 @@ export class SpatialVegetation {
       raingreenDiscrepancyPftIds: Object.freeze(raingreenDiscrepancyPftIds),
       waterBalanceResidualMm: trace.waterBalanceResidualMm,
       soilSource: trace.soilSource,
-      epistemicStatus: "BIOME4-parameter daily rooting, water-supply and source-operational phenology diagnostics over Earth 777's conserved two-layer soil trace; no PFT-specific transpiration feedback, LAI/NPP optimization, competition, or categorical biome transition is enabled."
+      epistemicStatus: "BIOME4-parameter daily rooting/phenology diagnostics plus independent parallel PFT water trials over the same climate and soil forcing; each candidate closes its own water budget and cannot alter shared Earth hydrology before competition selects occupancy. LAI/NPP optimization, competition, and categorical biome transitions remain disabled."
     });
     this.pftDiagnosticCache.set(key, result);
     if (this.pftDiagnosticCache.size > 24) this.pftDiagnosticCache.delete(this.pftDiagnosticCache.keys().next().value);
@@ -255,9 +273,10 @@ export class SpatialVegetation {
       pftClimateEligibilityIntegrated: true,
       pftWaterPhenologyIntegrated: true,
       pftHydrologyFeedbackEnabled: false,
+      pftParallelVirtualHydrologyIntegrated: true,
       snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",
       absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),
-      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, and opt-in daily PFT rooting/water/phenology diagnostics; no claim of full BIOME4 PFT competition or categorical biome transitions after 777 ka"
+      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, and parallel mass-conserving candidate water trials; shared hydrology feedback, PFT competition and categorical biome transitions remain disabled"
     });
   }
 }
