@@ -1,0 +1,78 @@
+name: Audit BIOME4 soil sentinel and scaling rules
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-transitions
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-transitions
+      - name: Inspect exact BIOME4 soil handling
+        run: |
+          set -euo pipefail
+          curl -fL --retry 4 --retry-all-errors \
+            'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' \
+            -o /tmp/biome41.tar.gz
+          mkdir -p /tmp/biome4
+          tar -xzf /tmp/biome41.tar.gz -C /tmp/biome4
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/biome4')
+          files=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in {'.f','.for','.f90','.inc','.txt','.dat'}]
+          terms=('whc','perc','soil(1)','soil(2)','soil(3)','soil(4)','soil(5)','vars_out(31)','vars_out(32)','water holding','percolation')
+          for p in files:
+              text=p.read_text(errors='ignore')
+              lines=text.splitlines()
+              hits=[]
+              for i,line in enumerate(lines):
+                  low=line.lower()
+                  if any(term.lower() in low for term in terms): hits.append(i)
+              if not hits: continue
+              print(f'\n=== {p.relative_to(root)} ===')
+              merged=[]
+              for i in hits:
+                  lo=max(0,i-12); hi=min(len(lines),i+18)
+                  if merged and lo <= merged[-1][1]+1:
+                      merged[-1]=(merged[-1][0],max(merged[-1][1],hi))
+                  else:
+                      merged.append((lo,hi))
+              for lo,hi in merged:
+                  print(f'--- lines {lo+1}-{hi} ---')
+                  for n in range(lo,hi): print(f'{n+1:5d}: {lines[n]}')
+          PY
+          echo '=== INPUT READER HITS ==='
+          grep -RniE 'nf_get.*whc|nf_get.*perc|varid.*whc|varid.*perc|whc|perc' /tmp/biome4 --include='*.f' --include='*.for' | head -300 || true
+      - name: Inspect soil field value populations
+        run: |
+          python3 - <<'PY'
+          import netCDF4 as nc, numpy as np
+          ds=nc.Dataset('/tmp/biome4/inputdata.nc')
+          for name in ('whc','perc'):
+              a=np.asarray(ds.variables[name][:],dtype=float)
+              print(f'\n=== {name} by layer ===')
+              for layer in range(2):
+                  x=a[layer].ravel()
+                  vals,counts=np.unique(x,return_counts=True)
+                  pairs=sorted(zip(counts,vals),reverse=True)
+                  print('layer',layer+1,'top values by frequency:')
+                  for count,val in pairs[:30]: print(int(count),float(val))
+                  physical=x[(x>=0)&(x<900)]
+                  print('physical-range stats',float(physical.min()) if physical.size else None,float(physical.max()) if physical.size else None,float(np.median(physical)) if physical.size else None,int(physical.size))
+          PY
+      - name: Remove transient workflow
+        run: |
+          rm .github/workflows/audit-biome4-soil-rules.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove transient BIOME4 soil rules audit'
+          git push origin HEAD:agent/biome4-pft-transitions
