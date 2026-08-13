@@ -1,12 +1,14 @@
 export const ETOPO_ROWS = 360;
 export const ETOPO_COLS = 720;
 export const ETOPO_STRIDE = 30;
-export const ETOPO_LAT_STOP = 10_799;
-export const ETOPO_LON_STOP = 21_599;
+export const ETOPO_LAT_START = 15;
+export const ETOPO_LON_START = 15;
+export const ETOPO_LAT_STOP = 10_785;
+export const ETOPO_LON_STOP = 21_585;
 
 export function buildEtopoOpendapUrl({ stride = ETOPO_STRIDE } = {}) {
   const base = "https://www.ngdc.noaa.gov/thredds/dodsC/global/ETOPO2022/60s/60s_bed_elev_netcdf/ETOPO_2022_v1_60s_N90W180_bed.nc.ascii";
-  const constraint = `z[0:${stride}:${ETOPO_LAT_STOP}][0:${stride}:${ETOPO_LON_STOP}]`;
+  const constraint = `z[${ETOPO_LAT_START}:${stride}:${ETOPO_LAT_STOP}][${ETOPO_LON_START}:${stride}:${ETOPO_LON_STOP}]`;
   return `${base}?${encodeURIComponent(constraint)}`;
 }
 
