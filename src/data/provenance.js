@@ -45,6 +45,15 @@ export const SOURCES = Object.freeze([
     status: "integrated · 360 × 720 compact bedrock grid"
   },
   {
+    id: "oudin-2005",
+    title: "Towards a simple and efficient potential evapotranspiration model for rainfall–runoff modelling",
+    authors: "Oudin et al. / Journal of Hydrology (2005)",
+    url: "https://doi.org/10.1016/j.jhydrol.2004.08.026",
+    license: "published method; citation required",
+    role: "Temperature- and extraterrestrial-radiation-based potential evapotranspiration in the conservative water-balance layer; adapted to Earth 777's 360-day monthly climate calendar.",
+    status: "integrated method · water-balance forcing"
+  },
+  {
     id: "lr04",
     title: "LR04 benthic δ18O stack",
     authors: "Lisiecki & Raymo / Paleoceanography (2005)",
