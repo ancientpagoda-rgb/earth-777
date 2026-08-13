@@ -164,6 +164,7 @@ export class MassConservingHydrology {
     // region can still use 0.5° climate separately from this network solve.
     const networkClimateDetail = spacingDegrees === 2 ? 0.35 : 0.1;
     const localRunoffMmPerYear = new Float32Array(topology.count);
+    const climateForcedMask = new Uint8Array(topology.count);
     let activeRunoffCells = 0;
 
     for (const index of topology.routingOrder) {
@@ -174,10 +175,11 @@ export class MassConservingHydrology {
       const local = this.sample(forcingState, latitude, longitude, networkClimateDetail);
       if (!local || !Number.isFinite(local.runoffMmPerYear)) continue;
       localRunoffMmPerYear[index] = Math.max(0, local.runoffMmPerYear);
+      climateForcedMask[index] = 1;
       activeRunoffCells += 1;
     }
 
-    const accumulation = accumulateRunoffNetwork(topology, localRunoffMmPerYear);
+    const accumulation = accumulateRunoffNetwork(topology, localRunoffMmPerYear, climateForcedMask);
     const result = Object.freeze({
       policy: RIVER_NETWORK_POLICY,
       signature,
@@ -186,9 +188,12 @@ export class MassConservingHydrology {
       networkClimateDetail,
       topology,
       localRunoffMmPerYear,
+      climateForcedMask,
       accumulation,
       activeRunoffCells,
-      epistemicStatus: "model-derived upstream-accumulating river network from closed local water budgets; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated"
+      climateForcedLandCellCount: accumulation.climateForcedLandCellCount,
+      climateForcingCoverageFraction: accumulation.climateForcingCoverageFraction,
+      epistemicStatus: "model-derived upstream-accumulating river network from closed local water budgets; discharge is complete only over the explicitly tracked climate-forced part of each basin; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated"
     });
     this.networkCache.set(signature, result);
     if (this.networkCache.size > 3) this.networkCache.delete(this.networkCache.keys().next().value);
@@ -205,6 +210,11 @@ export class MassConservingHydrology {
       seaLevelMeters: network.forcingState.seaLevel,
       maxSteps: 1024
     });
+    const upstreamAreaKm2 = network.accumulation.upstreamAreaKm2[cell.index];
+    const upstreamClimateForcedAreaKm2 = network.accumulation.climateForcedUpstreamAreaKm2[cell.index];
+    const upstreamClimateForcingCoverageFraction = upstreamAreaKm2 > 0
+      ? upstreamClimateForcedAreaKm2 / upstreamAreaKm2
+      : 0;
     return Object.freeze({
       policy: RIVER_NETWORK_POLICY,
       latitude: cell.latitude,
@@ -212,11 +222,16 @@ export class MassConservingHydrology {
       spacingDegrees: network.spacingDegrees,
       elevationMeters: network.topology.elevationMeters[cell.index],
       localRunoffMmPerYear,
+      localClimateForced: Boolean(network.climateForcedMask[cell.index]),
       localAnnualVolumeM3: network.accumulation.localAnnualVolumeM3[cell.index],
       accumulatedAnnualVolumeM3: network.accumulation.accumulatedAnnualVolumeM3[cell.index],
       meanDischargeM3s: network.accumulation.meanDischargeM3s[cell.index],
-      upstreamAreaKm2: network.accumulation.upstreamAreaKm2[cell.index],
+      upstreamAreaKm2,
       upstreamCellCount: network.accumulation.upstreamCellCount[cell.index],
+      upstreamClimateForcedAreaKm2,
+      upstreamClimateForcedCellCount: network.accumulation.climateForcedUpstreamCellCount[cell.index],
+      upstreamClimateForcingCoverageFraction,
+      globalClimateForcingCoverageFraction: network.accumulation.climateForcingCoverageFraction,
       outlet: route.outlet,
       routeCellsToOutlet: route.path.length,
       networkMassConserved: network.accumulation.massConserved,
@@ -235,7 +250,7 @@ export class MassConservingHydrology {
       cachedWaterBalanceCells: this.cache.size,
       cachedNetworks: this.networkCache.size,
       stateSignature: this._stateSignature(globalState, spatialDetail),
-      epistemicStatus: "model-derived closed land water budget with parcel routing and optional upstream-accumulating river network; not a reconstructed river network"
+      epistemicStatus: "model-derived closed land water budget with parcel routing and optional upstream-accumulating river network; forcing coverage is tracked explicitly and this is not a reconstructed river network"
     });
   }
 }
