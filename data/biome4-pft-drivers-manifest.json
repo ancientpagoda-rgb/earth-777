@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "dataset": "BIOME4 4.1 static PFT climate driver",
+  "sourcePackage": "https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz",
+  "sourcePackageSha256": "c732b09ead940f10d7f10ac59629ad6e857437b965e10ae923327bc70c3c4a55",
+  "inputdataNcSha256": "3c6189dddd264aacfe52842c61393a8fa288c3eec0c078d1d5a45d65041dfd15",
+  "inputdataNcBytes": 23334032,
+  "sourceVariable": {
+    "name": "tmin",
+    "shape": [
+      360,
+      720
+    ],
+    "dtype": "int16",
+    "declaredUnits": "degC",
+    "missingValue": -9999,
+    "operationalSemantics": "BIOME4 driver divides source short by 10 to obtain degrees Celsius"
+  },
+  "validStats": {
+    "rawMinimum": -693,
+    "rawMaximum": 347,
+    "celsiusMinimum": -69.3,
+    "celsiusMaximum": 34.7,
+    "validCells": 69152,
+    "missingCells": 190048
+  },
+  "preprocessing": "source int16 preserved without quantization; grid reordered north-to-south and longitude -180..180",
+  "license": "GPL-2.0-only transformed input data; see data/licenses/BIOME4-GPL-2.0.txt and BIOME4-SOIL-NOTICE.md",
+  "output": {
+    "asset": "public/data/biome4-pft-drivers.bin.gz",
+    "assetSha256": "084b7ac85ea60888acfe647a6315fce68acf376f8ac5d470d0a1f55e5a0d78c9",
+    "compressedBytes": 90813,
+    "uncompressedBytes": 518400
+  }
+}

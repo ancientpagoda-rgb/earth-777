@@ -2,6 +2,7 @@ import { SOURCES } from "./data/provenance.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
 import { loadKrapp777Vegetation } from "./data/krapp-777-vegetation.js";
 import { loadBiome4Soil } from "./data/biome4-soil.js";
+import { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
 import { MassConservingHydrology } from "./sim/MassConservingHydrology.js";
@@ -150,7 +151,7 @@ function renderRegion(state, latitude, longitude) {
     climateDetails.push(`PFT climate candidates ${region.climateEligiblePftIds.join("/")}`);
   }
   if (Array.isArray(region.climateUnresolvedPftIds) && region.climateUnresolvedPftIds.length) {
-    climateDetails.push(`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · snow physics pending`);
+    climateDetails.push(`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · source-driver coverage`);
   }
   if (region.pftWaterPhenology?.status === "resolved") {
     climateDetails.push(`PFT daily phenology ${region.pftWaterPhenology.resolvedCount}/${region.pftWaterPhenology.candidateCount}`);
@@ -274,17 +275,23 @@ loadKrapp777Climate()
   .then(async (climateLayer) => {
     climate777 = climateLayer;
     let soilLayer = null;
+    let pftDrivers = null;
     try {
       soilLayer = await loadBiome4Soil();
     } catch (error) {
       console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error);
     }
+    try {
+    pftDrivers = await loadBiome4PftDrivers();
+  } catch (error) {
+    console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", error);
+  }
     hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
     const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
     earthView.setHydroClimate(hydroClimate, surfaceDetail);
     try {
       const vegetationLayer = await loadKrapp777Vegetation();
-      spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate);
+      spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers);
       earthView.setVegetation(spatialVegetation, surfaceDetail);
     } catch (error) {
       console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);

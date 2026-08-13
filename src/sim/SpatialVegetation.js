@@ -1,5 +1,6 @@
 import { checkpointState, CHECKPOINT_777 } from "../data/checkpoint-777.js";
 import { evaluateBiome4PftClimateEligibility } from "./Biome4PftEligibility.js";
+import { biome4MaximumSnowDepth } from "./Biome4Snow.js";
 import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
 
@@ -28,20 +29,33 @@ function responseFactor(globalState, currentHydrology, checkpointHydrology) {
   return clamp(waterRatio ** 0.65 * co2Ratio, 0.15, 2.5);
 }
 
-function climateEligibility(hydrology, globalState, latitude, longitude, detail) {
+function climateEligibility(hydrology, pftDrivers, globalState, latitude, longitude, detail) {
   const climate = hydrology?.climate;
   if (!climate?.monthlyAt) return null;
   const monthlyTemperatures = [];
+  const monthlyPrecipitation = [];
   for (let month = 0; month < 12; month += 1) {
     const sample = climate.monthlyAt(globalState, month, latitude, longitude, detail);
-    if (!Number.isFinite(sample?.temperatureCelsius)) return null;
+    if (!Number.isFinite(sample?.temperatureCelsius) || !Number.isFinite(sample?.precipitationMmPerYear)) return null;
     monthlyTemperatures.push(sample.temperatureCelsius);
+    monthlyPrecipitation.push(sample.precipitationMmPerYear);
   }
-  return evaluateBiome4PftClimateEligibility(monthlyTemperatures);
+  const tmin = pftDrivers?.absoluteMinimumTemperatureAt?.(latitude, longitude) ?? null;
+  const snow = biome4MaximumSnowDepth(monthlyTemperatures, monthlyPrecipitation);
+  const result = evaluateBiome4PftClimateEligibility(monthlyTemperatures, {
+    absoluteMinimumTemperatureCelsius: tmin?.temperatureCelsius ?? null,
+    maximumSnowDepthModelUnits: snow.maximumSnowDepthModelUnits
+  });
+  return Object.freeze({
+    ...result,
+    sourceAbsoluteMinimumTemperatureCelsius: tmin?.temperatureCelsius ?? null,
+    absoluteMinimumDriverSource: tmin?.source ?? null,
+    snow
+  });
 }
 
 export class SpatialVegetation {
-  constructor(checkpointVegetation, hydrology) {
+  constructor(checkpointVegetation, hydrology, pftDrivers = null) {
     if (!checkpointVegetation?.annualAt || !checkpointVegetation?.monthlyNppAt) {
       throw new TypeError("SpatialVegetation requires a Krapp777VegetationLayer-like checkpoint source.");
     }
@@ -50,6 +64,7 @@ export class SpatialVegetation {
     }
     this.checkpoint = checkpointVegetation;
     this.hydrology = hydrology;
+    this.pftDrivers = pftDrivers;
     this.checkpointHydrology = hydrology instanceof MassConservingHydrology
       ? new MassConservingHydrology(hydrology.climate, hydrology.soil)
       : hydrology;
@@ -106,7 +121,7 @@ export class SpatialVegetation {
       factor = responseFactor(globalState, currentHydrology, checkpointHydrology);
     }
 
-    const pftClimate = climateEligibility(this.hydrology, globalState, sampleLatitude, sampleLongitude, detail);
+    const pftClimate = climateEligibility(this.hydrology, this.pftDrivers, globalState, sampleLatitude, sampleLongitude, detail);
     const npp = published.npp * factor;
     const lai = Number.isFinite(published.lai)
       ? published.lai * clamp(factor ** 0.55, 0.25, 1.8)
@@ -129,6 +144,8 @@ export class SpatialVegetation {
       climateUnresolvedPftIds: pftClimate?.unresolvedPftIds ?? Object.freeze([]),
       climateDisabledPftIds: pftClimate?.disabledPftIds ?? Object.freeze([]),
       pftClimateIndices: pftClimate?.indices ?? null,
+      pftAbsoluteMinimumDriverSource: pftClimate?.absoluteMinimumDriverSource ?? null,
+      pftMaximumSnowDepthModelUnits: pftClimate?.snow?.maximumSnowDepthModelUnits ?? null,
       pftEligibilityPolicy: pftClimate?.policy ?? null,
       source: published.source,
       policy: SPATIAL_VEGETATION_POLICY,
@@ -238,7 +255,8 @@ export class SpatialVegetation {
       pftClimateEligibilityIntegrated: true,
       pftWaterPhenologyIntegrated: true,
       pftHydrologyFeedbackEnabled: false,
-      snowConstraintState: "unresolved where required until maximum snow depth is simulated",
+      snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",
+      absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),
       epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, and opt-in daily PFT rooting/water/phenology diagnostics; no claim of full BIOME4 PFT competition or categorical biome transitions after 777 ka"
     });
   }
