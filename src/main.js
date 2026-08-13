@@ -2,6 +2,7 @@ import { SOURCES } from "./data/provenance.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
+import { ConservativeHydrology } from "./sim/ConservativeHydrology.js";
 import { regionalState } from "./sim/regional-state.js";
 import { EarthView } from "./render/earth-view.js";
 
@@ -40,6 +41,7 @@ let lastUiUpdate = 0;
 let selected = null;
 let climate777 = null;
 let hydroClimate = null;
+let conservativeHydrology = null;
 const engine = new FreeEarthEngine(seed);
 const earthView = new EarthView($("#earth"), engine.snapshot(), handleRegionSelect);
 
@@ -55,6 +57,22 @@ function signed(value, digits = 2) {
 function spatialDetailFor(system, fallback = 0.35) {
   const target = engine.fidelityDiagnostics().targets.find((entry) => entry.id === system);
   return Number.isFinite(target?.spatialDetail) ? target.spatialDetail : fallback;
+}
+
+function quantize(value, step) {
+  return Math.round((Number(value) || 0) / step) * step;
+}
+
+function waterRoutingState(state) {
+  // Expensive global routing is refreshed only when physically meaningful
+  // state bins change. The bins are deterministic model-compute policy.
+  return Object.freeze({
+    ...state,
+    temperatureAnomaly: quantize(state.temperatureAnomaly, 0.1),
+    iceIndex: quantize(state.iceIndex, 0.01),
+    seaLevel: quantize(state.seaLevel, 2),
+    obliquity: quantize(state.obliquity, 0.1)
+  });
 }
 
 function iceDescription(index) {
@@ -115,9 +133,16 @@ function handleRegionSelect(region) {
 
 function renderRegion(state, latitude, longitude) {
   const regionalDetail = Math.max(spatialDetailFor("hydrology"), 0.82);
+  const conservativeWater = conservativeHydrology?.sample?.(
+    waterRoutingState(state),
+    latitude,
+    longitude,
+    regionalDetail
+  ) ?? null;
   const region = regionalState(state, latitude, longitude, {
     climateLayer: climate777,
     hydroClimate,
+    conservativeWater,
     spatialDetail: regionalDetail
   });
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
@@ -127,7 +152,10 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
   climateDetails.push(`moisture index ${Math.round(region.moisture * 100)}%`);
-  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`runoff potential ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.actualEt)) climateDetails.push(`actual ET ${Math.round(region.actualEt).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.annualRunoff)) climateDetails.push(`local runoff ${Math.round(region.annualRunoff).toLocaleString()} mm/yr`);
+  else if (Number.isFinite(region.runoffPotential)) climateDetails.push(`runoff potential ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.meanDischarge)) climateDetails.push(`routed discharge ${region.meanDischarge.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³/s`);
   ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${climateDetails.join(" · ")}.`;
   ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}`;
 }
@@ -230,6 +258,7 @@ loadKrapp777Climate()
   .then((layer) => {
     climate777 = layer;
     hydroClimate = new SpatialHydroClimate(layer);
+    conservativeHydrology = new ConservativeHydrology(hydroClimate);
     earthView.setHydroClimate(hydroClimate, spatialDetailFor("hydrology"));
     if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
   })
