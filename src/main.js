@@ -41,7 +41,13 @@ let seed = 777001;
 let speed = 100;
 let playing = false;
 let lastFrame = performance.now();
+let lastSimulationUpdate = lastFrame;
 let lastUiUpdate = 0;
+let lastRegionUpdate = 0;
+let pendingSimulationYears = 0;
+const SIMULATION_INTERVAL_MS = 100;
+const UI_UPDATE_INTERVAL_MS = 250;
+const REGION_UPDATE_INTERVAL_MS = 1_000;
 let selected = null;
 let climate777 = null;
 let hydroClimate = null;
@@ -76,7 +82,7 @@ function ecosystemDescription(value) {
   return "stable";
 }
 
-function updateInterface(state, forceTexture = false) {
+function updateInterface(state, forceTexture = false, forceRegion = false) {
   ui.year.textContent = formatYear(state.yearBP);
   ui.stage.textContent = state.yearBP > 773_900 ? "Late MIS 19c" : state.yearBP > 756_900 ? "MIS 19 transition" : "Free Earth trajectory";
   ui.co2.textContent = `${Math.round(state.co2)} ppm`;
@@ -93,7 +99,11 @@ function updateInterface(state, forceTexture = false) {
   ui.range.style.setProperty("--progress", `${state.elapsedYears / 777_000 * 100}%`);
   ui.elapsed.textContent = state.elapsedYears < 1 ? "checkpoint" : `+${Math.round(state.elapsedYears).toLocaleString()} years`;
   updateJournal(state);
-  if (selected) renderRegion(state, selected.latitude, selected.longitude);
+  const now = performance.now();
+  if (selected && (forceRegion || now - lastRegionUpdate >= REGION_UPDATE_INTERVAL_MS)) {
+    renderRegion(state, selected.latitude, selected.longitude);
+    lastRegionUpdate = now;
+  }
   const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
   earthView.updateState(state, forceTexture, surfaceDetail);
 }
@@ -119,6 +129,7 @@ function handleRegionSelect(region) {
   engine.setObserverRelevance({ climate: 1, hydrology: 1, vegetation: 0.8 });
   ui.surface.disabled = false;
   renderRegion(engine.snapshot(), region.latitude, region.longitude);
+  lastRegionUpdate = performance.now();
 }
 
 function renderRegion(state, latitude, longitude) {
@@ -179,6 +190,8 @@ function renderRegion(state, latitude, longitude) {
 
 function setPlaying(next) {
   playing = next;
+  pendingSimulationYears = 0;
+  lastSimulationUpdate = performance.now();
   ui.play.textContent = playing ? "Ⅱ" : "▶";
   ui.play.classList.toggle("is-playing", playing);
   ui.play.setAttribute("aria-label", playing ? "Pause simulation" : "Start simulation");
@@ -195,7 +208,7 @@ function setSeed(nextSeed) {
   ui.locationCoordinates.textContent = "—";
   ui.seed.textContent = `SEED ${seed}`;
   setPlaying(false);
-  updateInterface(engine.snapshot(), true);
+  updateInterface(engine.snapshot(), true, true);
 }
 
 function populateSources() {
@@ -231,7 +244,7 @@ ui.range.addEventListener("input", () => {
 });
 ui.range.addEventListener("change", () => {
   const state = engine.seek(Number(ui.range.value));
-  updateInterface(state, true);
+  updateInterface(state, true, true);
 });
 
 for (const button of document.querySelectorAll("[data-speed]")) {
@@ -258,11 +271,16 @@ function frame(now) {
   const deltaSeconds = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   if (playing) {
-    const state = engine.advance(deltaSeconds * speed);
-    if (state.yearBP <= 0) setPlaying(false);
-    if (now - lastUiUpdate > 160) {
-      updateInterface(state);
-      lastUiUpdate = now;
+    pendingSimulationYears += deltaSeconds * speed;
+    if (now - lastSimulationUpdate >= SIMULATION_INTERVAL_MS) {
+      const state = engine.advance(pendingSimulationYears);
+      pendingSimulationYears = 0;
+      lastSimulationUpdate = now;
+      if (state.yearBP <= 0) setPlaying(false);
+      if (now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+        updateInterface(state);
+        lastUiUpdate = now;
+      }
     }
   }
   earthView.render(deltaSeconds);
@@ -288,13 +306,14 @@ loadKrapp777Climate()
   }
     hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
     const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
-    earthView.setHydroClimate(hydroClimate, surfaceDetail);
+    earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
     try {
       const vegetationLayer = await loadKrapp777Vegetation();
       spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers);
-      earthView.setVegetation(spatialVegetation, surfaceDetail);
+      earthView.setVegetation(spatialVegetation, surfaceDetail, true);
     } catch (error) {
       console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);
+      earthView.updateState(engine.snapshot(), true, surfaceDetail);
     }
     if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
   })
