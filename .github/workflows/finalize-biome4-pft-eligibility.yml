@@ -1,0 +1,93 @@
+name: Finalize BIOME4 PFT eligibility phase
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-eligibility
+    paths:
+      - data/licenses/BIOME4-PFT-DRIVERS-NOTICE.md
+      - .github/workflows/finalize-biome4-pft-eligibility.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-eligibility
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Update scientific status and documentation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('README.md')
+          s=p.read_text()
+          s=s.replace(
+            '- an independently implemented BIOME4 4.1 PFT climate-eligibility sieve for all 13 PFT parameter records, using the source coldest/warmest-month, absolute-minimum and GDD constraints while leaving the snow-dependent tundra-shrub gate unresolved until snowpack exists;',
+            '- an independently implemented BIOME4 4.1 PFT climate-eligibility sieve for all 13 PFT parameter records, using source coldest/warmest-month and GDD constraints, the pinned 0.5° static `tmin` driver, and the model-compatible two-year degree-day snow diagnostic;'
+          )
+          s=s.replace(
+            'Earth 777 now also independently reproduces BIOME4 4.1’s 13-PFT climatic eligibility sieve from the distributed parameter semantics: coldest and warmest monthly temperature, absolute-minimum temperature, and GDD0/GDD5 are evaluated with the model’s source boundary conventions and monthly-to-daily interpolation. BIOME4 PFT 1 remains disabled as in that distribution. The tundra-shrub snow-depth constraint is explicitly unresolved until a snowpack model supplies the required diagnostic. Climate eligibility is only a candidate sieve.',
+            'Earth 777 now also independently reproduces BIOME4 4.1’s 13-PFT climatic eligibility sieve from the distributed parameter semantics: coldest and warmest monthly temperature, absolute-minimum temperature, GDD0/GDD5, and the snow-depth gate are evaluated with the model’s source boundary conventions and monthly-to-daily interpolation. The official static `tmin` field is checksum-pinned as source int16 and operationally divided by 10 exactly as BIOME4 does; a two-year degree-day snow diagnostic uses the authors’ monthly precipitation convention to resolve the tundra-shrub snow gate. BIOME4 PFT 1 remains disabled as in that distribution. Climate eligibility is only a candidate sieve.'
+          )
+          s=s.replace(
+            'These PFT diagnostics do not yet change evapotranspiration or soil water, optimize PFT LAI/NPP, simulate snow/fire/dryness, perform woody/grass competition, or run the empirical biome classifier;',
+            'These PFT diagnostics do not yet change evapotranspiration or soil water, optimize PFT LAI/NPP, simulate fire/dryness ranking, perform woody/grass competition, or run the empirical biome classifier; the snow calculation currently exists only as the BIOME4 eligibility diagnostic, not as a mass-coupled cryosphere store;'
+          )
+          s=s.replace(
+            'The soil path downloads the official BIOME4 4.1 package, verifies its pinned hash and the exact `inputdata.nc` hash, preserves the four static two-layer soil float grids, and writes [`data/biome4-soil-manifest.json`](data/biome4-soil-manifest.json).',
+            'The soil path downloads the official BIOME4 4.1 package, verifies its pinned hash and the exact `inputdata.nc` hash, preserves the four static two-layer soil float grids, and writes [`data/biome4-soil-manifest.json`](data/biome4-soil-manifest.json). The PFT-driver path reuses the same pinned source and preserves its static `tmin` int16 field in a separate 90.8 KB asset described by [`data/biome4-pft-drivers-manifest.json`](data/biome4-pft-drivers-manifest.json).'
+          )
+          s=s.replace('npm run data:soil\n```', 'npm run data:soil\nnpm run data:pft-drivers\n```')
+          s=s.replace(
+            '5. **Integrated prerequisites:** independent BIOME4 4.1 PFT climate eligibility plus selected-region rooting/water-supply/phenology diagnostics. Next couple PFT-specific water demand back into the conserved hydrology, then implement optimized PFT LAI/NPP, snow/fire/dryness diagnostics, competition and classification before enabling categorical biome transitions.',
+            '5. **Integrated prerequisites:** independent BIOME4 4.1 PFT climate eligibility using the pinned static `tmin` driver and degree-day snow gate, plus selected-region rooting/water-supply/phenology diagnostics. Next couple PFT-specific water demand back into the conserved hydrology, then implement optimized PFT LAI/NPP, fire/dryness diagnostics, competition and classification before enabling categorical biome transitions.'
+          )
+          s=s.replace(
+            '`public/data/biome4-soil.bin.gz` is a transformed subset of the BIOME4 4.1 comprehensive driver dataset and retains the upstream **GPL-2.0-only** terms.',
+            '`public/data/biome4-soil.bin.gz` and `public/data/biome4-pft-drivers.bin.gz` are transformed subsets of the BIOME4 4.1 comprehensive driver dataset and retain the upstream **GPL-2.0-only** terms.'
+          )
+          s=s.replace(
+            'with transformation/source details in [`data/licenses/BIOME4-SOIL-NOTICE.md`](data/licenses/BIOME4-SOIL-NOTICE.md).',
+            'with transformation/source details in [`data/licenses/BIOME4-SOIL-NOTICE.md`](data/licenses/BIOME4-SOIL-NOTICE.md) and [`data/licenses/BIOME4-PFT-DRIVERS-NOTICE.md`](data/licenses/BIOME4-PFT-DRIVERS-NOTICE.md).'
+          )
+          p.write_text(s)
+
+          p=Path('src/data/checkpoint-777.js')
+          s=p.read_text()
+          old='published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ response + independent BIOME4 4.1 PFT climate eligibility and daily rooting/water/phenology diagnostics'
+          new='published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ response + independent BIOME4 4.1 PFT climate eligibility using static tmin/snow diagnostics and daily rooting/water/phenology diagnostics'
+          assert old in s
+          s=s.replace(old,new,1)
+          s=s.replace('PFT-specific hydrology feedback, optimized PFT LAI/NPP, snow/fire/dryness diagnostics, competition and categorical biome transitions', 'PFT-specific hydrology feedback, optimized PFT LAI/NPP, fire/dryness diagnostics, competition and categorical biome transitions',1)
+          p.write_text(s)
+
+          p=Path('src/data/provenance.js')
+          s=p.read_text()
+          s=s.replace('BIOME4 4.1 comprehensive driver dataset — static soil fields', 'BIOME4 4.1 comprehensive driver dataset — static soil and PFT climate fields',1)
+          s=s.replace(
+            'Static 0.5° two-layer water-holding-capacity and percolation inputs plus factual BIOME4 4.1 PFT climate, rooting, transpiration and phenology parameter semantics. Earth 777 preserves source soil floats and independently implements the climate sieve plus selected-region daily rooting/water/phenology diagnostics rather than copying BIOME4 program structure.',
+            'Static 0.5° two-layer water-holding-capacity/percolation inputs, the static absolute-minimum-temperature (`tmin`) driver, and factual BIOME4 4.1 PFT climate, rooting, transpiration and phenology parameter semantics. Earth 777 preserves source soil floats and `tmin` int16 values, independently implements the climate/snow sieve plus selected-region daily rooting/water/phenology diagnostics, and does not copy BIOME4 program structure.'
+          )
+          s=s.replace('integrated · 0.5° soil driver + PFT climate/rooting/phenology parameter reference', 'integrated · 0.5° soil + tmin drivers + PFT climate/snow/rooting/phenology compatibility',1)
+          p.write_text(s)
+          PY
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Commit final phase docs and remove transient workflow
+        run: |
+          rm -f .github/workflows/finalize-biome4-pft-eligibility.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Document BIOME4 PFT source-driver eligibility phase'
+          git push origin HEAD:agent/biome4-pft-eligibility
