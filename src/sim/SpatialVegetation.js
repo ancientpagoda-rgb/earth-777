@@ -1,4 +1,5 @@
 import { checkpointState, CHECKPOINT_777 } from "../data/checkpoint-777.js";
+import { evaluateBiome4PftClimateEligibility } from "./Biome4PftEligibility.js";
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -24,6 +25,18 @@ function responseFactor(globalState, currentHydrology, checkpointHydrology) {
   const checkpointCo2 = CHECKPOINT_777.boundary.co2.value;
   const co2Ratio = clamp((co2 / checkpointCo2) ** 0.25, 0.75, 1.35);
   return clamp(waterRatio ** 0.65 * co2Ratio, 0.15, 2.5);
+}
+
+function climateEligibility(hydrology, globalState, latitude, longitude, detail) {
+  const climate = hydrology?.climate;
+  if (!climate?.monthlyAt) return null;
+  const monthlyTemperatures = [];
+  for (let month = 0; month < 12; month += 1) {
+    const sample = climate.monthlyAt(globalState, month, latitude, longitude, detail);
+    if (!Number.isFinite(sample?.temperatureCelsius)) return null;
+    monthlyTemperatures.push(sample.temperatureCelsius);
+  }
+  return evaluateBiome4PftClimateEligibility(monthlyTemperatures);
 }
 
 export class SpatialVegetation {
@@ -82,6 +95,7 @@ export class SpatialVegetation {
       factor = responseFactor(globalState, currentHydrology, checkpointHydrology);
     }
 
+    const pftClimate = climateEligibility(this.hydrology, globalState, sampleLatitude, sampleLongitude, detail);
     const npp = published.npp * factor;
     const lai = Number.isFinite(published.lai)
       ? published.lai * clamp(factor ** 0.55, 0.25, 1.8)
@@ -100,11 +114,16 @@ export class SpatialVegetation {
       productivityFactor: round(factor, 4),
       transitionPressure: round(transitionPressure, 4),
       checkpointCategoryRetained: true,
+      climateEligiblePftIds: pftClimate?.eligiblePftIds ?? Object.freeze([]),
+      climateUnresolvedPftIds: pftClimate?.unresolvedPftIds ?? Object.freeze([]),
+      climateDisabledPftIds: pftClimate?.disabledPftIds ?? Object.freeze([]),
+      pftClimateIndices: pftClimate?.indices ?? null,
+      pftEligibilityPolicy: pftClimate?.policy ?? null,
       source: published.source,
       policy: SPATIAL_VEGETATION_POLICY,
       epistemicStatus: isCheckpoint
-        ? "study-constrained published BIOME4 model output at 777 ka"
-        : "published BIOME4 777 ka category/NPP/LAI baseline + model-derived hydroclimate and CO2 productivity response; categorical biome transitions are not yet simulated"
+        ? "study-constrained published BIOME4 model output at 777 ka; BIOME4-parameter PFT climate eligibility is independently recomputed as a diagnostic only"
+        : "published BIOME4 777 ka category/NPP/LAI baseline + model-derived hydroclimate and CO2 productivity response; independently recomputed BIOME4-parameter climate eligibility identifies candidate PFTs, but NPP/LAI competition and categorical biome transitions are not yet simulated"
     });
     this.cache.set(key, result);
     return result;
@@ -133,7 +152,9 @@ export class SpatialVegetation {
       cachedCells: this.cache.size,
       checkpointSource: this.checkpoint.meta?.id ?? null,
       checkpointResolutionDegrees: this.checkpoint.meta?.spacingDegrees ?? null,
-      epistemicStatus: "published BIOME4 checkpoint with deliberately limited continuous branch response; no claim of full BIOME4 PFT competition after 777 ka"
+      pftClimateEligibilityIntegrated: true,
+      snowConstraintState: "unresolved where required until maximum snow depth is simulated",
+      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response and independently implemented BIOME4-parameter climate candidate sieve; no claim of full BIOME4 PFT competition or categorical biome transitions after 777 ka"
     });
   }
 }
