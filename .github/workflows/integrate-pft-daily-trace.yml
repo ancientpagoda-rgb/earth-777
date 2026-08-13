@@ -1,0 +1,92 @@
+name: Integrate PFT daily soil trace
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-water-phenology
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-water-phenology
+      - name: Apply daily-trace integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p=Path(path); s=p.read_text(); found=s.count(old)
+              if found != count:
+                  raise SystemExit(f'{path}: expected {count} matches, found {found}: {old[:120]!r}')
+              p.write_text(s.replace(old,new,count))
+
+          # Fix null source sentinels and distinguish non-grass raingreen from
+          # cold-deciduous grass phenology in the newly added diagnostic module.
+          replace('src/sim/Biome4PftWaterPhenology.js',
+              '  const rampRaw = grassCase ? pft.parameters.leafOutGdd0 : pft.parameters.leafOutGdd5;\n  const ramp = Number.isFinite(Number(rampRaw)) ? Number(rampRaw) : -99;\n',
+              '  const rampRaw = grassCase ? pft.parameters.leafOutGdd0 : pft.parameters.leafOutGdd5;\n  const ramp = rampRaw == null ? -99 : (Number.isFinite(Number(rampRaw)) ? Number(rampRaw) : -99);\n')
+          replace('src/sim/Biome4PftWaterPhenology.js',
+              '  const genericPhenology = pft.parameters.phenology === "evergreen"\n    ? { fraction: Float64Array.from({ length: 365 }, () => 1), grassCase: GRASS_CASE_PFT_IDS.has(pft.id), isothermalHotMonthGuardUsed: false }\n    : biome4SummergreenPhenologyFraction(pft, monthlyTemperature, dailyDaylength);\n',
+              '  const grassCase = GRASS_CASE_PFT_IDS.has(pft.id);\n  const usesGenericColdPhenology = pft.parameters.phenology === "summergreen" || (pft.parameters.phenology === "raingreen" && grassCase);\n  const genericPhenology = usesGenericColdPhenology\n    ? biome4SummergreenPhenologyFraction(pft, monthlyTemperature, dailyDaylength)\n    : { fraction: Float64Array.from({ length: 365 }, () => 1), grassCase, isothermalHotMonthGuardUsed: false };\n')
+
+          # WaterBalance: capture the final spin-up year's daily layer state only
+          # when explicitly requested. Normal renderer/network solves remain lean.
+          replace('src/sim/WaterBalance.js',
+              'function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil) {',
+              'function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil, captureDailyTrace = false) {')
+          replace('src/sim/WaterBalance.js',
+              '  let simulatedDays = 0;\n  const months = [];\n\n  for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {',
+              '  let simulatedDays = 0;\n  const months = [];\n  const dailyTrace = captureDailyTrace ? [] : null;\n\n  for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {')
+          replace('src/sim/WaterBalance.js',
+              '    for (let day = 0; day < days; day += 1) {\n      topStorage += dailyPrecipitation;\n',
+              '    for (let day = 0; day < days; day += 1) {\n      const startTopWetness = soil.topCapacityMm > 0 ? clamp(topStorage / soil.topCapacityMm, 0, 1) : 0;\n      const startBottomWetness = soil.bottomCapacityMm > 0 ? clamp(bottomStorage / soil.bottomCapacityMm, 0, 1) : 0;\n      topStorage += dailyPrecipitation;\n')
+          replace('src/sim/WaterBalance.js',
+              '      meanStorageDaySum += topStorage + bottomStorage;\n      simulatedDays += 1;\n',
+              '      if (dailyTrace) {\n        dailyTrace.push(Object.freeze({\n          dayOfYear: simulatedDays + 1,\n          monthIndex,\n          dayOfMonth: day + 1,\n          startTopWetness: round(startTopWetness, 6),\n          startBottomWetness: round(startBottomWetness, 6),\n          endTopWetness: round(soil.topCapacityMm > 0 ? clamp(topStorage / soil.topCapacityMm, 0, 1) : 0, 6),\n          endBottomWetness: round(soil.bottomCapacityMm > 0 ? clamp(bottomStorage / soil.bottomCapacityMm, 0, 1) : 0, 6),\n          startTopStorageMm: round(startTopWetness * soil.topCapacityMm, 4),\n          startBottomStorageMm: round(startBottomWetness * soil.bottomCapacityMm, 4),\n          endTopStorageMm: round(topStorage, 4),\n          endBottomStorageMm: round(bottomStorage, 4),\n          precipitationMm: round(dailyPrecipitation, 6),\n          potentialEvapotranspirationMm: round(dailyPet, 6),\n          actualEvapotranspirationMm: round(evap.removed, 6)\n        }));\n      }\n      meanStorageDaySum += topStorage + bottomStorage;\n      simulatedDays += 1;\n')
+          replace('src/sim/WaterBalance.js',
+              '    residualMm: residual,\n    months: Object.freeze(months)\n  };\n}\n\nfunction closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, soil, spinupYears) {',
+              '    residualMm: residual,\n    months: Object.freeze(months),\n    daily: dailyTrace ? Object.freeze(dailyTrace) : null\n  };\n}\n\nfunction closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, soil, spinupYears, includeDailyTrace = false) {')
+          replace('src/sim/WaterBalance.js',
+              '  for (let year = 0; year < cycles; year += 1) {\n    finalYear = simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil);\n',
+              '  for (let year = 0; year < cycles; year += 1) {\n    finalYear = simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil, includeDailyTrace && year === cycles - 1);\n')
+          replace('src/sim/WaterBalance.js',
+              '    soilProfile = null,\n    spinupYears = 8\n',
+              '    soilProfile = null,\n    spinupYears = 8,\n    includeDailyTrace = false\n')
+          replace('src/sim/WaterBalance.js',
+              '    finalYear = closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, biome4Soil, spinupYears);',
+              '    finalYear = closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, biome4Soil, spinupYears, includeDailyTrace);')
+          replace('src/sim/WaterBalance.js',
+              '    massBalanceResidualMm: round(finalYear.residualMm, 9),\n    months: finalYear.months,\n',
+              '    massBalanceResidualMm: round(finalYear.residualMm, 9),\n    months: finalYear.months,\n    daily: finalYear.daily ?? null,\n')
+
+          # Hydrology exposes an uncached opt-in daily trace for inspected-region
+          # diagnostics only. It reuses the same climate grid cell and soil profile.
+          replace('src/sim/MassConservingHydrology.js',
+              '  _balanceFor(globalState, climate, spatialDetail) {',
+              '  _balanceFor(globalState, climate, spatialDetail, includeDailyTrace = false) {')
+          replace('src/sim/MassConservingHydrology.js',
+              '      elevationMeters,\n      soilProfile: soilProfile?.validSoil ? soilProfile : null\n    });\n    return { elevationMeters, soilProfile, balance };\n  }\n\n  sample(globalState, latitude, longitude, spatialDetail = 0.35) {',
+              '      elevationMeters,\n      soilProfile: soilProfile?.validSoil ? soilProfile : null,\n      includeDailyTrace\n    });\n    return { elevationMeters, soilProfile, balance, monthlyClimate };\n  }\n\n  dailyWaterTrace(globalState, latitude, longitude, spatialDetail = 0.35) {\n    const climate = this.climate.sample(globalState, latitude, longitude, spatialDetail);\n    if (!climate) return null;\n    const solved = this._balanceFor(globalState, climate, spatialDetail, true);\n    if (!solved?.balance?.daily || !solved.soilProfile?.validSoil) {\n      return Object.freeze({\n        latitude: climate.latitude,\n        longitude: climate.longitude,\n        gridSpacingDegrees: climate.gridSpacingDegrees,\n        soilProfileApplied: false,\n        soilStatus: solved?.soilProfile?.status ?? "unavailable",\n        dailyWaterTrace: null,\n        monthlyTemperatureCelsius: solved?.monthlyClimate?.map((month) => month?.temperatureCelsius ?? null) ?? null,\n        monthlyCloudCoverPercent: solved?.monthlyClimate?.map((month) => month?.cloudCoverPercent ?? null) ?? null,\n        epistemicStatus: "daily PFT water-access trace unavailable because BIOME4 does not define a valid two-layer soil profile at this materialized cell"\n      });\n    }\n    return Object.freeze({\n      latitude: climate.latitude,\n      longitude: climate.longitude,\n      gridSpacingDegrees: climate.gridSpacingDegrees,\n      elevationMeters: solved.elevationMeters,\n      soilProfileApplied: true,\n      soilStatus: solved.soilProfile.status,\n      soilSource: solved.soilProfile.source,\n      topSoilWaterCapacityMm: solved.balance.topSoilWaterCapacityMm,\n      bottomSoilWaterCapacityMm: solved.balance.bottomSoilWaterCapacityMm,\n      monthlyTemperatureCelsius: Object.freeze(solved.monthlyClimate.map((month) => month.temperatureCelsius)),\n      monthlyCloudCoverPercent: Object.freeze(solved.monthlyClimate.map((month) => month.cloudCoverPercent)),\n      dailyWaterTrace: solved.balance.daily,\n      waterBalanceResidualMm: solved.balance.massBalanceResidualMm,\n      epistemicStatus: "opt-in final-spinup-year daily two-layer soil state from the same conserved Earth 777 water balance; exposed for PFT diagnostics without changing the hydrology solution"\n    });\n  }\n\n  sample(globalState, latitude, longitude, spatialDetail = 0.35) {')
+          PY
+      - name: Syntax and baseline tests
+        run: |
+          npm ci
+          node --check src/sim/Biome4PftWaterPhenology.js
+          node --check src/sim/WaterBalance.js
+          node --check src/sim/MassConservingHydrology.js
+          npm test
+      - name: Commit validated trace and remove helper
+        run: |
+          rm .github/workflows/integrate-pft-daily-trace.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Expose conserved daily soil trace for PFT diagnostics'
+          git push origin HEAD:agent/biome4-pft-water-phenology
