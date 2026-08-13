@@ -68,11 +68,19 @@ export class SpatialVegetation {
     ].join("|");
   }
 
+  _pftDiagnosticSignature(globalState, spatialDetail) {
+    return [
+      round(globalState.temperatureAnomaly ?? 0, 1),
+      round(globalState.iceIndex ?? 0, 2),
+      round(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value, 0),
+      round(spatialDetail, 1)
+    ].join("|");
+  }
+
   _prepare(globalState, spatialDetail) {
     const signature = this._signature(globalState, spatialDetail);
     if (signature !== this.cacheSignature) {
       this.cache.clear();
-      this.pftDiagnosticCache.clear();
       this.cacheSignature = signature;
     }
   }
@@ -137,7 +145,7 @@ export class SpatialVegetation {
     this._prepare(globalState, detail);
     const annual = this.sample(globalState, latitude, longitude, detail);
     if (!annual) return null;
-    const key = `${annual.latitude}:${annual.longitude}:${annual.gridSpacingDegrees}`;
+    const key = `${this._pftDiagnosticSignature(globalState, detail)}|${annual.latitude}:${annual.longitude}:${annual.gridSpacingDegrees}`;
     if (this.pftDiagnosticCache.has(key)) return this.pftDiagnosticCache.get(key);
 
     const trace = this.hydrology.dailyWaterTrace?.(globalState, annual.latitude, annual.longitude, detail) ?? null;
@@ -164,6 +172,7 @@ export class SpatialVegetation {
         epistemicStatus: trace?.epistemicStatus ?? "PFT daily rooting and phenology diagnostics require a valid BIOME4 two-layer soil trace; no monthly soil approximation is substituted."
       });
       this.pftDiagnosticCache.set(key, unresolved);
+      if (this.pftDiagnosticCache.size > 24) this.pftDiagnosticCache.delete(this.pftDiagnosticCache.keys().next().value);
       return unresolved;
     }
 
@@ -198,6 +207,7 @@ export class SpatialVegetation {
       epistemicStatus: "BIOME4-parameter daily rooting, water-supply and source-operational phenology diagnostics over Earth 777's conserved two-layer soil trace; no PFT-specific transpiration feedback, LAI/NPP optimization, competition, or categorical biome transition is enabled."
     });
     this.pftDiagnosticCache.set(key, result);
+    if (this.pftDiagnosticCache.size > 24) this.pftDiagnosticCache.delete(this.pftDiagnosticCache.keys().next().value);
     return result;
   }
 

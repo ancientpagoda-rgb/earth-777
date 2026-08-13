@@ -152,6 +152,14 @@ function renderRegion(state, latitude, longitude) {
   if (Array.isArray(region.climateUnresolvedPftIds) && region.climateUnresolvedPftIds.length) {
     climateDetails.push(`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · snow physics pending`);
   }
+  if (region.pftWaterPhenology?.status === "resolved") {
+    climateDetails.push(`PFT daily phenology ${region.pftWaterPhenology.resolvedCount}/${region.pftWaterPhenology.candidateCount}`);
+    if (region.pftWaterPhenology.raingreenDiscrepancyPftIds?.length) {
+      climateDetails.push(`BIOME4 rain-threshold source quirk preserved for PFT ${region.pftWaterPhenology.raingreenDiscrepancyPftIds.join("/")}`);
+    }
+  } else if (region.pftWaterPhenology?.status === "unresolved-water-trace") {
+    climateDetails.push("PFT daily water/phenology unresolved at this soil cell");
+  }
   if (Number.isFinite(region.vegetationTransitionPressure) && region.vegetationTransitionPressure > 0.02) {
     climateDetails.push(`vegetation transition pressure ${Math.round(region.vegetationTransitionPressure * 100)}%`);
   }
