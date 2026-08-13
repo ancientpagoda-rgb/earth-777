@@ -4,8 +4,11 @@ import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
 import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 
 const TAU = Math.PI * 2;
-const TEXTURE_WIDTH = 1024;
-const TEXTURE_HEIGHT = 512;
+const TEXTURE_WIDTH = 512;
+const TEXTURE_HEIGHT = 256;
+const STATIC_PIXEL_RATIO_CAP = 1.25;
+const INTERACTION_PIXEL_RATIO_CAP = 1.0;
+const MIN_TEXTURE_REFRESH_INTERVAL_MS = 1_500;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mix = (a, b, t) => a + (b - a) * t;
@@ -142,8 +145,8 @@ function createEarthTexture(state, climate = null, hydroClimate = null, vegetati
 
 function createCloudTexture(state, climate = null, hydroClimate = null, spatialDetail = 0.35) {
   const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = 512;
+  canvas.width = TEXTURE_WIDTH;
+  canvas.height = TEXTURE_HEIGHT;
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
   for (let i = 0; i < 420; i += 1) {
@@ -208,9 +211,11 @@ export class EarthView {
     this.spatialDetail = 0.35;
     this.pointerStart = null;
     this.selectedNormal = null;
+    this.interacting = false;
+    this.lastTextureRefreshMs = 0;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, STATIC_PIXEL_RATIO_CAP));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.9;
@@ -229,13 +234,24 @@ export class EarthView {
     this.controls.maxDistance = 8.2;
     this.controls.rotateSpeed = 0.48;
     this.controls.zoomSpeed = 0.7;
+    this.controls.addEventListener("start", () => {
+      this.interacting = true;
+      this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, INTERACTION_PIXEL_RATIO_CAP));
+      this.resize();
+    });
+    this.controls.addEventListener("end", () => {
+      this.interacting = false;
+      this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, STATIC_PIXEL_RATIO_CAP));
+      this.resize();
+      this.updateState(this.lastState, false, this.spatialDetail);
+    });
 
     this.earthMaterial = new THREE.MeshStandardMaterial({
       map: createEarthTexture(initialState),
       roughness: 0.88,
       metalness: 0.02
     });
-    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 128, 80), this.earthMaterial);
+    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 96, 64), this.earthMaterial);
     this.earth.rotation.y = -0.35;
     this.scene.add(this.earth);
 
@@ -246,7 +262,7 @@ export class EarthView {
       depthWrite: false,
       blending: THREE.NormalBlending
     });
-    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 96, 64), this.cloudMaterial);
+    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 64, 48), this.cloudMaterial);
     this.clouds.rotation.y = 0.2;
     this.scene.add(this.clouds);
 
@@ -269,7 +285,7 @@ export class EarthView {
         }
       `
     });
-    this.atmosphere = new THREE.Mesh(new THREE.SphereGeometry(1.55, 96, 64), atmosphereMaterial);
+    this.atmosphere = new THREE.Mesh(new THREE.SphereGeometry(1.55, 64, 48), atmosphereMaterial);
     this.scene.add(this.atmosphere);
 
     this.marker = new THREE.Mesh(
@@ -330,23 +346,26 @@ export class EarthView {
     this.updateState(this.lastState, true, this.spatialDetail);
   }
 
-  setHydroClimate(hydroClimate, spatialDetail = this.spatialDetail) {
+  setHydroClimate(hydroClimate, spatialDetail = this.spatialDetail, refresh = true) {
     this.hydroClimate = hydroClimate;
     this.climate = hydroClimate?.baseline ?? this.climate;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
-    this.updateState(this.lastState, true, this.spatialDetail);
+    if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
 
-  setVegetation(vegetation, spatialDetail = this.spatialDetail) {
+  setVegetation(vegetation, spatialDetail = this.spatialDetail, refresh = true) {
     this.vegetation = vegetation;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
-    this.updateState(this.lastState, true, this.spatialDetail);
+    if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
 
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
+    const now = performance.now();
+    if (!force && this.interacting) return;
     if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
+    if (!force && now - this.lastTextureRefreshMs < MIN_TEXTURE_REFRESH_INTERVAL_MS) return;
     const next = createEarthTexture(state, this.climate, this.hydroClimate, this.vegetation, this.spatialDetail);
     this.earthMaterial.map?.dispose();
     this.earthMaterial.map = next;
@@ -359,6 +378,7 @@ export class EarthView {
       this.cloudMaterial.needsUpdate = true;
     }
     this.lastTextureYear = state.yearBP;
+    this.lastTextureRefreshMs = performance.now();
   }
 
   resize() {
