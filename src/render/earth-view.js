@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
 import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 
 const TAU = Math.PI * 2;
@@ -17,7 +18,13 @@ function noise(longitude, latitude) {
   );
 }
 
-function colorEarthPixel(data, offset, latitude, longitude, state) {
+function moistureFromCheckpoint(precipitationMmPerYear, cloudCoverPercent) {
+  const precipitation = clamp(Math.log1p(Math.max(0, precipitationMmPerYear)) / Math.log1p(5_000), 0, 1);
+  const cloud = clamp((cloudCoverPercent ?? 50) / 100, 0, 1);
+  return clamp(precipitation * 0.82 + cloud * 0.18, 0.05, 1);
+}
+
+function colorEarthPixel(data, offset, latitude, longitude, state, climate = null) {
   const elevation = bedrockElevationAt(latitude, longitude);
   const seaLevel = Number.isFinite(state.seaLevel) ? state.seaLevel : 0;
   const land = elevation > seaLevel;
@@ -40,8 +47,15 @@ function colorEarthPixel(data, offset, latitude, longitude, state) {
   }
 
   const absLat = Math.abs(latitude);
-  const temperature = 28 - absLat * 0.58 + state.temperatureAnomaly * (1 + absLat / 110);
-  const moisture = clamp(0.58 + Math.cos(latitude * Math.PI / 45) * 0.18 + noise(longitude, latitude) * 0.28, 0, 1);
+  const checkpointClimate = climate?.annualAt?.(latitude, longitude) ?? null;
+  const checkpointGlobalAnomaly = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
+  const freeEarthTemperatureDelta = (state.temperatureAnomaly ?? checkpointGlobalAnomaly) - checkpointGlobalAnomaly;
+  const temperature = Number.isFinite(checkpointClimate?.temperatureCelsius)
+    ? checkpointClimate.temperatureCelsius + freeEarthTemperatureDelta
+    : 28 - absLat * 0.58 + state.temperatureAnomaly * (1 + absLat / 110);
+  const moisture = Number.isFinite(checkpointClimate?.precipitationMmPerYear)
+    ? moistureFromCheckpoint(checkpointClimate.precipitationMmPerYear, checkpointClimate.cloudCoverPercent)
+    : clamp(0.58 + Math.cos(latitude * Math.PI / 45) * 0.18 + noise(longitude, latitude) * 0.28, 0, 1);
   const relief = clamp(elevation / 4500, -1, 1);
   const rugged = relief * 0.72 + noise(longitude * 2.4, latitude * 2.2) * 0.28;
   let red;
@@ -76,7 +90,7 @@ function colorEarthPixel(data, offset, latitude, longitude, state) {
   data[offset + 3] = 255;
 }
 
-function createEarthTexture(state) {
+function createEarthTexture(state, climate = null) {
   const canvas = document.createElement("canvas");
   canvas.width = TEXTURE_WIDTH;
   canvas.height = TEXTURE_HEIGHT;
@@ -87,7 +101,7 @@ function createEarthTexture(state) {
     for (let x = 0; x < TEXTURE_WIDTH; x += 1) {
       const offset = (y * TEXTURE_WIDTH + x) * 4;
       const longitude = (x / (TEXTURE_WIDTH - 1)) * 360 - 180;
-      colorEarthPixel(image.data, offset, latitude, longitude, state);
+      colorEarthPixel(image.data, offset, latitude, longitude, state, climate);
     }
   }
   context.putImageData(image, 0, 0);
@@ -97,7 +111,7 @@ function createEarthTexture(state) {
   return texture;
 }
 
-function createCloudTexture() {
+function createCloudTexture(climate = null) {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
   canvas.height = 512;
@@ -108,10 +122,15 @@ function createCloudTexture() {
     const y = (Math.sin(i * 271.91 + 2) * 0.5 + 0.5) * canvas.height;
     const latitude = 90 - y / canvas.height * 180;
     if (Math.abs(latitude) > 76) continue;
+    const longitude = x / canvas.width * 360 - 180;
+    const checkpointCloud = climate?.annualValueAt?.("cloudCover", latitude, longitude);
+    const cloudFraction = Number.isFinite(checkpointCloud) ? clamp(checkpointCloud / 100, 0, 1) : 0.55;
+    if ((Math.sin(i * 191.3) * 0.5 + 0.5) > 0.25 + cloudFraction * 0.75) continue;
     const width = 12 + (Math.sin(i * 71.3) * 0.5 + 0.5) * 44;
     const height = 3 + (Math.cos(i * 37.4) * 0.5 + 0.5) * 10;
+    const alpha = 0.08 + cloudFraction * 0.28;
     const gradient = context.createRadialGradient(x, y, 0, x, y, width);
-    gradient.addColorStop(0, "rgba(210,226,217,0.22)");
+    gradient.addColorStop(0, `rgba(210,226,217,${alpha.toFixed(3)})`);
     gradient.addColorStop(1, "rgba(210,226,217,0)");
     context.fillStyle = gradient;
     context.save();
@@ -150,6 +169,8 @@ export class EarthView {
     this.canvas = canvas;
     this.onSelect = onSelect;
     this.lastTextureYear = initialState.yearBP;
+    this.lastState = initialState;
+    this.climate = null;
     this.pointerStart = null;
     this.selectedNormal = null;
 
@@ -175,7 +196,7 @@ export class EarthView {
     this.controls.zoomSpeed = 0.7;
 
     this.earthMaterial = new THREE.MeshStandardMaterial({
-      map: createEarthTexture(initialState),
+      map: createEarthTexture(initialState, this.climate),
       roughness: 0.88,
       metalness: 0.02
     });
@@ -183,14 +204,14 @@ export class EarthView {
     this.earth.rotation.y = -0.35;
     this.scene.add(this.earth);
 
-    const cloudMaterial = new THREE.MeshLambertMaterial({
-      map: createCloudTexture(),
+    this.cloudMaterial = new THREE.MeshLambertMaterial({
+      map: createCloudTexture(this.climate),
       transparent: true,
       opacity: 0.58,
       depthWrite: false,
       blending: THREE.NormalBlending
     });
-    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 96, 64), cloudMaterial);
+    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 96, 64), this.cloudMaterial);
     this.clouds.rotation.y = 0.2;
     this.scene.add(this.clouds);
 
@@ -269,9 +290,19 @@ export class EarthView {
     this.controls.update();
   }
 
+  setClimate(climate) {
+    this.climate = climate;
+    const nextClouds = createCloudTexture(this.climate);
+    this.cloudMaterial.map?.dispose();
+    this.cloudMaterial.map = nextClouds;
+    this.cloudMaterial.needsUpdate = true;
+    this.updateState(this.lastState, true);
+  }
+
   updateState(state, force = false) {
+    this.lastState = state;
     if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
-    const next = createEarthTexture(state);
+    const next = createEarthTexture(state, this.climate);
     this.earthMaterial.map?.dispose();
     this.earthMaterial.map = next;
     this.earthMaterial.needsUpdate = true;
