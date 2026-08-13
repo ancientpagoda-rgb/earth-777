@@ -95,7 +95,7 @@ SOURCES = {
 
 QUANTIZATION = {
     "temperature": {"scale": 0.01, "offset": 0.0, "units": "K", "description": "uint16 centi-kelvin"},
-    "precipitation": {"scale": 1.0, "offset": 0.0, "units": "source mm/a", "description": "uint16 integer source precipitation units"},
+    "precipitation": {"scale": 1.0, "offset": 0.0, "units": "mm year^-1", "description": "uint16 integer mm year^-1"},
     "cloudCover": {"scale": 0.01, "offset": 0.0, "units": "%", "description": "uint16 centi-percent"},
 }
 

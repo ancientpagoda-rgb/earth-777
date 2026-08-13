@@ -10,7 +10,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "data:paleo": "node scripts/ingest-paleo-forcing.mjs",
     "data:terrain": "node scripts/ingest-etopo-2022.mjs",
-    "data:ingest": "npm run data:paleo && npm run data:terrain",
+    "data:climate": "python3 scripts/ingest-krapp-777.py",
+    "data:ingest": "npm run data:paleo && npm run data:terrain && npm run data:climate",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

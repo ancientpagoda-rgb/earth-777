@@ -26,8 +26,8 @@ export const CHECKPOINT_777 = Object.freeze({
     magneticPolarity: datum(-1, "reversed", "medium", "model", ["mb-reversal"])
   }),
   layers: Object.freeze({
-    terrain: Object.freeze({ status: "topology proxy", target: "ETOPO 2022 downsample", sources: ["etopo-2022"] }),
-    climate: Object.freeze({ status: "global emulator", target: "Krapp 777 ka monthly frame", sources: ["krapp-2021"] }),
+    terrain: Object.freeze({ status: "integrated ETOPO 2022 bedrock baseline", target: "time-varying paleo topography and isostasy", sources: ["etopo-2022"] }),
+    climate: Object.freeze({ status: "integrated Krapp 777 ka monthly 0.5° checkpoint", target: "branch-evolving gridded climate", sources: ["krapp-2021"] }),
     orbital: Object.freeze({ status: "Vavrus-anchored La2004 series", target: "Direct 1 kyr astronomical forcing", sources: ["ruddiman-2018-mis19", "la2004"] }),
     seaLevel: Object.freeze({ status: "reconstruction with uncertainty", target: "Spratt–Lisiecki five-record stack", sources: ["spratt-lisiecki-2016"] }),
     vegetation: Object.freeze({ status: "climate-derived emulator", target: "Krapp BIOME4/NPP", sources: ["krapp-2021"] }),

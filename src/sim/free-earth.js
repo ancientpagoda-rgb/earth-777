@@ -195,18 +195,42 @@ export class FreeEarthEngine {
   }
 }
 
-export function regionalState(globalState, latitude, longitude) {
-  const lat = latitude * Math.PI / 180;
-  const lon = longitude * Math.PI / 180;
-  const seasonality = Math.abs(Math.sin(lat));
-  const continentality = 0.55 + 0.45 * Math.sin(lon * 2.7 + lat) ** 2;
-  const annualTemperature =
-    27 - seasonality * 43 + globalState.temperatureAnomaly * (1 + seasonality * 0.8) - continentality * seasonality * 5;
-  const moisture = clamp(
-    0.64 + Math.cos(lat * 2.7) * 0.22 + Math.sin(lon * 1.7 - lat) * 0.16 - globalState.iceIndex * seasonality * 0.2,
-    0.05,
-    1
-  );
+export function regionalState(globalState, latitude, longitude, climateLayer = null) {
+  const checkpointClimate = climateLayer?.annualAt?.(latitude, longitude) ?? null;
+  let annualTemperature;
+  let moisture;
+  let annualPrecipitation = null;
+  let cloudCover = null;
+  let confidence = "modeled regional estimate";
+  let climateSource = "regional-emulator";
+
+  if (checkpointClimate && Number.isFinite(checkpointClimate.temperatureCelsius)) {
+    const checkpointGlobalAnomaly = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
+    const freeEarthTemperatureDelta = (globalState.temperatureAnomaly ?? checkpointGlobalAnomaly) - checkpointGlobalAnomaly;
+    annualTemperature = checkpointClimate.temperatureCelsius + freeEarthTemperatureDelta;
+    annualPrecipitation = checkpointClimate.precipitationMmPerYear;
+    cloudCover = checkpointClimate.cloudCoverPercent;
+    moisture = Number.isFinite(annualPrecipitation)
+      ? clamp(annualPrecipitation / (annualPrecipitation + 700), 0.05, 1)
+      : 0.5;
+    climateSource = "krapp-2021-777ka";
+    confidence = globalState.elapsedYears > 0
+      ? "Krapp 777 ka 0.5° checkpoint + model-derived Free Earth temperature anomaly; precipitation/cloud held at checkpoint baseline"
+      : "Krapp 777 ka 0.5° published reconstruction";
+  } else {
+    const lat = latitude * Math.PI / 180;
+    const lon = longitude * Math.PI / 180;
+    const seasonality = Math.abs(Math.sin(lat));
+    const continentality = 0.55 + 0.45 * Math.sin(lon * 2.7 + lat) ** 2;
+    annualTemperature =
+      27 - seasonality * 43 + globalState.temperatureAnomaly * (1 + seasonality * 0.8) - continentality * seasonality * 5;
+    moisture = clamp(
+      0.64 + Math.cos(lat * 2.7) * 0.22 + Math.sin(lon * 1.7 - lat) * 0.16 - globalState.iceIndex * seasonality * 0.2,
+      0.05,
+      1
+    );
+  }
+
   const biome = Math.abs(latitude) > 72 - globalState.iceIndex * 8
     ? "polar ice / tundra"
     : annualTemperature < -4
@@ -223,8 +247,12 @@ export function regionalState(globalState, latitude, longitude) {
     latitude,
     longitude,
     annualTemperature: round(annualTemperature, 1),
+    annualPrecipitation: Number.isFinite(annualPrecipitation) ? round(annualPrecipitation, 0) : null,
+    cloudCover: Number.isFinite(cloudCover) ? round(cloudCover, 1) : null,
     moisture: round(moisture, 2),
     biome,
-    confidence: "modeled regional estimate"
+    climateSource,
+    checkpointClimate: climateSource === "krapp-2021-777ka",
+    confidence
   };
 }

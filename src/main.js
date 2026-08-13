@@ -1,4 +1,5 @@
 import { SOURCES } from "./data/provenance.js";
+import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
 import { FreeEarthEngine, regionalState } from "./sim/free-earth.js";
 import { EarthView } from "./render/earth-view.js";
 
@@ -35,6 +36,7 @@ let playing = false;
 let lastFrame = performance.now();
 let lastUiUpdate = 0;
 let selected = null;
+let climate777 = null;
 const engine = new FreeEarthEngine(seed);
 const earthView = new EarthView($("#earth"), engine.snapshot(), handleRegionSelect);
 
@@ -103,11 +105,15 @@ function handleRegionSelect(region) {
 }
 
 function renderRegion(state, latitude, longitude) {
-  const region = regionalState(state, latitude, longitude);
+  const region = regionalState(state, latitude, longitude, climate777);
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
   const lonLabel = `${Math.abs(longitude).toFixed(1)}°${longitude >= 0 ? "E" : "W"}`;
   ui.locationTitle.textContent = region.biome;
-  ui.locationDetail.textContent = `Estimated mean annual temperature ${signed(region.annualTemperature, 1)} °C · moisture index ${Math.round(region.moisture * 100)}%.`;
+  const climateDetails = [`mean annual temperature ${signed(region.annualTemperature, 1)} °C`];
+  if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
+  climateDetails.push(`moisture index ${Math.round(region.moisture * 100)}%`);
+  ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Estimated climate"}: ${climateDetails.join(" · ")}.`;
   ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}`;
 }
 
@@ -204,4 +210,10 @@ function frame(now) {
 
 populateSources();
 updateInterface(engine.snapshot(), true);
+loadKrapp777Climate()
+  .then((layer) => {
+    climate777 = layer;
+    if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
+  })
+  .catch((error) => console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error));
 requestAnimationFrame(frame);
