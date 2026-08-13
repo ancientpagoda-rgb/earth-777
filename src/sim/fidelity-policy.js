@@ -6,10 +6,10 @@ const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 const BASE_NODES = Object.freeze([
   { id: "orbit", localUncertainty: 0.03, evidence: "study constrained" },
   { id: "carbon", localUncertainty: 0.22, evidence: "mixed: study constrained + model derived" },
-  { id: "climate", localUncertainty: 0.24, evidence: "model derived" },
+  { id: "climate", localUncertainty: 0.24, evidence: "study-constrained checkpoint + model-derived branch response" },
   { id: "ice", localUncertainty: 0.28, evidence: "model derived" },
   { id: "seaLevel", localUncertainty: 0.18, evidence: "study constrained + modeled branch divergence" },
-  { id: "hydrology", localUncertainty: 0.46, evidence: "provisional prior" },
+  { id: "hydrology", localUncertainty: 0.38, evidence: "model derived from study-constrained Krapp checkpoint; moisture/runoff diagnostic" },
   { id: "vegetation", localUncertainty: 0.48, evidence: "provisional prior" },
   { id: "herbivores", localUncertainty: 0.60, evidence: "provisional prior" },
   { id: "carnivores", localUncertainty: 0.65, evidence: "provisional prior" },
@@ -72,9 +72,10 @@ function localUncertaintyFor(node, state) {
   if (node.id === "seaLevel" && Number.isFinite(state?.seaLevelUncertainty)) {
     return clamp01(0.08 + state.seaLevelUncertainty / 35);
   }
-  if (node.id === "climate") {
+  if (node.id === "climate" || node.id === "hydrology") {
     const elapsed = clamp01((state?.elapsedYears ?? 0) / 777_000);
-    return clamp01(node.localUncertainty + elapsed * 0.22);
+    const divergencePenalty = node.id === "climate" ? 0.22 : 0.30;
+    return clamp01(node.localUncertainty + elapsed * divergencePenalty);
   }
   return node.localUncertainty;
 }
@@ -85,6 +86,11 @@ function activityFor(id, state) {
     case "climate": return clamp01(0.55 + Math.abs((state?.temperatureAnomaly ?? -1.27) + 1.27) / 5);
     case "ice": return clamp01(0.45 + Math.abs((state?.iceIndex ?? 0.18) - 0.18));
     case "seaLevel": return clamp01(0.45 + Math.abs((state?.seaLevel ?? -12.76) + 12.76) / 140);
+    case "hydrology": return clamp01(
+      0.48 +
+      Math.abs((state?.temperatureAnomaly ?? -1.27) + 1.27) / 7 +
+      Math.abs((state?.iceIndex ?? 0.18) - 0.18) * 0.35
+    );
     case "vegetation": return clamp01(0.50 + Math.abs((state?.productivityIndex ?? 1) - 1));
     case "herbivores": return clamp01(0.45 + Math.abs((state?.herbivoreBiomass ?? 1) - 1));
     case "carnivores": return clamp01(0.40 + Math.abs((state?.carnivoreBiomass ?? 1) - 1));
