@@ -210,7 +210,13 @@ export class SpatialVegetation {
           lai: annual.lai ?? annual.checkpointLai ?? 0,
           soilProfile,
           baselineDailyWaterTrace: trace.dailyWaterTrace,
-          phenologyDaily: diagnostic.daily
+          phenologyDaily: diagnostic.daily,
+          latitude: trace.latitude,
+          monthlyTemperatureCelsius: trace.monthlyTemperatureCelsius,
+          monthlyCloudCoverPercent: trace.monthlyCloudCoverPercent,
+          monthlyPrecipitationMmPerYear: trace.monthlyPrecipitationMmPerYear,
+          elevationMeters: trace.elevationMeters,
+          co2Ppm: globalState.co2
         });
       }
       return Object.freeze({
@@ -276,7 +282,7 @@ export class SpatialVegetation {
       pftParallelVirtualHydrologyIntegrated: true,
       snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",
       absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),
-      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, and parallel mass-conserving candidate water trials; shared hydrology feedback, PFT competition and categorical biome transitions remain disabled"
+      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, and parallel BIOME4 conductance/equilibrium-demand candidate water trials; shared hydrology feedback, LAI/NPP competition and categorical biome transitions remain disabled"
     });
   }
 }
