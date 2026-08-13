@@ -1,0 +1,70 @@
+name: Generate official BIOME4 soil layer
+
+on:
+  push:
+    branches:
+      - agent/biome4-soil-hydrology
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-soil-hydrology
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install netCDF4 numpy
+      - run: python3 scripts/ingest-biome4-soil.py
+      - name: Capture upstream GPL notice
+        run: |
+          set -euo pipefail
+          curl -fL --retry 4 --retry-all-errors \
+            'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' \
+            -o /tmp/biome41.tar.gz
+          echo 'c732b09ead940f10d7f10ac59629ad6e857437b965e10ae923327bc70c3c4a55  /tmp/biome41.tar.gz' | sha256sum -c -
+          mkdir -p data/licenses
+          tar -xOf /tmp/biome41.tar.gz COPYING > data/licenses/BIOME4-GPL-2.0.txt
+          cat > data/licenses/BIOME4-SOIL-NOTICE.md <<'EOF'
+          # BIOME4 soil data notice
+
+          `public/data/biome4-soil.bin.gz` is a transformed subset of the `whc` and `perc` variables from `inputdata.nc` in the official BIOME4 4.1 package.
+
+          - Upstream package: `https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz`
+          - Package SHA-256: `c732b09ead940f10d7f10ac59629ad6e857437b965e10ae923327bc70c3c4a55`
+          - `inputdata.nc` SHA-256: `3c6189dddd264aacfe52842c61393a8fa288c3eec0c078d1d5a45d65041dfd15`
+          - Upstream package license: GNU GPL version 2, reproduced in `BIOME4-GPL-2.0.txt`.
+
+          The Earth 777 application code remains MIT-licensed. This transformed BIOME4 soil-data asset retains its upstream GPL-2.0-only terms. `scripts/ingest-biome4-soil.py` reproduces the transformed asset from the official package without incorporating BIOME4 program source code into the application.
+          EOF
+      - name: Validate compact asset
+        run: |
+          python3 - <<'PY'
+          import gzip, hashlib, json
+          from pathlib import Path
+          asset=Path('public/data/biome4-soil.bin.gz')
+          manifest=json.loads(Path('data/biome4-soil-manifest.json').read_text())
+          raw=gzip.decompress(asset.read_bytes())
+          assert len(raw)==360*720*17, len(raw)
+          assert hashlib.sha256(asset.read_bytes()).hexdigest()==manifest['output']['assetSha256']
+          assert sum(manifest['statusCounts'].values())==360*720
+          assert manifest['statusCounts']['soil'] > 70_000
+          print('compressed bytes',asset.stat().st_size)
+          print('raw bytes',len(raw))
+          print('sha256',manifest['output']['assetSha256'])
+          print('status counts',manifest['statusCounts'])
+          print('soil stats',manifest['soilStats'])
+          PY
+      - name: Commit generated soil layer
+        run: |
+          rm .github/workflows/generate-biome4-soil.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Generate official BIOME4 spatial soil inputs'
+          git push origin HEAD:agent/biome4-soil-hydrology
