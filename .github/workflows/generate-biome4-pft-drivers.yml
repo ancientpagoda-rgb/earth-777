@@ -1,0 +1,35 @@
+name: Generate BIOME4 PFT drivers once
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-eligibility
+    paths:
+      - scripts/ingest-biome4-pft-drivers.py
+      - .github/workflows/generate-biome4-pft-drivers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-eligibility
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install netCDF4 numpy
+      - run: python3 scripts/ingest-biome4-pft-drivers.py
+      - name: Commit generated driver and remove transient workflows
+        run: |
+          rm -f .github/workflows/generate-biome4-pft-drivers.yml
+          rm -f .github/workflows/audit-biome4-pft-eligibility.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Generate BIOME4 static PFT climate driver'
+          git push origin HEAD:agent/biome4-pft-eligibility
