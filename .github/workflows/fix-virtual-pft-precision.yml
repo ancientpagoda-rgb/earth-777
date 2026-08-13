@@ -1,0 +1,79 @@
+name: Fix virtual PFT precision
+
+on:
+  push:
+    branches:
+      - agent/biome4-virtual-pft-hydrology
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-virtual-pft-hydrology
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply precision and branch-exercise fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p=Path(path); s=p.read_text(); found=s.count(old)
+              if found != count:
+                  raise SystemExit(f'{path}: expected {count}, found {found}: {old[:120]!r}')
+              p.write_text(s.replace(old,new,count))
+
+          # Preserve full-precision daily water fluxes. Rounding belongs only in
+          # user-facing summaries, not the conserved state trajectory.
+          replace('src/sim/Biome4VirtualClimateForcing.js',
+              '        totalPrecipitationMm: round(totalPrecipitationMm),\n        liquidPrecipitationMm: round(liquidPrecipitationMm),\n        snowfallMm: round(snowfallMm),\n        snowmeltMm: round(snowmeltMm),\n        snowpackMm: round(snowpackMm),\n',
+              '        totalPrecipitationMm,\n        liquidPrecipitationMm,\n        snowfallMm,\n        snowmeltMm,\n        snowpackMm,\n')
+          replace('src/sim/Biome4VirtualClimateForcing.js',
+              '    precipitationInputMm: round(precipitationInputMm),\n    liquidToSoilMm: round(liquidToSoilMm),\n    snowfallMm: round(snowfallMm),\n    snowmeltMm: round(snowmeltMm),\n    finalYearStartSnowpackMm: round(finalYearStartSnowpackMm),\n    finalSnowpackMm: round(snowpackMm),\n    snowStorageChangeMm: round(snowStorageChangeMm),\n',
+              '    precipitationInputMm: round(precipitationInputMm, 9),\n    liquidToSoilMm: round(liquidToSoilMm, 9),\n    snowfallMm: round(snowfallMm, 9),\n    snowmeltMm: round(snowmeltMm, 9),\n    finalYearStartSnowpackMm: round(finalYearStartSnowpackMm, 9),\n    finalSnowpackMm: round(snowpackMm, 9),\n    snowStorageChangeMm: round(snowStorageChangeMm, 9),\n')
+
+          replace('src/sim/Biome4VirtualPftHydrology.js',
+              '        actualEvapotranspirationMm: round(actualEvapotranspirationMm),\n        canopyConductance: round(canopyConductance),\n        uncappedSourcePercolationMm: round(uncappedPercolationMm),\n        percolationMm: round(percolationMm),\n        surfaceRunoffMm: round(surfaceRunoffMm),\n        bottomDrainageMm: round(bottomDrainageMm),\n',
+              '        actualEvapotranspirationMm,\n        canopyConductance,\n        uncappedSourcePercolationMm: uncappedPercolationMm,\n        percolationMm,\n        surfaceRunoffMm,\n        bottomDrainageMm,\n')
+
+          # March 1 is zero-based index 59 (day 60), not index 58 (Feb 28).
+          replace('test/virtual-pft-climate-forcing.test.js',
+              '  assert.equal(forcing.days[58].monthIndex, 2);\n',
+              '  assert.equal(forcing.days[58].monthIndex, 1);\n  assert.equal(forcing.days[59].monthIndex, 2);\n')
+
+          # Force enough saturation for the uncapped source k*w^4 transfer to
+          # exceed the physically present top-layer water.
+          replace('test/virtual-pft-hydrology.test.js',
+              '  const extreme = trial({\n    soilProfile: soil({ topPercolationCoefficient: 999, bottomPercolationCoefficient: 999 })\n  });\n',
+              '  const extreme = trial({\n    soilProfile: soil({\n      topWaterCapacityMm: 5,\n      bottomWaterCapacityMm: 20,\n      topPercolationCoefficient: 999,\n      bottomPercolationCoefficient: 999\n    }),\n    monthlyPrecipitationMm: Array(12).fill(300)\n  });\n')
+
+          # Zero-input evergreen case guarantees a positive PET demand against
+          # zero root-zone supply, exercising the source water-limitation branch.
+          old='''  const dry = trial({\n    monthlyPrecipitationMm: Array(12).fill(2),\n    soilProfile: soil({ topWaterCapacityMm: 30, bottomWaterCapacityMm: 40, topPercolationCoefficient: 0.01 })\n  });\n  assert.ok(dry.daily.some((day) => day.optimalDemandMm > day.supplyMm));\n'''
+          new='''  const dry = runBiome4VirtualPftHydrologyTrial({\n    pftId: 11,\n    lai: 2,\n    soilProfile: soil({ topWaterCapacityMm: 30, bottomWaterCapacityMm: 40, topPercolationCoefficient: 0.01 }),\n    ...climate,\n    monthlyTemperatureCelsius: Array(12).fill(10),\n    monthlyPrecipitationMm: Array(12).fill(0)\n  });\n  assert.ok(dry.daily.some((day) => day.optimalDemandMm > day.supplyMm));\n'''
+          replace('test/virtual-pft-hydrology.test.js', old, new)
+          PY
+      - name: Validate corrected exact branch state
+        run: |
+          npm ci
+          node --check src/sim/Biome4VirtualClimateForcing.js
+          node --check src/sim/Biome4VirtualPftHydrology.js
+          npm test
+          npm run build
+      - name: Commit corrected validated state and remove helpers
+        run: |
+          rm -f .github/workflows/fix-virtual-pft-precision.yml
+          rm -f .github/workflows/validate-virtual-pft-hydrology.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Keep virtual PFT water budgets at full numerical precision'
+          git push origin HEAD:agent/biome4-virtual-pft-hydrology
