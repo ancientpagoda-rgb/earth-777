@@ -23,8 +23,8 @@ export const SOURCES = Object.freeze([
     authors: "BIOME4 4.1 / PMIP distribution",
     url: "https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz",
     license: "GPL-2.0-only for the transformed soil-data asset; upstream COPYING retained in data/licenses",
-    role: "Static 0.5° two-layer water-holding-capacity/percolation inputs, the static absolute-minimum-temperature (`tmin`) driver, and factual BIOME4 4.1 PFT climate, rooting, transpiration and phenology parameter semantics. Earth 777 preserves source soil floats and `tmin` int16 values, independently implements the climate/snow sieve plus selected-region daily rooting/phenology diagnostics and parallel mass-conserving candidate water trials, and does not copy BIOME4 program structure.",
-    status: "integrated · 0.5° soil + tmin drivers + PFT climate/snow/rooting/phenology + parallel candidate hydrology"
+    role: "Static 0.5° two-layer water-holding-capacity/percolation inputs, the static absolute-minimum-temperature (`tmin`) driver, and factual BIOME4 4.1 PFT climate, rooting, transpiration, phenology, photosynthesis/conductance, equilibrium-demand and hydrology semantics. Earth 777 preserves source soil floats and `tmin` int16 values and independently implements the climate/snow sieve, C3/C4 physiology, selected-region rooting/phenology diagnostics, and parallel source-equation conductance-controlled candidate water trials without copying BIOME4 program structure.",
+    status: "integrated · 0.5° soil + tmin + PFT climate/physiology/snow/rooting/phenology + source-equation parallel candidate hydrology"
   },
   {
     id: "priestley-taylor-1972",
