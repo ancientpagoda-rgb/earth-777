@@ -45,9 +45,6 @@ export class MassConservingHydrology {
   }
 
   _networkForcingState(globalState) {
-    // Whole-network solves are expensive. CWF permits deterministic coarser
-    // state bins so small frame-to-frame changes reuse the same conserved
-    // network instead of rebuilding thousands of local water budgets.
     return Object.freeze({
       ...globalState,
       temperatureAnomaly: quantize(globalState.temperatureAnomaly, 0.1),
@@ -92,11 +89,19 @@ export class MassConservingHydrology {
       elevationMeters: round(elevationMeters, 1),
       soilMoistureIndex: balance.soilMoistureIndex,
       soilWaterStorageMm: balance.meanSoilWaterStorageMm,
+      rainfallMmPerYear: balance.rainfallMmPerYear,
+      snowfallMmPerYear: balance.snowfallMmPerYear,
+      snowmeltMmPerYear: balance.snowmeltMmPerYear,
+      snowWaterEquivalentMm: balance.endSnowWaterEquivalentMm,
+      meanSnowWaterEquivalentMm: balance.meanSnowWaterEquivalentMm,
+      maximumSnowWaterEquivalentMm: balance.maximumSnowWaterEquivalentMm,
       potentialEvapotranspirationMmPerYear: balance.potentialEvapotranspirationMmPerYear,
       actualEvapotranspirationMmPerYear: balance.actualEvapotranspirationMmPerYear,
       runoffMmPerYear: balance.runoffMmPerYear,
       runoffPotentialMmPerYear: balance.runoffMmPerYear,
       waterStorageChangeMmPerYear: balance.storageChangeMm,
+      soilWaterStorageChangeMmPerYear: balance.soilWaterStorageChangeMm,
+      snowWaterEquivalentChangeMmPerYear: balance.snowWaterEquivalentChangeMm,
       waterBalanceResidualMm: balance.massBalanceResidualMm,
       waterBalancePolicy: WATER_BALANCE_POLICY,
       policy: MASS_CONSERVING_HYDROLOGY_POLICY,
@@ -112,7 +117,7 @@ export class MassConservingHydrology {
     if (!climate) return null;
     const annual = this.sample(globalState, latitude, longitude, spatialDetail);
     const monthIndex = climate.monthIndex;
-    const balanceMonth = annual
+    const balanceMonth = annual?.waterBalancePolicy
       ? closeAnnualWaterBalance(
           Array.from({ length: 12 }, (_, index) =>
             this.climate.monthlyAt(globalState, index, annual.latitude, annual.longitude, spatialDetail)
@@ -122,10 +127,15 @@ export class MassConservingHydrology {
       : null;
     return Object.freeze({
       ...climate,
+      rainfallMm: balanceMonth?.rainfallMm ?? null,
+      snowfallMm: balanceMonth?.snowfallMm ?? null,
+      snowfallFraction: balanceMonth?.snowfallFraction ?? null,
+      snowmeltMm: balanceMonth?.snowmeltMm ?? null,
       potentialEvapotranspirationMm: balanceMonth?.potentialEvapotranspirationMm ?? null,
       actualEvapotranspirationMm: balanceMonth?.actualEvapotranspirationMm ?? null,
       runoffMm: balanceMonth?.runoffMm ?? null,
-      soilWaterStorageMm: balanceMonth?.endStorageMm ?? null,
+      soilWaterStorageMm: balanceMonth?.endSoilWaterStorageMm ?? balanceMonth?.endStorageMm ?? null,
+      snowWaterEquivalentMm: balanceMonth?.endSnowWaterEquivalentMm ?? null,
       waterBalancePolicy: balanceMonth ? WATER_BALANCE_POLICY : null,
       policy: MASS_CONSERVING_HYDROLOGY_POLICY
     });
@@ -160,8 +170,6 @@ export class MassConservingHydrology {
       }
     }
 
-    // Match local water-balance cells to the coarse network grid. The selected
-    // region can still use 0.5° climate separately from this network solve.
     const networkClimateDetail = spacingDegrees === 2 ? 0.35 : 0.1;
     const localRunoffMmPerYear = new Float32Array(topology.count);
     const climateForcedMask = new Uint8Array(topology.count);
@@ -193,7 +201,7 @@ export class MassConservingHydrology {
       activeRunoffCells,
       climateForcedLandCellCount: accumulation.climateForcedLandCellCount,
       climateForcingCoverageFraction: accumulation.climateForcingCoverageFraction,
-      epistemicStatus: "model-derived upstream-accumulating river network from closed local water budgets; discharge is complete only over the explicitly tracked climate-forced part of each basin; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated"
+      epistemicStatus: "model-derived upstream-accumulating river network from closed local soil+snow water budgets; discharge is complete only over the explicitly tracked climate-forced part of each basin; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated"
     });
     this.networkCache.set(signature, result);
     if (this.networkCache.size > 3) this.networkCache.delete(this.networkCache.keys().next().value);
@@ -250,7 +258,7 @@ export class MassConservingHydrology {
       cachedWaterBalanceCells: this.cache.size,
       cachedNetworks: this.networkCache.size,
       stateSignature: this._stateSignature(globalState, spatialDetail),
-      epistemicStatus: "model-derived closed land water budget with parcel routing and optional upstream-accumulating river network; forcing coverage is tracked explicitly and this is not a reconstructed river network"
+      epistemicStatus: "model-derived closed land soil+snow water budget with parcel routing and optional upstream-accumulating river network; forcing coverage is tracked explicitly and this is not a reconstructed river network"
     });
   }
 }
