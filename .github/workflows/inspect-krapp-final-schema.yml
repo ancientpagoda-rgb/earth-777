@@ -1,0 +1,63 @@
+name: Inspect Krapp final climate schema
+
+on:
+  push:
+    branches:
+      - agent/krapp-777-climate
+
+jobs:
+  inspect:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/krapp-777-climate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install netCDF4 numpy
+      - name: Inspect January published grids
+        run: |
+          python - <<'PY'
+          import hashlib, os, urllib.request
+          import netCDF4 as nc
+          import numpy as np
+
+          sources = [
+              ('temp', 'https://osf.io/download/mbxsr/', '37561a2d9ea343f5f05b55c2a6da0b8693c4310d17de6519af78b452761706d0'),
+              ('prec', 'https://osf.io/download/6khc8/', '67cf88b21c5e6009ecab0bbd83f77e337c5a2a042c6fb7bbe8290044b55a1ed3'),
+              ('tcc', 'https://osf.io/download/4j5rq/', '33b0530c05deaff14ea47a74d3801cf2045cd296a6337f4871d6694185828819'),
+          ]
+          for name, url, expected in sources:
+              path = f'/tmp/{name}.nc'
+              print('DOWNLOAD', name, url)
+              urllib.request.urlretrieve(url, path)
+              digest = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+              assert digest == expected, (name, digest, expected)
+              with nc.Dataset(path) as ds:
+                  print('===', name, '===')
+                  print('DIMS', {k: len(v) for k, v in ds.dimensions.items()})
+                  print('GLOBAL', {a: getattr(ds, a) for a in ds.ncattrs()})
+                  for var_name, v in ds.variables.items():
+                      print('VAR', var_name, v.dimensions, v.shape, v.dtype, {a:getattr(v,a) for a in v.ncattrs()})
+                      if var_name.lower() in {'time','lat','latitude','lon','longitude'}:
+                          arr=np.asarray(v[:])
+                          print('COORD_SAMPLE', var_name, arr[:10].tolist(), arr[-10:].tolist())
+                  time_name = next(k for k in ds.variables if k.lower() == 'time')
+                  t = np.asarray(ds.variables[time_name][:], dtype=float)
+                  hits = np.where(np.isclose(t, -777000))[0]
+                  if not len(hits): hits = np.where(np.isclose(t, 777000))[0]
+                  if not len(hits): hits = np.where(np.isclose(t, -777))[0]
+                  if not len(hits): hits = np.where(np.isclose(t, 777))[0]
+                  print('TIME_RANGE', float(t.min()), float(t.max()), 'TARGET_HITS', hits.tolist())
+                  data_vars = [k for k,v in ds.variables.items() if len(v.dimensions) >= 3 and time_name in v.dimensions]
+                  print('DATA_VARS', data_vars)
+                  for dv in data_vars:
+                      v = ds.variables[dv]
+                      idx = int(hits[0]) if len(hits) else 0
+                      slab=np.ma.asarray(v[idx])
+                      finite=np.asarray(slab.compressed(),dtype=float)
+                      print('SLAB', dv, 'idx', idx, 'count', finite.size, 'range', (float(finite.min()), float(finite.max())) if finite.size else None, 'mean', float(finite.mean()) if finite.size else None)
+              os.remove(path)
+          PY
