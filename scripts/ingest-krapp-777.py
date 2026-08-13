@@ -183,8 +183,12 @@ def standardize_grid(ds: nc.Dataset, variable_name: str, index: int, lat_name: s
 
 def quantize(variable: str, slab: np.ma.MaskedArray) -> tuple[bytes, dict]:
     values = np.ma.asarray(slab, dtype=float)
-    mask = np.ma.getmaskarray(values) | ~np.isfinite(np.ma.filled(values, np.nan))
-    filled = np.asarray(np.ma.filled(values, 0.0), dtype=float)
+    source = np.asarray(np.ma.filled(values, np.nan), dtype=float)
+    # The final CDO-produced temperature/cloud files contain the CDO default
+    # missing sentinel (~9.96921e36) even though missing_value is NaN. Treat
+    # extreme sentinels as missing rather than scientific values.
+    mask = np.ma.getmaskarray(values) | ~np.isfinite(source) | (np.abs(source) > 1e20)
+    filled = np.where(mask, 0.0, source)
     rule = QUANTIZATION[variable]
 
     if variable == "temperature":
@@ -206,7 +210,7 @@ def quantize(variable: str, slab: np.ma.MaskedArray) -> tuple[bytes, dict]:
     encoded = encoded.astype("<u2")
     encoded[mask] = MISSING
 
-    finite_source = np.asarray(values.compressed(), dtype=float)
+    finite_source = source[~mask]
     stats = {
         "finiteCells": int(finite_source.size),
         "missingCells": int(mask.sum()),
@@ -271,7 +275,8 @@ def main() -> None:
                         "sha256": expected_sha,
                         "bytes": expected_size,
                         "sourceVariable": data_name,
-                        "sourceUnits": source_units,
+                        "sourceUnitsMetadata": source_units or None,
+                        "encodedUnits": QUANTIZATION[variable]["units"],
                         "timeCoordinate": matched_time,
                         "byteOffset": byte_offset,
                         "byteLength": len(encoded),
