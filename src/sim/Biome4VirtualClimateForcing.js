@@ -3,6 +3,7 @@ import { biome4DailyMidmonthInterpolation } from "./Biome4PftWaterPhenology.js";
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const round = (value, digits = 6) => Number(value.toFixed(digits));
 const MONTH_MIDPOINT_DAY = Object.freeze([16, 44, 75, 105, 136, 166, 197, 228, 258, 289, 319, 350]);
+const MONTH_DAYS = Object.freeze([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]);
 
 export const BIOME4_VIRTUAL_CLIMATE_POLICY = "biome4-4.1-virtual-pft-climate-forcing-v1";
 export const BIOME4_RADIATION_ANOMALY_ASSUMPTION = "radiation-anomaly multipliers are fixed to 1 because Earth 777 does not yet carry BIOME4's separate monthly radiation-anomaly driver";
@@ -48,6 +49,15 @@ function requireMonthly(values, label) {
   return numbers;
 }
 
+function monthForDay(dayOfYear) {
+  let remaining = clamp(Math.floor(Number(dayOfYear) || 1), 1, 365);
+  for (let month = 0; month < MONTH_DAYS.length; month += 1) {
+    if (remaining <= MONTH_DAYS[month]) return month;
+    remaining -= MONTH_DAYS[month];
+  }
+  return 11;
+}
+
 function anomalyForMonth(radiationAnomaly, monthIndex) {
   if (radiationAnomaly == null) return 1;
   if (Array.isArray(radiationAnomaly)) {
@@ -64,8 +74,7 @@ function anomalyForMonth(radiationAnomaly, monthIndex) {
 export function biome4PetLookup(temperatureCelsius) {
   const temperature = Number(temperatureCelsius);
   if (!Number.isFinite(temperature)) throw new TypeError("BIOME4 PET lookup requires a finite temperature.");
-  const row = PET_TABLE.find((entry) => temperature <= entry.thresholdCelsius) ?? PET_TABLE[PET_TABLE.length - 1];
-  return row;
+  return PET_TABLE.find((entry) => temperature <= entry.thresholdCelsius) ?? PET_TABLE[PET_TABLE.length - 1];
 }
 
 export function biome4RadiationPetDay({
@@ -116,9 +125,6 @@ export function biome4RadiationPetDay({
       (lambda * SOURCE_CONSTANTS.waterDensityKgM3)
     : 0;
 
-  // BIOME4 also stores the daily-integrated incoming shortwave at monthly
-  // midpoints as `sun(month)` for photosynthesis. This is based on the
-  // astronomical shortwave interval, not the positive-net-radiation interval.
   const us = shortwave * sla;
   const vs = shortwave * cla;
   let solarHourAngle;
@@ -196,13 +202,13 @@ export function biome4VirtualDailyClimate({
   let maximumSnowpackMm = 0;
   const years = Math.max(1, Math.min(20, Math.floor(Number(snowSpinupYears)) || 1));
   let finalDaily = null;
+  let finalYearStartSnowpackMm = 0;
   for (let year = 0; year < years; year += 1) {
+    if (year === years - 1) finalYearStartSnowpackMm = snowpackMm;
     const days = [];
     for (let index = 0; index < 365; index += 1) {
       const dayOfYear = index + 1;
-      const monthIndex = MONTH_MIDPOINT_DAY.findIndex((midpoint) => dayOfYear <= midpoint) < 0
-        ? 11
-        : Math.min(11, Math.max(0, Math.round((dayOfYear - 15) / (365 / 12))));
+      const monthIndex = monthForDay(dayOfYear);
       const temperature = dailyTemperature[index];
       const cloud = dailyCloud[index];
       const totalPrecipitationMm = Math.max(0, dailyPrecipitationField[index] / SOURCE_CONSTANTS.sourceMeanDaysPerMonth);
@@ -249,6 +255,7 @@ export function biome4VirtualDailyClimate({
   const liquidToSoilMm = finalDaily.reduce((sum, day) => sum + day.liquidPrecipitationMm + day.snowmeltMm, 0);
   const snowfallMm = finalDaily.reduce((sum, day) => sum + day.snowfallMm, 0);
   const snowmeltMm = finalDaily.reduce((sum, day) => sum + day.snowmeltMm, 0);
+  const snowStorageChangeMm = snowpackMm - finalYearStartSnowpackMm;
   return Object.freeze({
     policy: BIOME4_VIRTUAL_CLIMATE_POLICY,
     latitude: clamp(latitude, -SOURCE_CONSTANTS.latitudeLimitDegrees, SOURCE_CONSTANTS.latitudeLimitDegrees),
@@ -263,7 +270,10 @@ export function biome4VirtualDailyClimate({
     liquidToSoilMm: round(liquidToSoilMm),
     snowfallMm: round(snowfallMm),
     snowmeltMm: round(snowmeltMm),
+    finalYearStartSnowpackMm: round(finalYearStartSnowpackMm),
     finalSnowpackMm: round(snowpackMm),
+    snowStorageChangeMm: round(snowStorageChangeMm),
+    snowMassBalanceResidualMm: round(precipitationInputMm - liquidToSoilMm - snowStorageChangeMm, 9),
     maximumSnowpackModelUnits: round(maximumSnowpackMm),
     radiationAnomalyAssumption: radiationAnomaly == null ? BIOME4_RADIATION_ANOMALY_ASSUMPTION : null,
     epistemicStatus: "independent BIOME4 4.1 daily radiation/PET/snow forcing; monthly precipitation is supplied as monthly total and the source 365/12 daily conversion is preserved; radiation anomaly defaults to 1 when absent"
