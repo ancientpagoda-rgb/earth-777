@@ -1,5 +1,6 @@
 import { checkpointState, CHECKPOINT_777 } from "../data/checkpoint-777.js";
 import { paleoForcingAt } from "../data/paleo-forcing.js";
+import { AdaptiveFidelityController } from "./AdaptiveFidelityController.js";
 import { createRandom, gaussian } from "./random.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -14,21 +15,46 @@ const EVENTS = Object.freeze([
 ]);
 
 export class FreeEarthEngine {
-  constructor(seed = 777001) {
+  constructor(seed = 777001, { fidelityBudget = 1, observerRelevance = {}, fidelityRefreshYears = 250 } = {}) {
     this.seed = Number(seed) >>> 0;
-    this.random = createRandom(this.seed);
+    this.fidelity = new AdaptiveFidelityController({
+      budget: fidelityBudget,
+      observerRelevance,
+      refreshYears: fidelityRefreshYears
+    });
+    this._resetRandomStreams();
     this.state = checkpointState();
     this.events = [];
     this._eventAccumulator = 0;
   }
 
+  _resetRandomStreams() {
+    this.carbonRandom = createRandom((this.seed ^ 0x9e3779b9) >>> 0);
+    this.eventRandom = createRandom((this.seed ^ 0x85ebca6b) >>> 0);
+  }
+
   reset(seed = this.seed) {
     this.seed = Number(seed) >>> 0;
-    this.random = createRandom(this.seed);
+    this._resetRandomStreams();
+    this.fidelity.reset();
     this.state = checkpointState();
     this.events = [];
     this._eventAccumulator = 0;
     return this.snapshot();
+  }
+
+  setFidelityBudget(budget) {
+    this.fidelity.setBudget(budget);
+    return this.fidelityDiagnostics();
+  }
+
+  setObserverRelevance(observerRelevance = {}) {
+    this.fidelity.setObserverRelevance(observerRelevance);
+    return this.fidelityDiagnostics();
+  }
+
+  fidelityDiagnostics() {
+    return this.fidelity.diagnostics();
   }
 
   advance(years) {
@@ -61,55 +87,79 @@ export class FreeEarthEngine {
     state.seaLevelUncertainty = forcing.seaLevelSigma;
     state.seaLevelLower95 = forcing.seaLevelLower95;
     state.seaLevelUpper95 = forcing.seaLevelUpper95;
+    this.fidelity.update(state);
+    this.fidelity.recordExecution("orbit", 1);
 
     const orbitalSummer =
       (state.obliquity - 23.3) * 0.36 +
       (state.eccentricity - 0.023) * 28 * Math.cos(state.precession * Math.PI / 180);
-    const carbonNoise = gaussian(this.random) * 0.015 * Math.sqrt(dt);
-    const carbonEquilibrium = 245 + 42 * (1 - state.iceIndex) + orbitalSummer * 5;
-    state.co2 += (carbonEquilibrium - state.co2) * (dt / 12_000) + carbonNoise;
-    state.co2 = clamp(state.co2, 170, 330);
 
-    const radiative = 3.7 * Math.log(state.co2 / 245) / Math.log(2);
-    const temperatureTarget = -1.27 + radiative * 0.72 + orbitalSummer * 0.9;
-    state.temperatureAnomaly += (temperatureTarget - state.temperatureAnomaly) * (dt / 380);
+    this.fidelity.execute("carbon", dt, (subDt) => {
+      const carbonNoise = gaussian(this.carbonRandom) * 0.015 * Math.sqrt(subDt);
+      const carbonEquilibrium = 245 + 42 * (1 - state.iceIndex) + orbitalSummer * 5;
+      state.co2 += (carbonEquilibrium - state.co2) * (subDt / 12_000) + carbonNoise;
+      state.co2 = clamp(state.co2, 170, 330);
+    });
 
-    const reconstructedIce = clamp((8.96 - state.seaLevelReference) / 120, 0.03, 1);
-    const climateIce = clamp(0.18 - state.temperatureAnomaly * 0.13 - orbitalSummer * 0.18, 0.03, 1);
-    const iceTarget = clamp(climateIce * 0.55 + reconstructedIce * 0.45, 0.03, 1);
-    state.iceIndex += (iceTarget - state.iceIndex) * (dt / 2_800);
-    const branchedSeaLevel = state.seaLevelReference - (state.iceIndex - reconstructedIce) * 116;
-    state.seaLevel += (branchedSeaLevel - state.seaLevel) * (dt / 1_900);
+    this.fidelity.execute("climate", dt, (subDt) => {
+      const radiative = 3.7 * Math.log(state.co2 / 245) / Math.log(2);
+      const temperatureTarget = -1.27 + radiative * 0.72 + orbitalSummer * 0.9;
+      state.temperatureAnomaly += (temperatureTarget - state.temperatureAnomaly) * (subDt / 380);
+    });
+
+    this.fidelity.execute("ice", dt, (subDt) => {
+      const reconstructedIce = clamp((8.96 - state.seaLevelReference) / 120, 0.03, 1);
+      const climateIce = clamp(0.18 - state.temperatureAnomaly * 0.13 - orbitalSummer * 0.18, 0.03, 1);
+      const iceTarget = clamp(climateIce * 0.55 + reconstructedIce * 0.45, 0.03, 1);
+      state.iceIndex += (iceTarget - state.iceIndex) * (subDt / 2_800);
+    });
+
+    this.fidelity.execute("seaLevel", dt, (subDt) => {
+      const reconstructedIce = clamp((8.96 - state.seaLevelReference) / 120, 0.03, 1);
+      const branchedSeaLevel = state.seaLevelReference - (state.iceIndex - reconstructedIce) * 116;
+      state.seaLevel += (branchedSeaLevel - state.seaLevel) * (subDt / 1_900);
+    });
 
     state.productivityIndex = clamp(
       1 + (state.co2 - 245) * 0.0017 + state.temperatureAnomaly * 0.055 - state.iceIndex * 0.12,
       0.42,
       1.45
     );
-    const herbivoreTarget = clamp(state.productivityIndex * (1 - state.iceIndex * 0.18), 0.25, 1.6);
-    state.herbivoreBiomass += (herbivoreTarget - state.herbivoreBiomass) * (dt / 34);
-    const carnivoreTarget = clamp(state.herbivoreBiomass * 0.94, 0.2, 1.5);
-    state.carnivoreBiomass += (carnivoreTarget - state.carnivoreBiomass) * (dt / 48);
+    this.fidelity.recordExecution("vegetation", 1);
 
-    const homininClimate = clamp(1 - Math.abs(state.temperatureAnomaly + 0.6) * 0.08, 0.5, 1.1);
-    const homininTarget = clamp(state.productivityIndex * homininClimate, 0.25, 1.8);
-    state.homininPopulationIndex += (homininTarget - state.homininPopulationIndex) * (dt / 85);
+    this.fidelity.execute("herbivores", dt, (subDt) => {
+      const herbivoreTarget = clamp(state.productivityIndex * (1 - state.iceIndex * 0.18), 0.25, 1.6);
+      state.herbivoreBiomass += (herbivoreTarget - state.herbivoreBiomass) * (subDt / 34);
+    });
 
-    if (state.yearBP <= 773_000 && state.magneticPolarity < 0) {
-      state.magneticStrength = Math.max(0.16, state.magneticStrength - dt / 18_000);
-      if (state.yearBP <= 772_500) {
-        state.magneticPolarity = 1;
-        this._recordEvent("The Matuyama–Brunhes transition resolves into normal polarity.");
+    this.fidelity.execute("carnivores", dt, (subDt) => {
+      const carnivoreTarget = clamp(state.herbivoreBiomass * 0.94, 0.2, 1.5);
+      state.carnivoreBiomass += (carnivoreTarget - state.carnivoreBiomass) * (subDt / 48);
+    });
+
+    this.fidelity.execute("hominins", dt, (subDt) => {
+      const homininClimate = clamp(1 - Math.abs(state.temperatureAnomaly + 0.6) * 0.08, 0.5, 1.1);
+      const homininTarget = clamp(state.productivityIndex * homininClimate, 0.25, 1.8);
+      state.homininPopulationIndex += (homininTarget - state.homininPopulationIndex) * (subDt / 85);
+    });
+
+    this.fidelity.execute("magnetism", dt, (subDt) => {
+      if (state.yearBP <= 773_000 && state.magneticPolarity < 0) {
+        state.magneticStrength = Math.max(0.16, state.magneticStrength - subDt / 18_000);
+        if (state.yearBP <= 772_500) {
+          state.magneticPolarity = 1;
+          this._recordEvent("The Matuyama–Brunhes transition resolves into normal polarity.");
+        }
+      } else if (state.magneticPolarity > 0) {
+        state.magneticStrength += (0.78 - state.magneticStrength) * (subDt / 4_500);
       }
-    } else if (state.magneticPolarity > 0) {
-      state.magneticStrength += (0.78 - state.magneticStrength) * (dt / 4_500);
-    }
+    });
 
     this._eventAccumulator += dt;
     if (this._eventAccumulator >= 250) {
       this._eventAccumulator %= 250;
       for (const event of EVENTS) {
-        if (this.random() < event.threshold) this._recordEvent(event.text);
+        if (this.eventRandom() < event.threshold) this._recordEvent(event.text);
       }
     }
   }
