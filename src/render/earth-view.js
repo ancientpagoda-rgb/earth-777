@@ -9,6 +9,7 @@ const TEXTURE_HEIGHT = 256;
 const STATIC_PIXEL_RATIO_CAP = 1.25;
 const INTERACTION_PIXEL_RATIO_CAP = 1.0;
 const MIN_TEXTURE_REFRESH_INTERVAL_MS = 1_500;
+const TEXTURE_BUILD_BUDGET_MS = 5;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mix = (a, b, t) => a + (b - a) * t;
@@ -143,6 +144,41 @@ function createEarthTexture(state, climate = null, hydroClimate = null, vegetati
   return texture;
 }
 
+function yieldForTextureBuild() {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 40 });
+    else setTimeout(resolve, 0);
+  });
+}
+
+async function createEarthTextureAsync(state, climate = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35, shouldCancel = () => false) {
+  const canvas = document.createElement("canvas");
+  canvas.width = TEXTURE_WIDTH;
+  canvas.height = TEXTURE_HEIGHT;
+  const context = canvas.getContext("2d");
+  const image = context.createImageData(TEXTURE_WIDTH, TEXTURE_HEIGHT);
+  let sliceStarted = performance.now();
+  for (let y = 0; y < TEXTURE_HEIGHT; y += 1) {
+    const latitude = 90 - (y / (TEXTURE_HEIGHT - 1)) * 180;
+    for (let x = 0; x < TEXTURE_WIDTH; x += 1) {
+      const offset = (y * TEXTURE_WIDTH + x) * 4;
+      const longitude = (x / (TEXTURE_WIDTH - 1)) * 360 - 180;
+      colorEarthPixel(image.data, offset, latitude, longitude, state, climate, hydroClimate, vegetation, spatialDetail);
+    }
+    if (shouldCancel()) return null;
+    if (performance.now() - sliceStarted >= TEXTURE_BUILD_BUDGET_MS) {
+      await yieldForTextureBuild();
+      if (shouldCancel()) return null;
+      sliceStarted = performance.now();
+    }
+  }
+  context.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
 function createCloudTexture(state, climate = null, hydroClimate = null, spatialDetail = 0.35) {
   const canvas = document.createElement("canvas");
   canvas.width = TEXTURE_WIDTH;
@@ -213,6 +249,8 @@ export class EarthView {
     this.selectedNormal = null;
     this.interacting = false;
     this.lastTextureRefreshMs = 0;
+    this.textureBuildVersion = 0;
+    this.textureBuildInFlight = false;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, STATIC_PIXEL_RATIO_CAP));
@@ -236,6 +274,8 @@ export class EarthView {
     this.controls.zoomSpeed = 0.7;
     this.controls.addEventListener("start", () => {
       this.interacting = true;
+      this.textureBuildVersion += 1;
+      this.textureBuildInFlight = false;
       this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, INTERACTION_PIXEL_RATIO_CAP));
       this.resize();
     });
@@ -364,21 +404,30 @@ export class EarthView {
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
     const now = performance.now();
     if (!force && this.interacting) return;
+    if (!force && this.textureBuildInFlight) return;
     if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
     if (!force && now - this.lastTextureRefreshMs < MIN_TEXTURE_REFRESH_INTERVAL_MS) return;
-    const next = createEarthTexture(state, this.climate, this.hydroClimate, this.vegetation, this.spatialDetail);
-    this.earthMaterial.map?.dispose();
-    this.earthMaterial.map = next;
-    this.earthMaterial.needsUpdate = true;
-
-    if (this.hydroClimate) {
-      const nextClouds = createCloudTexture(state, this.climate, this.hydroClimate, this.spatialDetail);
-      this.cloudMaterial.map?.dispose();
-      this.cloudMaterial.map = nextClouds;
-      this.cloudMaterial.needsUpdate = true;
-    }
-    this.lastTextureYear = state.yearBP;
-    this.lastTextureRefreshMs = performance.now();
+    const buildVersion = ++this.textureBuildVersion;
+    const buildState = state;
+    const buildDetail = this.spatialDetail;
+    this.textureBuildInFlight = true;
+    this.lastTextureRefreshMs = now;
+    createEarthTextureAsync(buildState, this.climate, this.hydroClimate, this.vegetation, buildDetail, () => buildVersion !== this.textureBuildVersion || this.interacting).then((next) => {
+      if (!next || buildVersion !== this.textureBuildVersion || this.interacting) { next?.dispose(); return; }
+      this.earthMaterial.map?.dispose();
+      this.earthMaterial.map = next;
+      this.earthMaterial.needsUpdate = true;
+      if (this.hydroClimate) {
+        const nextClouds = createCloudTexture(buildState, this.climate, this.hydroClimate, buildDetail);
+        this.cloudMaterial.map?.dispose();
+        this.cloudMaterial.map = nextClouds;
+        this.cloudMaterial.needsUpdate = true;
+      }
+      this.lastTextureYear = buildState.yearBP;
+      this.lastTextureRefreshMs = performance.now();
+    }).catch((error) => console.warn("Earth texture refresh failed; keeping the previous texture.", error)).finally(() => {
+      if (buildVersion === this.textureBuildVersion) this.textureBuildInFlight = false;
+    });
   }
 
   resize() {
