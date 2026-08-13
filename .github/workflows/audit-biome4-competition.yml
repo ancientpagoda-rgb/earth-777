@@ -1,0 +1,41 @@
+name: Audit exact BIOME4 PFT competition
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-competition
+    paths:
+      - .github/workflows/audit-biome4-competition.yml
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-competition
+      - name: Print exact ranking and competition source
+        run: |
+          curl -fsSL 'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' -o /tmp/b.tgz
+          mkdir -p /tmp/b && tar -xzf /tmp/b.tgz -C /tmp/b
+          f=$(find /tmp/b -name biome4.f | head -1)
+          echo '=== main PFT ranking / competition call ==='
+          sed -n '330,700p' "$f"
+          echo '=== competition2 routine ==='
+          line=$(grep -n -i 'subroutine  *competition2' "$f" | head -1 | cut -d: -f1 || true)
+          echo "competition2 starts at $line"
+          if [ -n "$line" ]; then sed -n "${line},$((line+520))p" "$f"; fi
+          echo '=== helper competition routines ==='
+          grep -n -i -E 'subroutine  *competition|call +competition' "$f" | head -100
+      - name: Remove transient workflow
+        run: |
+          rm -f .github/workflows/audit-biome4-competition.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove transient BIOME4 competition audit'
+          git push origin HEAD:agent/biome4-pft-competition
