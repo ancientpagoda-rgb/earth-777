@@ -5,6 +5,7 @@ export const ETOPO_LAT_START = 15;
 export const ETOPO_LON_START = 15;
 export const ETOPO_LAT_STOP = 10_785;
 export const ETOPO_LON_STOP = 21_585;
+export const ETOPO_SOURCE_STEP_DEGREES = 1 / 60;
 
 export function buildEtopoOpendapUrl({ stride = ETOPO_STRIDE } = {}) {
   const base = "https://www.ngdc.noaa.gov/thredds/dodsC/global/ETOPO2022/60s/60s_bed_elev_netcdf/ETOPO_2022_v1_60s_N90W180_bed.nc.ascii";
@@ -12,45 +13,49 @@ export function buildEtopoOpendapUrl({ stride = ETOPO_STRIDE } = {}) {
   return `${base}?${encodeURIComponent(constraint)}`;
 }
 
-function section(text, startMarker, endMarker) {
-  const start = text.indexOf(startMarker);
-  if (start < 0) throw new Error(`Missing OPeNDAP section: ${startMarker}`);
-  const from = start + startMarker.length;
-  const end = endMarker ? text.indexOf(endMarker, from) : text.length;
-  if (end < 0) throw new Error(`Missing OPeNDAP section terminator: ${endMarker}`);
-  return text.slice(from, end);
+function rasterSection(text) {
+  const marker = "z.z";
+  const start = text.indexOf(marker);
+  if (start < 0) throw new Error(`Missing OPeNDAP section: ${marker}`);
+  return text.slice(start + marker.length);
 }
 
-function parseIndexedRows(text) {
+function parseRasterRows(text, rows, cols) {
   const values = [];
-  for (const rawLine of text.split(/\r?\n/)) {
+  let parsedRows = 0;
+  for (const rawLine of rasterSection(text).split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!/^\[\d+\],/.test(line)) continue;
     const comma = line.indexOf(",");
-    for (const token of line.slice(comma + 1).split(",")) {
-      const value = Number(token.trim());
-      if (Number.isFinite(value)) values.push(value);
-    }
+    const row = line.slice(comma + 1).split(",").map((token) => Number(token.trim()));
+    if (row.length !== cols || row.some((value) => !Number.isFinite(value))) continue;
+    values.push(...row);
+    parsedRows += 1;
+    if (parsedRows === rows) break;
+  }
+  if (parsedRows !== rows || values.length !== rows * cols) {
+    throw new Error(`Expected ${rows} × ${cols} ETOPO elevations, received ${parsedRows} rows / ${values.length} values`);
   }
   return values;
 }
 
-export function parseEtopoAscii(text, { rows = ETOPO_ROWS, cols = ETOPO_COLS } = {}) {
-  const zValues = parseIndexedRows(section(text, "z.z", "z.lat"));
-  const latitudes = parseIndexedRows(section(text, "z.lat", "z.lon"));
-  const longitudes = parseIndexedRows(section(text, "z.lon", null));
+function latitudeForSourceIndex(index) {
+  return 90 - (index + 0.5) * ETOPO_SOURCE_STEP_DEGREES;
+}
 
-  if (zValues.length !== rows * cols) {
-    throw new Error(`Expected ${rows * cols} ETOPO elevations, received ${zValues.length}`);
-  }
-  if (latitudes.length !== rows) {
-    throw new Error(`Expected ${rows} ETOPO latitudes, received ${latitudes.length}`);
-  }
-  if (longitudes.length !== cols) {
-    throw new Error(`Expected ${cols} ETOPO longitudes, received ${longitudes.length}`);
-  }
+function longitudeForSourceIndex(index) {
+  return -180 + (index + 0.5) * ETOPO_SOURCE_STEP_DEGREES;
+}
 
-  return { rows, cols, elevations: zValues, latitudes, longitudes };
+export function parseEtopoAscii(text, { rows = ETOPO_ROWS, cols = ETOPO_COLS, stride = ETOPO_STRIDE } = {}) {
+  const elevations = parseRasterRows(text, rows, cols);
+  const latitudes = Array.from({ length: rows }, (_, row) =>
+    latitudeForSourceIndex(ETOPO_LAT_START + row * stride)
+  );
+  const longitudes = Array.from({ length: cols }, (_, col) =>
+    longitudeForSourceIndex(ETOPO_LON_START + col * stride)
+  );
+  return { rows, cols, elevations, latitudes, longitudes };
 }
 
 export function encodeInt16Base64(values) {
