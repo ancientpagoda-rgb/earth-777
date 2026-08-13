@@ -1,8 +1,10 @@
 import { SOURCES } from "./data/provenance.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
+import { loadKrapp777Vegetation } from "./data/krapp-777-vegetation.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
 import { MassConservingHydrology } from "./sim/MassConservingHydrology.js";
+import { SpatialVegetation } from "./sim/SpatialVegetation.js";
 import { regionalState } from "./sim/regional-state.js";
 import { EarthView } from "./render/earth-view.js";
 
@@ -41,6 +43,7 @@ let lastUiUpdate = 0;
 let selected = null;
 let climate777 = null;
 let hydroClimate = null;
+let spatialVegetation = null;
 const engine = new FreeEarthEngine(seed);
 const earthView = new EarthView($("#earth"), engine.snapshot(), handleRegionSelect);
 
@@ -82,13 +85,15 @@ function updateInterface(state, forceTexture = false) {
   ui.orbit.textContent = `${state.obliquity.toFixed(1)}° tilt`;
   ui.orbit.title = `e ${state.eccentricity.toFixed(4)} · perihelion longitude ${state.precession.toFixed(1)}°`;
   ui.npp.textContent = ecosystemDescription(state.productivityIndex);
+  ui.npp.title = "Global aggregate productivity emulator; select a region for published BIOME4 NPP/LAI and branch vegetation response.";
   ui.hominin.textContent = ecosystemDescription(state.homininPopulationIndex);
   ui.range.value = Math.round(state.elapsedYears);
   ui.range.style.setProperty("--progress", `${state.elapsedYears / 777_000 * 100}%`);
   ui.elapsed.textContent = state.elapsedYears < 1 ? "checkpoint" : `+${Math.round(state.elapsedYears).toLocaleString()} years`;
   updateJournal(state);
   if (selected) renderRegion(state, selected.latitude, selected.longitude);
-  earthView.updateState(state, forceTexture, spatialDetailFor("hydrology"));
+  const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
+  earthView.updateState(state, forceTexture, surfaceDetail);
 }
 
 function updateJournal(state) {
@@ -115,10 +120,11 @@ function handleRegionSelect(region) {
 }
 
 function renderRegion(state, latitude, longitude) {
-  const regionalDetail = Math.max(spatialDetailFor("hydrology"), 0.82);
+  const regionalDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"), 0.82);
   const region = regionalState(state, latitude, longitude, {
     climateLayer: climate777,
     hydroClimate,
+    vegetation: spatialVegetation,
     spatialDetail: regionalDetail
   });
   const river = hydroClimate?.networkSample?.(state, latitude, longitude, regionalDetail) ?? null;
@@ -130,6 +136,11 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
   climateDetails.push(`soil moisture ${Math.round(region.moisture * 100)}%`);
   if (Number.isFinite(region.runoffPotential)) climateDetails.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.npp)) climateDetails.push(`BIOME4 NPP ${region.npp.toFixed(1)} source units`);
+  if (Number.isFinite(region.lai)) climateDetails.push(`LAI ${region.lai.toFixed(2)}`);
+  if (Number.isFinite(region.vegetationTransitionPressure) && region.vegetationTransitionPressure > 0.02) {
+    climateDetails.push(`vegetation transition pressure ${Math.round(region.vegetationTransitionPressure * 100)}%`);
+  }
   if (river) {
     climateDetails.push(`river ${river.meanDischargeM3s.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³/s`);
     climateDetails.push(`upstream area ${Math.round(river.upstreamAreaKm2).toLocaleString()} km²`);
@@ -238,10 +249,18 @@ function frame(now) {
 populateSources();
 updateInterface(engine.snapshot(), true);
 loadKrapp777Climate()
-  .then((layer) => {
-    climate777 = layer;
-    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(layer));
-    earthView.setHydroClimate(hydroClimate, spatialDetailFor("hydrology"));
+  .then(async (climateLayer) => {
+    climate777 = climateLayer;
+    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer));
+    const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
+    earthView.setHydroClimate(hydroClimate, surfaceDetail);
+    try {
+      const vegetationLayer = await loadKrapp777Vegetation();
+      spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate);
+      earthView.setVegetation(spatialVegetation, surfaceDetail);
+    } catch (error) {
+      console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);
+    }
     if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
   })
   .catch((error) => console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error));

@@ -31,7 +31,7 @@ export const CHECKPOINT_777 = Object.freeze({
     hydrology: Object.freeze({ status: "closed monthly soil-water budget + upstream-accumulating ETOPO river network", target: "lake, groundwater, snow, floodplain, and channel storage with sub-degree observed routing", sources: ["krapp-2021", "etopo-2022", "priestley-taylor-1972", "fao56"] }),
     orbital: Object.freeze({ status: "Vavrus-anchored La2004 series", target: "Direct 1 kyr astronomical forcing", sources: ["ruddiman-2018-mis19", "la2004"] }),
     seaLevel: Object.freeze({ status: "reconstruction with uncertainty", target: "Spratt–Lisiecki five-record stack", sources: ["spratt-lisiecki-2016"] }),
-    vegetation: Object.freeze({ status: "climate-derived emulator", target: "Krapp BIOME4/NPP", sources: ["krapp-2021"] }),
+    vegetation: Object.freeze({ status: "published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ continuous response", target: "dynamic PFT competition and categorical biome transitions", sources: ["krapp-2021"] }),
     fauna: Object.freeze({ status: "functional guilds", target: "Neotoma/PBDB evidence envelopes", sources: ["neotoma", "madingley"] }),
     hominins: Object.freeze({ status: "regional populations", target: "ROAD evidence envelopes", sources: ["road"] })
   })

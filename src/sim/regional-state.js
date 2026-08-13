@@ -16,7 +16,7 @@ export function regionalState(
   globalState,
   latitude,
   longitude,
-  { climateLayer = null, hydroClimate = null, spatialDetail = 0.35 } = {}
+  { climateLayer = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35 } = {}
 ) {
   const hydro = hydroClimate?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
   if (!hydro || !Number.isFinite(hydro.temperatureCelsius)) {
@@ -25,6 +25,8 @@ export function regionalState(
 
   const moisture = Number.isFinite(hydro.soilMoistureIndex) ? hydro.soilMoistureIndex : 0.5;
   const closedBudget = Number.isFinite(hydro.waterBalanceResidualMm);
+  const vegetationState = vegetation?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
+  const fallbackBiome = biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture);
   return Object.freeze({
     latitude,
     longitude,
@@ -43,7 +45,14 @@ export function regionalState(
       : null,
     soilWaterStorage: Number.isFinite(hydro.soilWaterStorageMm) ? round(hydro.soilWaterStorageMm, 0) : null,
     waterBalanceResidual: Number.isFinite(hydro.waterBalanceResidualMm) ? hydro.waterBalanceResidualMm : null,
-    biome: biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture),
+    biome: vegetationState?.biomeLabel ?? fallbackBiome,
+    biomeCode: vegetationState?.biomeCode ?? null,
+    npp: Number.isFinite(vegetationState?.npp) ? round(vegetationState.npp, 1) : null,
+    lai: Number.isFinite(vegetationState?.lai) ? round(vegetationState.lai, 2) : null,
+    vegetationProductivityFactor: Number.isFinite(vegetationState?.productivityFactor) ? vegetationState.productivityFactor : null,
+    vegetationTransitionPressure: Number.isFinite(vegetationState?.transitionPressure) ? vegetationState.transitionPressure : null,
+    vegetationSource: vegetationState?.source ?? null,
+    checkpointVegetation: Boolean(vegetationState) && globalState.elapsedYears <= 0,
     climateSource: closedBudget
       ? "krapp-777 + branch-hydroclimate + closed-water-budget"
       : "krapp-777 + branch-hydroclimate",
@@ -52,7 +61,7 @@ export function regionalState(
     hydroClimatePolicy: hydro.policy,
     waterBalancePolicy: hydro.waterBalancePolicy ?? null,
     confidence: closedBudget
-      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed soil-water bucket conserve precipitation into AET, runoff, and storage change`
+      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed soil-water bucket conserve precipitation into AET, runoff, and storage change${vegetationState ? "; vegetation uses the published 777 ka BIOME4 category/NPP/LAI baseline with continuous hydro-CO₂ response after the checkpoint" : ""}`
       : globalState.elapsedYears > 0
         ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies`
         : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`

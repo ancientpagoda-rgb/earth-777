@@ -11,7 +11,8 @@
     "data:paleo": "node scripts/ingest-paleo-forcing.mjs",
     "data:terrain": "node scripts/ingest-etopo-2022.mjs",
     "data:climate": "python3 scripts/ingest-krapp-777.py",
-    "data:ingest": "npm run data:paleo && npm run data:terrain && npm run data:climate",
+    "data:vegetation": "python3 scripts/ingest-krapp-biome4-777.py",
+    "data:ingest": "npm run data:paleo && npm run data:terrain && npm run data:climate && npm run data:vegetation",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
