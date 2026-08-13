@@ -18,7 +18,7 @@ export const CHECKPOINT_777 = Object.freeze({
     climaticPrecession: datum(108.9, "degrees", "high", "study", ["ruddiman-2018-mis19"]),
     co2: datum(245, "ppm", "high", "study", ["ruddiman-2018-mis19"], 3),
     methane: datum(631, "ppb", "high", "study", ["ruddiman-2018-mis19"], 30),
-    nitrousOxide: datum(270, "ppb", "high", "study", ["ruddiman-2018-mis19"], 8),
+    nitrousOxide: datum(270, "ppb", "medium", "study", ["ruddiman-2018-mis19"], 8),
     globalTemperatureAnomaly: datum(-1.27, "K vs 1850 PI", "medium", "model", ["ruddiman-2018-mis19"], 0.35),
     seaLevelAnomaly: datum(-12.76, "m vs modern", "medium", "study", ["spratt-lisiecki-2016"], 9.52),
     iceVolumeIndex: datum(0.18, "0 interglacial–1 glacial", "low", "prior", ["lr04", "ruddiman-2018-mis19"], 0.15),
