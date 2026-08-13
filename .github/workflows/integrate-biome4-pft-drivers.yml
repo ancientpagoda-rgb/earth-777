@@ -1,0 +1,130 @@
+name: Integrate BIOME4 PFT source drivers
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-eligibility
+    paths:
+      - test/biome4-pft-drivers.test.js
+      - .github/workflows/integrate-biome4-pft-drivers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-eligibility
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Wire tmin and snow into existing PFT diagnostics
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('src/sim/SpatialVegetation.js')
+          s=p.read_text()
+          s=s.replace('import { evaluateBiome4PftClimateEligibility } from "./Biome4PftEligibility.js";\n', 'import { evaluateBiome4PftClimateEligibility } from "./Biome4PftEligibility.js";\nimport { biome4MaximumSnowDepth } from "./Biome4Snow.js";\n')
+          old='''function climateEligibility(hydrology, globalState, latitude, longitude, detail) {
+            const climate = hydrology?.climate;
+            if (!climate?.monthlyAt) return null;
+            const monthlyTemperatures = [];
+            for (let month = 0; month < 12; month += 1) {
+              const sample = climate.monthlyAt(globalState, month, latitude, longitude, detail);
+              if (!Number.isFinite(sample?.temperatureCelsius)) return null;
+              monthlyTemperatures.push(sample.temperatureCelsius);
+            }
+            return evaluateBiome4PftClimateEligibility(monthlyTemperatures);
+          }
+          '''
+          new='''function climateEligibility(hydrology, pftDrivers, globalState, latitude, longitude, detail) {
+            const climate = hydrology?.climate;
+            if (!climate?.monthlyAt) return null;
+            const monthlyTemperatures = [];
+            const monthlyPrecipitation = [];
+            for (let month = 0; month < 12; month += 1) {
+              const sample = climate.monthlyAt(globalState, month, latitude, longitude, detail);
+              if (!Number.isFinite(sample?.temperatureCelsius) || !Number.isFinite(sample?.precipitationMmPerYear)) return null;
+              monthlyTemperatures.push(sample.temperatureCelsius);
+              monthlyPrecipitation.push(sample.precipitationMmPerYear);
+            }
+            const tmin = pftDrivers?.absoluteMinimumTemperatureAt?.(latitude, longitude) ?? null;
+            const snow = biome4MaximumSnowDepth(monthlyTemperatures, monthlyPrecipitation);
+            const result = evaluateBiome4PftClimateEligibility(monthlyTemperatures, {
+              absoluteMinimumTemperatureCelsius: tmin?.temperatureCelsius ?? null,
+              maximumSnowDepthModelUnits: snow.maximumSnowDepthModelUnits
+            });
+            return Object.freeze({
+              ...result,
+              sourceAbsoluteMinimumTemperatureCelsius: tmin?.temperatureCelsius ?? null,
+              absoluteMinimumDriverSource: tmin?.source ?? null,
+              snow
+            });
+          }
+          '''
+          assert old in s, 'old climateEligibility block not found'
+          s=s.replace(old,new)
+          s=s.replace('constructor(checkpointVegetation, hydrology) {', 'constructor(checkpointVegetation, hydrology, pftDrivers = null) {')
+          s=s.replace('    this.hydrology = hydrology;\n', '    this.hydrology = hydrology;\n    this.pftDrivers = pftDrivers;\n',1)
+          s=s.replace('climateEligibility(this.hydrology, globalState, sampleLatitude, sampleLongitude, detail)', 'climateEligibility(this.hydrology, this.pftDrivers, globalState, sampleLatitude, sampleLongitude, detail)')
+          s=s.replace('      pftClimateIndices: pftClimate?.indices ?? null,\n', '      pftClimateIndices: pftClimate?.indices ?? null,\n      pftAbsoluteMinimumDriverSource: pftClimate?.absoluteMinimumDriverSource ?? null,\n      pftMaximumSnowDepthModelUnits: pftClimate?.snow?.maximumSnowDepthModelUnits ?? null,\n')
+          s=s.replace('      snowConstraintState: "unresolved where required until maximum snow depth is simulated",', '      snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",\n      absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),')
+          p.write_text(s)
+
+          p=Path('src/main.js')
+          s=p.read_text()
+          s=s.replace('import { loadBiome4Soil } from "./data/biome4-soil.js";\n', 'import { loadBiome4Soil } from "./data/biome4-soil.js";\nimport { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";\n')
+          old='''    let soilLayer = null;
+            try {
+              soilLayer = await loadBiome4Soil();
+            } catch (error) {
+              console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error);
+            }
+            hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
+          '''
+          new='''    let soilLayer = null;
+            let pftDrivers = null;
+            try {
+              soilLayer = await loadBiome4Soil();
+            } catch (error) {
+              console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error);
+            }
+            try {
+              pftDrivers = await loadBiome4PftDrivers();
+            } catch (error) {
+              console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", error);
+            }
+            hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
+          '''
+          assert old in s, 'main soil block not found'
+          s=s.replace(old,new)
+          s=s.replace('new SpatialVegetation(vegetationLayer, hydroClimate)', 'new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers)')
+          s=s.replace('`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · snow physics pending`', '`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · source-driver coverage`')
+          p.write_text(s)
+
+          p=Path('package.json')
+          import json
+          pkg=json.loads(p.read_text())
+          pkg['scripts']['data:pft-drivers']='python3 scripts/ingest-biome4-pft-drivers.py'
+          ingest=pkg['scripts']['data:ingest']
+          if 'data:pft-drivers' not in ingest:
+              pkg['scripts']['data:ingest']=ingest+' && npm run data:pft-drivers'
+          p.write_text(json.dumps(pkg,indent=2)+'\n')
+          PY
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Commit integrated PFT drivers and remove transient workflow
+        run: |
+          rm -f .github/workflows/integrate-biome4-pft-drivers.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Use BIOME4 tmin and snow in PFT climate eligibility'
+          git push origin HEAD:agent/biome4-pft-eligibility
