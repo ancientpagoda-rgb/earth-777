@@ -63,6 +63,12 @@ test("selected-region PFT diagnostics consume the conserved trace without enabli
   assert.equal(diagnostics.biomeCode, baseline.biomeCode);
   assert.equal(diagnostics.checkpointCategoryRetained, true);
   assert.equal(diagnostics.hydrologyFeedbackEnabled, false);
+  assert.equal(diagnostics.parallelVirtualHydrologyEnabled, true);
+  for (const candidate of diagnostics.candidates) {
+    if (!candidate.virtualHydrology) continue;
+    assert.ok(Math.abs(candidate.virtualHydrology.massBalanceResidualMm) < 1e-6);
+    assert.equal(candidate.virtualHydrology.sharedHydrologyMutated, false);
+  }
   assert.ok(diagnostics.candidateCount >= diagnostics.resolvedCount);
   assert.ok(Array.isArray(diagnostics.candidates));
   assert.ok(diagnostics.candidates.every((candidate) => candidate.pftId > 0));
