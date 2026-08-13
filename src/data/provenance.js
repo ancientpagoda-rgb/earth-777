@@ -18,6 +18,24 @@ export const SOURCES = Object.freeze([
     status: "integrated · 777 ka monthly 360 × 720 climate"
   },
   {
+    id: "priestley-taylor-1972",
+    title: "On the Assessment of Surface Heat Flux and Evaporation Using Large-Scale Parameters",
+    authors: "Priestley & Taylor / Monthly Weather Review (1972)",
+    url: "https://doi.org/10.1175/1520-0493(1972)100%3C0081:OTAOSH%3E2.3.CO;2",
+    license: "published formulation reference; no source data redistributed",
+    role: "Equilibrium energy-balance formulation used for model-derived potential evapotranspiration where the paleoclimate checkpoint lacks wind and humidity fields.",
+    status: "integrated · model formulation"
+  },
+  {
+    id: "fao56",
+    title: "Crop evapotranspiration — Guidelines for computing crop water requirements",
+    authors: "Allen, Pereira, Raes & Smith / FAO Irrigation and Drainage Paper 56 (1998)",
+    url: "https://www.fao.org/4/x0490e/x0490e00.htm",
+    license: "FAO publication reference; no source data redistributed",
+    role: "Solar geometry, extraterrestrial-radiation equations, reference-surface albedo, and default Angstrom coefficients used in the hydrology radiation estimate.",
+    status: "integrated · model formulation"
+  },
+  {
     id: "la2004",
     title: "La2004 astronomical solution",
     authors: "Laskar et al. / Astronomy & Astrophysics (2004)",
