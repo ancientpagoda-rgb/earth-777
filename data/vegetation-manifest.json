@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "dataset": "Krapp et al. (2021) BIOME4 outputs",
+  "paperDoi": "10.1038/s41597-021-01009-3",
+  "archiveDoi": "10.17605/OSF.IO/8N43X",
+  "targetYearsBeforePresent": 777000,
+  "sourceSelection": "original author BIOME4 annual output plus twelve monthly NPP outputs; exact -777000 coordinate",
+  "records": [
+    {
+      "label": "annual",
+      "filename": "biome4output_800ka.nc",
+      "osfDownloadId": "cf5zp",
+      "downloadUrl": "https://osf.io/download/cf5zp/",
+      "sha256": "6690fa535114b148c89cece05457a787fd5163cbcce7cbb4b1b09da528e70d74",
+      "bytes": 258437709,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "biome": {
+          "codes": {
+            "1": 4067,
+            "2": 1201,
+            "3": 1169,
+            "4": 672,
+            "5": 1070,
+            "6": 2307,
+            "7": 1437,
+            "8": 1760,
+            "9": 659,
+            "10": 8918,
+            "11": 3633,
+            "12": 661,
+            "13": 10455,
+            "14": 1854,
+            "15": 1478,
+            "17": 306,
+            "19": 58,
+            "20": 1013,
+            "21": 6622,
+            "22": 2085,
+            "23": 4035,
+            "24": 2801,
+            "25": 1043,
+            "26": 990,
+            "27": 528,
+            "28": 31495
+          },
+          "missingCells": 166883
+        },
+        "annualNpp": {
+          "minimum": 0.0,
+          "maximum": 2213.8837890625,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        },
+        "annualLai": {
+          "minimum": 0.0,
+          "maximum": 7.119375228881836,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "jan",
+      "filename": "biome4output_800ka_jan.nc",
+      "osfDownloadId": "jny87",
+      "downloadUrl": "https://osf.io/download/jny87/",
+      "sha256": "205423a17f640c81a5fdd7f97d907621c905cd7e52a2fcc93230a01279d92a88",
+      "bytes": 71302137,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -133.3000030517578,
+          "maximum": 323.8000183105469,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "feb",
+      "filename": "biome4output_800ka_feb.nc",
+      "osfDownloadId": "dj9e8",
+      "downloadUrl": "https://osf.io/download/dj9e8/",
+      "sha256": "08e21d4f978b24b11c51305522e41d99a8fd293c75c4b4431f74f5f3d3f9ff33",
+      "bytes": 73906851,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -33.10000228881836,
+          "maximum": 256.8999938964844,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "mar",
+      "filename": "biome4output_800ka_mar.nc",
+      "osfDownloadId": "z2sc7",
+      "downloadUrl": "https://osf.io/download/z2sc7/",
+      "sha256": "ee32af279bfc30e4c6f0071c03f4e9648d47172b257694087a50e87ee1b7d4ef",
+      "bytes": 82165265,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -46.79999923706055,
+          "maximum": 290.20001220703125,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "apr",
+      "filename": "biome4output_800ka_apr.nc",
+      "osfDownloadId": "29rs8",
+      "downloadUrl": "https://osf.io/download/29rs8/",
+      "sha256": "fbee8c3fc013f62bb3a643ea6e3e7dabda00f2d6a07e66cb3591a680e719a323",
+      "bytes": 93483554,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -63.0,
+          "maximum": 288.0,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "may",
+      "filename": "biome4output_800ka_may.nc",
+      "osfDownloadId": "wtgsa",
+      "downloadUrl": "https://osf.io/download/wtgsa/",
+      "sha256": "2cccf21f77188c95ba341e586a67ead385b9164547161e51747c15d4158137d4",
+      "bytes": 107495782,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -77.0,
+          "maximum": 303.8999938964844,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "jun",
+      "filename": "biome4output_800ka_jun.nc",
+      "osfDownloadId": "fb3vg",
+      "downloadUrl": "https://osf.io/download/fb3vg/",
+      "sha256": "372ac743d6a5cab5362709b7267d3e3d06e5efcdb73bc64cb51e38d32e1d1503",
+      "bytes": 109264422,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -71.20000457763672,
+          "maximum": 337.8000183105469,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "jul",
+      "filename": "biome4output_800ka_jul.nc",
+      "osfDownloadId": "gbsj6",
+      "downloadUrl": "https://osf.io/download/gbsj6/",
+      "sha256": "556b17515829aac5b498ef6cfa27f94dbeea4bd919dd9ace863295995ea40646",
+      "bytes": 108342325,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -133.8000030517578,
+          "maximum": 395.8000183105469,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "aug",
+      "filename": "biome4output_800ka_aug.nc",
+      "osfDownloadId": "dmc94",
+      "downloadUrl": "https://osf.io/download/dmc94/",
+      "sha256": "9cb928f7af3f1c4895927cbb09c60d159555fef32c4d9e627d6c8836a88398ba",
+      "bytes": 109311051,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -48.10000228881836,
+          "maximum": 337.1000061035156,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "sep",
+      "filename": "biome4output_800ka_sep.nc",
+      "osfDownloadId": "e3vmr",
+      "downloadUrl": "https://osf.io/download/e3vmr/",
+      "sha256": "a6af2ac79b2ec98cf9130dfcf7c004ed5b8da13237d64c3dd971b95deb199867",
+      "bytes": 107147771,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -37.0,
+          "maximum": 281.0,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "oct",
+      "filename": "biome4output_800ka_oct.nc",
+      "osfDownloadId": "vm7zf",
+      "downloadUrl": "https://osf.io/download/vm7zf/",
+      "sha256": "8818f74da829ff2fcc5d66f6e9e560e05a12ba626e7895bb149c3691b3a085fa",
+      "bytes": 93272272,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -28.399999618530273,
+          "maximum": 279.6000061035156,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "nov",
+      "filename": "biome4output_800ka_nov.nc",
+      "osfDownloadId": "rm98g",
+      "downloadUrl": "https://osf.io/download/rm98g/",
+      "sha256": "3843ff707a4376cd1a9de318d4a10f58d1b608124fae20390daf2c667fcad227",
+      "bytes": 81483249,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -18.200000762939453,
+          "maximum": 292.6000061035156,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    },
+    {
+      "label": "dec",
+      "filename": "biome4output_800ka_dec.nc",
+      "osfDownloadId": "rwthg",
+      "downloadUrl": "https://osf.io/download/rwthg/",
+      "sha256": "15096e5688d593e0c7aa8b63a4bc4ae8403d34974afa21305242f363d793c118",
+      "bytes": 73124675,
+      "timeCoordinate": -777000.0,
+      "timeSelection": "exact -777000 coordinate",
+      "stats": {
+        "monthlyNpp": {
+          "minimum": -16.600000381469727,
+          "maximum": 321.3999938964844,
+          "finiteCells": 92317,
+          "missingCells": 166883
+        }
+      }
+    }
+  ],
+  "biomeLegend": {
+    "0": "sea",
+    "1": "tropical evergreen forest",
+    "2": "tropical semi-deciduous forest",
+    "3": "tropical deciduous forest / woodland",
+    "4": "temperate deciduous forest",
+    "5": "temperate conifer forest",
+    "6": "warm mixed forest",
+    "7": "cool mixed forest",
+    "8": "cool conifer forest",
+    "9": "cold mixed forest",
+    "10": "evergreen taiga / montane forest",
+    "11": "deciduous taiga / montane forest",
+    "12": "tropical savanna",
+    "13": "tropical xerophytic shrubland",
+    "14": "temperate xerophytic shrubland",
+    "15": "temperate sclerophyll woodland",
+    "16": "temperate broadleaved savanna",
+    "17": "open conifer woodland",
+    "18": "boreal parkland",
+    "19": "tropical grassland",
+    "20": "temperate grassland",
+    "21": "desert",
+    "22": "graminoid and forb tundra",
+    "23": "low- and high-shrub tundra",
+    "24": "erect dwarf-shrub tundra",
+    "25": "prostrate dwarf-shrub tundra",
+    "26": "cushion-forb, lichen and moss tundra",
+    "27": "barren",
+    "28": "land ice"
+  },
+  "preprocessing": {
+    "grid": "source 0.5 degree 360 x 720 grid reordered north-to-south and -180..180 longitude",
+    "biome": "source integer category preserved as uint8; source fill mapped to 255",
+    "annualNpp": "source float32 quantized at 0.1 source NPP units per integer",
+    "annualLai": "source float32 quantized at 0.001 LAI per integer",
+    "monthlyNpp": "source signed float32 quantized at 0.1 source NPP units per integer; negative values preserved"
+  },
+  "output": {
+    "asset": "public/data/krapp-777-vegetation.bin.gz",
+    "assetSha256": "3f93f2e502c664c495a3ca5066907618824a9ec190ef295fb1bbc44efbc9a53b",
+    "compressedBytes": 1138384,
+    "uncompressedBytes": 7516800
+  }
+}

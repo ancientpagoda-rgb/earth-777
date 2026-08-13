@@ -19,6 +19,8 @@ Version 0.2 establishes:
 - a checksum-pinned NOAA ETOPO 2022 Bedrock layer compacted to a 360 × 720 half-degree global grid;
 - coastlines and ocean depth rendered from ETOPO bedrock against the simulated paleo sea level rather than a decorative land mask;
 - the exact published Krapp et al. 777 ka 0.5° monthly temperature, precipitation, and cloud-cover fields, compacted from 36 SHA-256-pinned author NetCDFs into a 3.94 MB browser layer;
+- the authors’ published BIOME4 777 ka biome, annual NPP, LAI, and 12 signed monthly NPP fields, compacted from 13 pinned NetCDFs into a 1.14 MB browser layer;
+- a closed monthly soil-water budget with Priestley–Taylor/FAO radiation PET and an upstream-accumulating ETOPO river-discharge network;
 - deterministic Free Earth branches with replayable seeds;
 - a guarded phase-one climate, ice, carbon, ecosystem, hominin, and magnetic-field emulator;
 - consequence-weighted fidelity that allocates bounded temporal refinement to higher-consequence simulated systems;
@@ -31,7 +33,9 @@ The canonical orbit comes from the Vavrus et al. CCSM4 experiment. Its values di
 
 The physical relief baseline now comes from NOAA NCEI ETOPO 2022 **Bedrock**. The browser layer is a reproducibly generated half-degree sampling of the official 60-arc-second grid, encoded as integer-meter elevations with the source subset SHA-256 recorded in [`data/terrain-manifest.json`](data/terrain-manifest.json). ETOPO 2022 represents modern bedrock, not a direct reconstruction of 777 ka topography. Earth 777 therefore labels the source as study constrained, the compact preprocessing as model derived, applies simulated paleo sea level separately, and reserves glacial isostasy, sediment/shoreline evolution, and time-varying ice loading for later terrain phases.
 
-The spatial climate checkpoint now comes directly from the final published Krapp et al. (2021) 0.5° monthly reconstruction. Earth 777 extracts only the exact −777,000-year time slice from each of the authors’ 36 temperature, precipitation, and cloud-cover NetCDFs, verifies every source SHA-256, masks the CDO missing-data sentinel, and compacts the result into a deterministic 3.94 MB gzip layer. At the checkpoint, regional inspection uses those published fields directly. After the checkpoint, only the Free Earth global temperature anomaly is currently applied to that spatial baseline; precipitation and cloud cover remain explicitly labeled 777 ka checkpoint values until a branch-evolving hydrology/climate solver is integrated.
+The spatial climate checkpoint now comes directly from the final published Krapp et al. (2021) 0.5° monthly reconstruction. Earth 777 extracts only the exact −777,000-year time slice from each of the authors’ 36 temperature, precipitation, and cloud-cover NetCDFs, verifies every source SHA-256, masks the CDO missing-data sentinel, and compacts the result into a deterministic 3.94 MB gzip layer. After the checkpoint, a CWF-driven virtual grid produces explicitly model-derived spatial temperature, precipitation, and cloud responses. A closed monthly soil-water bucket then conserves precipitation into actual evapotranspiration, local runoff, and storage change. Local runoff is accumulated through a deterministic coarse ETOPO drainage network into upstream area and mean river discharge while explicitly tracking climate-forcing coverage and whole-network closure. Groundwater/baseflow, lakes, snow/glacier melt routing, floodplain/channel storage and channel hydraulics are not yet simulated.
+
+The vegetation checkpoint is the authors’ published BIOME4 output at exactly 777 ka: categorical biome, annual NPP, annual LAI, and twelve signed monthly NPP fields. Earth 777 verifies all 13 original OSF files, preserves negative monthly NPP, and compacts the checkpoint to a deterministic 1.14 MB gzip layer. At the checkpoint those values are used directly. After the checkpoint, NPP and LAI respond continuously to the branch water budget and CO₂; the published categorical biome is retained as a reference until dynamic plant-functional-type competition is implemented. NPP source files do not declare a units attribute, so the interface reports BIOME4 NPP in source units rather than inventing units.
 
 
 ## Run
@@ -56,7 +60,7 @@ npm run build
 npm run data:ingest
 ```
 
-The paleo ingestion path downloads the official forcing sources when absent, rejects checksum changes, parses only 0–777 ka, and writes the compact browser forcing module plus [`data/manifest.json`](data/manifest.json). The terrain ingestion path requests a centered OPeNDAP hyperslab from NOAA's ETOPO 2022 Bedrock grid, rejects source-subset checksum changes, and writes `src/data/generated/etopo-2022.generated.js` plus [`data/terrain-manifest.json`](data/terrain-manifest.json). The climate ingestion path downloads the 36 final Krapp monthly NetCDFs one at a time, verifies pinned SHA-256 hashes, extracts only the exact 777 ka slice, deletes each large source immediately, and writes the compact browser asset plus [`data/climate-manifest.json`](data/climate-manifest.json). Rebuilding the climate layer requires Python `netCDF4` and `numpy`. Large raw scientific datasets remain preprocessing inputs rather than browser dependencies.
+The paleo ingestion path downloads the official forcing sources when absent, rejects checksum changes, parses only 0–777 ka, and writes the compact browser forcing module plus [`data/manifest.json`](data/manifest.json). The terrain ingestion path requests a centered OPeNDAP hyperslab from NOAA's ETOPO 2022 Bedrock grid, rejects source-subset checksum changes, and writes `src/data/generated/etopo-2022.generated.js` plus [`data/terrain-manifest.json`](data/terrain-manifest.json). The climate ingestion path downloads the 36 final Krapp monthly NetCDFs one at a time, verifies pinned SHA-256 hashes, extracts only the exact 777 ka slice, deletes each large source immediately, and writes the compact browser asset plus [`data/climate-manifest.json`](data/climate-manifest.json). The vegetation path does the same for the 13 BIOME4 annual/monthly files and writes [`data/vegetation-manifest.json`](data/vegetation-manifest.json). Rebuilding the Krapp layers requires Python `netCDF4` and `numpy`. Large raw scientific datasets remain preprocessing inputs rather than browser dependencies.
 
 Individual ingestion commands are also available:
 
@@ -64,18 +68,21 @@ Individual ingestion commands are also available:
 npm run data:paleo
 npm run data:terrain
 npm run data:climate
+npm run data:vegetation
 ```
 
 ## Data-ingestion roadmap
 
 1. **Integrated:** NOAA ETOPO 2022 bedrock relief and bathymetry, with simulated sea-level shoreline response.
 2. **Integrated:** Krapp et al. 777 ka monthly temperature, precipitation, and cloud cover at 0.5°.
-3. Build branch-evolving gridded hydrology/climate on the Krapp checkpoint baseline, with CWF-driven spatial detail.
-4. Add LR04 as an independent validation track for the integrated Spratt–Lisiecki layer.
-5. Build probabilistic fauna envelopes from Neotoma/PBDB occurrences.
-6. Build hominin evidence envelopes from ROCEEH ROAD.
-7. Calibrate aggregate ecosystem dynamics against the open Madingley model.
-8. Materialize representative individual animals and hominins only inside observed regions.
+3. **Integrated phase one:** CWF-driven branch hydroclimate, closed land-water budget, and upstream-accumulating ETOPO river discharge with explicit forcing coverage and conservation closure; lakes, groundwater, snow/floodplain/channel storage and hydraulics remain future work.
+4. **Integrated checkpoint:** Krapp BIOME4 777 ka biome, annual NPP/LAI, and signed monthly NPP, with deliberately limited continuous branch productivity response.
+5. Implement dynamic PFT competition and categorical vegetation transitions on the BIOME4 checkpoint.
+6. Add LR04 as an independent validation track for the integrated Spratt–Lisiecki layer.
+7. Build probabilistic fauna envelopes from Neotoma/PBDB occurrences.
+8. Build hominin evidence envelopes from ROCEEH ROAD.
+9. Calibrate aggregate ecosystem dynamics against the open Madingley model.
+10. Materialize representative individual animals and hominins only inside observed regions.
 
 Large scientific datasets are preprocessing inputs, not browser dependencies. The app ships compact, versioned, cited layers with checksums and reproducible generation scripts.
 

@@ -24,7 +24,28 @@ function moistureFromCheckpoint(precipitationMmPerYear, cloudCoverPercent) {
   return clamp(precipitation * 0.82 + cloud * 0.18, 0.05, 1);
 }
 
-function colorEarthPixel(data, offset, latitude, longitude, state, climate = null, hydroClimate = null, spatialDetail = 0.35) {
+function vegetationColor(vegetation, rugged) {
+  const code = vegetation?.biomeCode;
+  const nppStrength = clamp(Math.log1p(Math.max(0, vegetation?.npp ?? 0)) / Math.log1p(2_214), 0, 1);
+  const laiStrength = clamp((vegetation?.lai ?? 0) / 7.12, 0, 1);
+  const vigor = clamp(nppStrength * 0.7 + laiStrength * 0.3, 0, 1);
+  let base;
+  if (code >= 1 && code <= 3) base = [24, 77, 42];
+  else if (code >= 4 && code <= 11) base = [42, 79, 48];
+  else if (code >= 12 && code <= 20) base = [91, 104, 58];
+  else if (code === 21) base = [139, 112, 69];
+  else if (code >= 22 && code <= 26) base = [105, 118, 94];
+  else if (code === 27) base = [119, 111, 94];
+  else base = [78, 92, 59];
+  const vitality = 0.78 + vigor * 0.34;
+  return [
+    clamp(base[0] * vitality + rugged * 14, 0, 255),
+    clamp(base[1] * vitality + rugged * 18, 0, 255),
+    clamp(base[2] * vitality + rugged * 10, 0, 255)
+  ];
+}
+
+function colorEarthPixel(data, offset, latitude, longitude, state, climate = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35) {
   const elevation = bedrockElevationAt(latitude, longitude);
   const seaLevel = Number.isFinite(state.seaLevel) ? state.seaLevel : 0;
   const land = elevation > seaLevel;
@@ -48,6 +69,7 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate = nul
 
   const absLat = Math.abs(latitude);
   const branchClimate = hydroClimate?.sample?.(state, latitude, longitude, spatialDetail) ?? null;
+  const vegetationState = vegetation?.sample?.(state, latitude, longitude, spatialDetail) ?? null;
   const checkpointClimate = branchClimate ? null : climate?.annualAt?.(latitude, longitude) ?? null;
   const checkpointGlobalAnomaly = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
   const freeEarthTemperatureDelta = (state.temperatureAnomaly ?? checkpointGlobalAnomaly) - checkpointGlobalAnomaly;
@@ -67,10 +89,12 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate = nul
   let green;
   let blue;
 
-  if (absLat > 73 - state.iceIndex * 9 || temperature < -10) {
+  if (vegetationState?.biomeCode === 28 || absLat > 73 - state.iceIndex * 9 || temperature < -10) {
     red = 182 + rugged * 18;
     green = 198 + rugged * 15;
     blue = 190 + rugged * 13;
+  } else if (vegetationState) {
+    [red, green, blue] = vegetationColor(vegetationState, rugged);
   } else if (temperature < 2) {
     red = 82 + rugged * 12;
     green = 93 + rugged * 13;
@@ -95,7 +119,7 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate = nul
   data[offset + 3] = 255;
 }
 
-function createEarthTexture(state, climate = null, hydroClimate = null, spatialDetail = 0.35) {
+function createEarthTexture(state, climate = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35) {
   const canvas = document.createElement("canvas");
   canvas.width = TEXTURE_WIDTH;
   canvas.height = TEXTURE_HEIGHT;
@@ -106,7 +130,7 @@ function createEarthTexture(state, climate = null, hydroClimate = null, spatialD
     for (let x = 0; x < TEXTURE_WIDTH; x += 1) {
       const offset = (y * TEXTURE_WIDTH + x) * 4;
       const longitude = (x / (TEXTURE_WIDTH - 1)) * 360 - 180;
-      colorEarthPixel(image.data, offset, latitude, longitude, state, climate, hydroClimate, spatialDetail);
+      colorEarthPixel(image.data, offset, latitude, longitude, state, climate, hydroClimate, vegetation, spatialDetail);
     }
   }
   context.putImageData(image, 0, 0);
@@ -180,6 +204,7 @@ export class EarthView {
     this.lastState = initialState;
     this.climate = null;
     this.hydroClimate = null;
+    this.vegetation = null;
     this.spatialDetail = 0.35;
     this.pointerStart = null;
     this.selectedNormal = null;
@@ -312,11 +337,17 @@ export class EarthView {
     this.updateState(this.lastState, true, this.spatialDetail);
   }
 
+  setVegetation(vegetation, spatialDetail = this.spatialDetail) {
+    this.vegetation = vegetation;
+    this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
+    this.updateState(this.lastState, true, this.spatialDetail);
+  }
+
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
     if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
-    const next = createEarthTexture(state, this.climate, this.hydroClimate, this.spatialDetail);
+    const next = createEarthTexture(state, this.climate, this.hydroClimate, this.vegetation, this.spatialDetail);
     this.earthMaterial.map?.dispose();
     this.earthMaterial.map = next;
     this.earthMaterial.needsUpdate = true;

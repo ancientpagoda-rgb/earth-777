@@ -14,8 +14,8 @@ export const SOURCES = Object.freeze([
     authors: "Krapp et al. / Scientific Data (2021)",
     url: "https://doi.org/10.1038/s41597-021-01009-3",
     license: "CC BY 4.0",
-    role: "Published 0.5° monthly temperature, precipitation, and cloud-cover reconstruction at the 777 ka checkpoint; all 36 source files are SHA-256 pinned in the climate manifest.",
-    status: "integrated · 777 ka monthly 360 × 720 climate"
+    role: "Published 0.5° monthly climate plus BIOME4 biome, annual NPP/LAI, and signed monthly NPP at the 777 ka checkpoint; original author inputs are SHA-256 pinned in reproducible manifests.",
+    status: "integrated · 777 ka climate + BIOME4 vegetation"
   },
   {
     id: "priestley-taylor-1972",
