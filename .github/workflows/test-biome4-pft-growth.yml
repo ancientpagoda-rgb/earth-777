@@ -1,0 +1,37 @@
+name: Test BIOME4 PFT growth optimizer
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-lai-npp-optimization
+    paths:
+      - src/sim/Biome4PftGrowth.js
+      - test/pft-growth-optimization.test.js
+      - .github/workflows/test-biome4-pft-growth.yml
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-lai-npp-optimization
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Remove transient workflow after green run
+        run: |
+          rm -f .github/workflows/test-biome4-pft-growth.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove transient BIOME4 growth test workflow'
+          git push origin HEAD:agent/biome4-pft-lai-npp-optimization
