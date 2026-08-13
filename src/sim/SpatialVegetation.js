@@ -236,11 +236,19 @@ export class SpatialVegetation {
           });
         }
       }
+      const fireDryness = laiNppOptimization?.fireDryness ?? null;
+      const fireDrynessStatus = fireDryness
+        ? "resolved"
+        : laiNppOptimization
+          ? "nonproductive-no-optimum"
+          : "not-optimized";
       return Object.freeze({
         ...diagnostic,
         climateEligibilityStatus: isClimateEligible ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown",
         virtualHydrology,
-        laiNppOptimization
+        laiNppOptimization,
+        fireDryness,
+        fireDrynessStatus
       });
     });
     const raingreenDiscrepancyPftIds = candidates
@@ -257,8 +265,11 @@ export class SpatialVegetation {
       hydrologyFeedbackEnabled: false,
       parallelVirtualHydrologyEnabled: true,
       laiNppOptimizationEnabled: true,
+      fireDrynessDiagnosticsEnabled: true,
       competitiveOccupancyEnabled: false,
       optimizedCandidateCount: candidates.filter((candidate) => candidate.laiNppOptimization).length,
+      fireDrynessResolvedCount: candidates.filter((candidate) => candidate.fireDrynessStatus === "resolved").length,
+      nonproductiveOptimizedCandidateCount: candidates.filter((candidate) => candidate.fireDrynessStatus === "nonproductive-no-optimum").length,
       candidateCount: candidates.length,
       resolvedCount: candidates.filter((candidate) => candidate.status === "resolved-diagnostic").length,
       candidatePftIds: Object.freeze(candidateIds),
@@ -302,11 +313,12 @@ export class SpatialVegetation {
       pftHydrologyFeedbackEnabled: false,
       pftParallelVirtualHydrologyIntegrated: true,
       pftLaiNppOptimizationIntegrated: true,
+      pftFireDrynessDiagnosticsIntegrated: true,
       pftCompetitionEnabled: false,
       categoricalBiomeTransitionsEnabled: false,
       snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",
       absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),
-      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, parallel conductance/equilibrium-demand water trials, and selected-region source-operational LAI/NPP optimization for eligible candidates; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled"
+      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, parallel conductance/equilibrium-demand water trials, and selected-region source-operational LAI/NPP optimization plus fire/top-layer-dryness diagnostics for productive eligible candidates, with nonproductive eligible candidates explicitly unresolved for fire/dryness rather than fabricated; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled"
     });
   }
 }
