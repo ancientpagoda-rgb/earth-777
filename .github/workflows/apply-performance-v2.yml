@@ -1,0 +1,32 @@
+name: Apply Earth 777 performance v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/performance-compositing-v2]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/performance-compositing-v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: python3 .github/scripts/patch-performance-v2.py
+      - run: npm test
+      - run: npm run build
+      - name: Commit performance files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main.js src/render/earth-view.js styles.css
+          git commit -m "Eliminate WebGL interaction stalls"
+          git push origin HEAD:agent/performance-compositing-v2
