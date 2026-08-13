@@ -97,7 +97,7 @@ test("Krapp branch climate feeds a closed regional water budget", () => {
   assert.ok(Number.isFinite(sample.runoffMmPerYear));
   assert.ok(Number.isFinite(sample.soilWaterStorageMm));
   assert.ok(Math.abs(sample.waterBalanceResidualMm) < 1e-6);
-  assert.match(sample.epistemicStatus, /closed soil-water bucket/);
+  assert.match(sample.epistemicStatus, /closed .*water budget/);
 
   const route = hydrology.routeRunoff(state, 0, 20, 0.65, { maxSteps: 60 });
   assert.ok(route);
