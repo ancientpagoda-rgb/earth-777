@@ -41,18 +41,24 @@ export function regionalState(
     actualEvapotranspiration: Number.isFinite(hydro.actualEvapotranspirationMmPerYear)
       ? round(hydro.actualEvapotranspirationMmPerYear, 0)
       : null,
+    rainfall: Number.isFinite(hydro.rainfallMmPerYear) ? round(hydro.rainfallMmPerYear, 0) : null,
+    snowfall: Number.isFinite(hydro.snowfallMmPerYear) ? round(hydro.snowfallMmPerYear, 0) : null,
+    snowmelt: Number.isFinite(hydro.snowmeltMmPerYear) ? round(hydro.snowmeltMmPerYear, 0) : null,
+    snowWaterEquivalent: Number.isFinite(hydro.snowWaterEquivalentMm) ? round(hydro.snowWaterEquivalentMm, 0) : null,
+    meanSnowWaterEquivalent: Number.isFinite(hydro.meanSnowWaterEquivalentMm) ? round(hydro.meanSnowWaterEquivalentMm, 0) : null,
+    maximumSnowWaterEquivalent: Number.isFinite(hydro.maximumSnowWaterEquivalentMm) ? round(hydro.maximumSnowWaterEquivalentMm, 0) : null,
     soilWaterStorage: Number.isFinite(hydro.soilWaterStorageMm) ? round(hydro.soilWaterStorageMm, 0) : null,
     waterBalanceResidual: Number.isFinite(hydro.waterBalanceResidualMm) ? hydro.waterBalanceResidualMm : null,
     biome: biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture),
     climateSource: closedBudget
-      ? "krapp-777 + branch-hydroclimate + closed-water-budget"
+      ? "krapp-777 + branch-hydroclimate + closed-soil-snow-water-budget"
       : "krapp-777 + branch-hydroclimate",
     checkpointClimate: globalState.elapsedYears <= 0,
     gridSpacingDegrees: hydro.gridSpacingDegrees,
     hydroClimatePolicy: hydro.policy,
     waterBalancePolicy: hydro.waterBalancePolicy ?? null,
     confidence: closedBudget
-      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed soil-water bucket conserve precipitation into AET, runoff, and storage change`
+      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO PET plus a conservative soil+snow bucket partitions precipitation into rain, snow storage/melt, AET, runoff, and storage change; snow thresholds/melt factor are provisional priors`
       : globalState.elapsedYears > 0
         ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies`
         : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`
