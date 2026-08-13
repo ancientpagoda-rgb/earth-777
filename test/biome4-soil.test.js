@@ -48,6 +48,21 @@ function firstExtremeSoilCell() {
   return null;
 }
 
+function firstRuntimeSoilLocation(spatialClimate, state, spatialDetail = 0.65) {
+  // Choose after CWF grid materialization, because the runtime soil query is
+  // made at the materialized climate-cell location rather than the arbitrary
+  // pointer coordinate supplied by the caller.
+  for (let latitude = -60; latitude <= 70; latitude += 5) {
+    for (let longitude = -175; longitude <= 175; longitude += 5) {
+      const materialized = spatialClimate.sample(state, latitude, longitude, spatialDetail);
+      if (!materialized) continue;
+      const profile = soil.profileAt(materialized.latitude, materialized.longitude);
+      if (profile.validSoil) return materialized;
+    }
+  }
+  throw new Error("Could not find a climate-forced CWF grid cell with valid BIOME4 soil");
+}
+
 function syntheticMonthlyClimate({ precipitationMmPerYear = 1200, temperatureCelsius = 16, cloudCoverPercent = 45 } = {}) {
   return Array.from({ length: 12 }, () => ({
     precipitationMmPerYear,
@@ -157,9 +172,10 @@ test("soil capacity and percolation materially affect the same climate forcing",
 
 test("MassConservingHydrology applies BIOME4 soil without breaking river-network closure", () => {
   const state = checkpointState();
-  const hydrology = new MassConservingHydrology(new SpatialHydroClimate(climate), soil);
-  const valid = firstCellWithStatus(0);
-  const local = hydrology.sample(state, valid.latitude, valid.longitude, 0.65);
+  const spatialClimate = new SpatialHydroClimate(climate);
+  const hydrology = new MassConservingHydrology(spatialClimate, soil);
+  const runtimeLocation = firstRuntimeSoilLocation(spatialClimate, state, 0.65);
+  const local = hydrology.sample(state, runtimeLocation.latitude, runtimeLocation.longitude, 0.65);
   assert.ok(local);
   assert.equal(local.soilProfileApplied, true);
   assert.equal(local.soilSource, BIOME4_SOIL_META.id);
