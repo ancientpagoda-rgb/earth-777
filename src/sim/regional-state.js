@@ -16,7 +16,7 @@ export function regionalState(
   globalState,
   latitude,
   longitude,
-  { climateLayer = null, hydroClimate = null, spatialDetail = 0.35 } = {}
+  { climateLayer = null, hydroClimate = null, conservativeWater = null, spatialDetail = 0.35 } = {}
 ) {
   const hydro = hydroClimate?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
   if (!hydro || !Number.isFinite(hydro.temperatureCelsius)) {
@@ -24,6 +24,17 @@ export function regionalState(
   }
 
   const moisture = Number.isFinite(hydro.soilMoistureIndex) ? hydro.soilMoistureIndex : 0.5;
+  const routed = conservativeWater && Number.isFinite(conservativeWater.actualEtMm)
+    ? conservativeWater
+    : null;
+  const confidence = routed
+    ? globalState.elapsedYears > 0
+      ? `Krapp 777 ka checkpoint + model-derived branch climate; conservative water balance routed at ${routed.routingSpacingDegrees}° over the ETOPO modern-bedrock baseline`
+      : `Krapp 777 ka checkpoint climate; conservative water balance routed at ${routed.routingSpacingDegrees}° over the ETOPO modern-bedrock baseline`
+    : globalState.elapsedYears > 0
+      ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies here`
+      : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff remain model-derived diagnostic proxies here`;
+
   return Object.freeze({
     latitude,
     longitude,
@@ -31,14 +42,24 @@ export function regionalState(
     annualPrecipitation: Number.isFinite(hydro.precipitationMmPerYear) ? round(hydro.precipitationMmPerYear, 0) : null,
     cloudCover: Number.isFinite(hydro.cloudCoverPercent) ? round(hydro.cloudCoverPercent, 1) : null,
     moisture: round(moisture, 2),
-    runoffPotential: Number.isFinite(hydro.runoffPotentialMmPerYear) ? round(hydro.runoffPotentialMmPerYear, 0) : null,
+    runoffPotential: routed
+      ? null
+      : Number.isFinite(hydro.runoffPotentialMmPerYear) ? round(hydro.runoffPotentialMmPerYear, 0) : null,
+    annualRunoff: routed ? round(routed.localRunoffMm, 0) : null,
+    actualEt: routed ? round(routed.actualEtMm, 0) : null,
+    meanDischarge: routed ? round(routed.meanDischargeM3s, 2) : null,
+    peakMonthlyDischarge: routed ? round(routed.peakMonthlyDischargeM3s, 2) : null,
+    snowStorage: routed ? round(routed.snowStorageMm, 0) : null,
+    downstream: routed?.downstream ?? null,
+    waterRoutingSpacingDegrees: routed?.routingSpacingDegrees ?? null,
+    waterBudgetRelativeError: routed?.globalWaterBudgetRelativeError ?? null,
+    routingBudgetRelativeError: routed?.routingBudgetRelativeError ?? null,
     biome: biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture),
     climateSource: "krapp-777 + branch-hydroclimate",
     checkpointClimate: globalState.elapsedYears <= 0,
     gridSpacingDegrees: hydro.gridSpacingDegrees,
     hydroClimatePolicy: hydro.policy,
-    confidence: globalState.elapsedYears > 0
-      ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff are diagnostic proxies`
-      : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`
+    conservativeHydrologyPolicy: routed?.policy ?? null,
+    confidence
   });
 }
