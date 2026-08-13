@@ -129,9 +129,6 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
   climateDetails.push(`soil moisture ${Math.round(region.moisture * 100)}%`);
-  if (Number.isFinite(region.snowfall) && region.snowfall >= 1) climateDetails.push(`snowfall ${Math.round(region.snowfall).toLocaleString()} mm SWE/yr`);
-  if (Number.isFinite(region.snowmelt) && region.snowmelt >= 1) climateDetails.push(`snowmelt ${Math.round(region.snowmelt).toLocaleString()} mm/yr`);
-  if (Number.isFinite(region.maximumSnowWaterEquivalent) && region.maximumSnowWaterEquivalent >= 1) climateDetails.push(`max snowpack ${Math.round(region.maximumSnowWaterEquivalent).toLocaleString()} mm SWE`);
   if (Number.isFinite(region.runoffPotential)) climateDetails.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
   if (river) {
     climateDetails.push(`river ${river.meanDischargeM3s.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³/s`);
@@ -216,7 +213,7 @@ ui.sourcesModal.addEventListener("click", (event) => {
   if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open");
 });
 addEventListener("keydown", (event) => {
-  if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open"));
+  if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open");
   if (event.code === "Space" && event.target === document.body) {
     event.preventDefault();
     setPlaying(!playing);
