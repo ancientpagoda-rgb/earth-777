@@ -1,0 +1,98 @@
+name: Integrate parallel PFT hydrology trials
+
+on:
+  push:
+    branches:
+      - agent/biome4-parallel-pft-hydrology
+    paths:
+      - src/sim/Biome4VirtualPftHydrology.js
+      - test/pft-virtual-hydrology.test.js
+      - .github/workflows/integrate-parallel-pft-hydrology.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-parallel-pft-hydrology
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Wire virtual trials into selected-region PFT diagnostics
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/sim/SpatialVegetation.js')
+          s=p.read_text()
+          s=s.replace(
+            'import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";\n',
+            'import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";\nimport { runBiome4VirtualPftHydrologyTrial } from "./Biome4VirtualPftHydrology.js";\n',
+            1
+          )
+          old='''    const candidates = candidateIds.map((pftId) => Object.freeze({
+              ...evaluateBiome4PftWaterPhenology(pftId, {
+                latitude: trace.latitude,
+                monthlyTemperatureCelsius: trace.monthlyTemperatureCelsius,
+                monthlyCloudCoverPercent: trace.monthlyCloudCoverPercent,
+                dailyWaterTrace: trace.dailyWaterTrace
+              }),
+              climateEligibilityStatus: climateEligible.has(pftId) ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown"
+            }));
+          '''
+          new='''    const soilProfile = this.hydrology.soil?.profileAt?.(trace.latitude, trace.longitude) ?? null;
+            const candidates = candidateIds.map((pftId) => {
+              const diagnostic = evaluateBiome4PftWaterPhenology(pftId, {
+                latitude: trace.latitude,
+                monthlyTemperatureCelsius: trace.monthlyTemperatureCelsius,
+                monthlyCloudCoverPercent: trace.monthlyCloudCoverPercent,
+                dailyWaterTrace: trace.dailyWaterTrace
+              });
+              let virtualHydrology = null;
+              if (diagnostic.status === "resolved-diagnostic" && soilProfile?.validSoil) {
+                virtualHydrology = runBiome4VirtualPftHydrologyTrial({
+                  pftId,
+                  lai: annual.lai ?? annual.checkpointLai ?? 0,
+                  soilProfile,
+                  baselineDailyWaterTrace: trace.dailyWaterTrace,
+                  phenologyDaily: diagnostic.daily
+                });
+              }
+              return Object.freeze({
+                ...diagnostic,
+                climateEligibilityStatus: climateEligible.has(pftId) ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown",
+                virtualHydrology
+              });
+            });
+          '''
+          assert old in s, 'candidate map block not found'
+          s=s.replace(old,new,1)
+          s=s.replace('      hydrologyFeedbackEnabled: false,\n      candidateCount: candidates.length,', '      hydrologyFeedbackEnabled: false,\n      parallelVirtualHydrologyEnabled: true,\n      candidateCount: candidates.length,',1)
+          s=s.replace(
+            '      epistemicStatus: "BIOME4-parameter daily rooting, water-supply and source-operational phenology diagnostics over Earth 777\'s conserved two-layer soil trace; no PFT-specific transpiration feedback, LAI/NPP optimization, competition, or categorical biome transition is enabled."',
+            '      epistemicStatus: "BIOME4-parameter daily rooting/phenology diagnostics plus independent parallel PFT water trials over the same climate and soil forcing; each candidate closes its own water budget and cannot alter shared Earth hydrology before competition selects occupancy. LAI/NPP optimization, competition, and categorical biome transitions remain disabled."'
+          )
+          s=s.replace('      pftHydrologyFeedbackEnabled: false,\n', '      pftHydrologyFeedbackEnabled: false,\n      pftParallelVirtualHydrologyIntegrated: true,\n')
+          s=s.replace(
+            '      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, and opt-in daily PFT rooting/water/phenology diagnostics; no claim of full BIOME4 PFT competition or categorical biome transitions after 777 ka"',
+            '      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, and parallel mass-conserving candidate water trials; shared hydrology feedback, PFT competition and categorical biome transitions remain disabled"'
+          )
+          p.write_text(s)
+          PY
+      - run: npm test
+      - run: npm run build
+      - name: Commit integration and remove transient workflow
+        run: |
+          rm -f .github/workflows/integrate-parallel-pft-hydrology.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Integrate parallel mass-conserving PFT water trials'
+          git push origin HEAD:agent/biome4-parallel-pft-hydrology
