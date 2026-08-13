@@ -64,10 +64,21 @@ test("selected-region PFT diagnostics consume the conserved trace without enabli
   assert.equal(diagnostics.checkpointCategoryRetained, true);
   assert.equal(diagnostics.hydrologyFeedbackEnabled, false);
   assert.equal(diagnostics.parallelVirtualHydrologyEnabled, true);
+  assert.equal(diagnostics.laiNppOptimizationEnabled, true);
+  assert.equal(diagnostics.competitiveOccupancyEnabled, false);
   for (const candidate of diagnostics.candidates) {
     if (!candidate.virtualHydrology) continue;
     assert.ok(Math.abs(candidate.virtualHydrology.massBalanceResidualMm) < 1e-6);
     assert.equal(candidate.virtualHydrology.sharedHydrologyMutated, false);
+    if (candidate.climateEligibilityStatus === "eligible") {
+      assert.ok(candidate.laiNppOptimization);
+      assert.equal(candidate.laiNppOptimization.evaluationCount, 16);
+      assert.equal(candidate.laiNppOptimization.checkpointCategoryMutationEnabled, false);
+      assert.ok(Number.isFinite(candidate.laiNppOptimization.optimumNpp));
+      assert.ok(candidate.laiNppOptimization.optimumLai >= 0);
+    } else {
+      assert.equal(candidate.laiNppOptimization, null);
+    }
   }
   assert.ok(diagnostics.candidateCount >= diagnostics.resolvedCount);
   assert.ok(Array.isArray(diagnostics.candidates));
@@ -82,5 +93,8 @@ test("PFT diagnostics are deterministic and cached separately from lightweight v
   const info = spatial.diagnostics(state, 0.9);
   assert.equal(info.pftWaterPhenologyIntegrated, true);
   assert.equal(info.pftHydrologyFeedbackEnabled, false);
+  assert.equal(info.pftLaiNppOptimizationIntegrated, true);
+  assert.equal(info.pftCompetitionEnabled, false);
+  assert.equal(info.categoricalBiomeTransitionsEnabled, false);
   assert.ok(info.cachedPftDiagnostics >= 1);
 });

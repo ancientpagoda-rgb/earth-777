@@ -217,7 +217,7 @@ function runSourceHydrology({
       let dayDrainage = 0;
       let percolation = 0;
       if (temperature > -10) {
-        percolation = upperPercolationMm(topWetness, soil.topPercolationCoefficient);
+        percolation = Math.min(topStorage, upperPercolationMm(topWetness, soil.topPercolationCoefficient));
         const extraction = conservativeSourceExtraction(topStorage, bottomStorage, flux.actualAetMm, root);
         dayAet = extraction.removed;
         underflowMm += extraction.underflowMm;
