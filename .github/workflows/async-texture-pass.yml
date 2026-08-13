@@ -1,13 +1,48 @@
 name: Async texture performance pass
-on: workflow_dispatch
+on:
+  push:
+    branches: [agent/performance-async-textures]
 jobs:
   patch:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/performance-async-textures
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci
+      - name: Patch texture scheduling
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/render/earth-view.js')
+          s=p.read_text()
+          s=s.replace('const MIN_TEXTURE_REFRESH_INTERVAL_MS = 1_500;\n','const MIN_TEXTURE_REFRESH_INTERVAL_MS = 1_500;\nconst TEXTURE_BUILD_BUDGET_MS = 5;\n',1)
+          marker='function createCloudTexture(state, climate = null, hydroClimate = null, spatialDetail = 0.35) {'
+          async_block='''function yieldForTextureBuild() {\n  return new Promise((resolve) => {\n    if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 40 });\n    else setTimeout(resolve, 0);\n  });\n}\n\nasync function createEarthTextureAsync(state, climate = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35, shouldCancel = () => false) {\n  const canvas = document.createElement("canvas");\n  canvas.width = TEXTURE_WIDTH;\n  canvas.height = TEXTURE_HEIGHT;\n  const context = canvas.getContext("2d");\n  const image = context.createImageData(TEXTURE_WIDTH, TEXTURE_HEIGHT);\n  let sliceStarted = performance.now();\n  for (let y = 0; y < TEXTURE_HEIGHT; y += 1) {\n    const latitude = 90 - (y / (TEXTURE_HEIGHT - 1)) * 180;\n    for (let x = 0; x < TEXTURE_WIDTH; x += 1) {\n      const offset = (y * TEXTURE_WIDTH + x) * 4;\n      const longitude = (x / (TEXTURE_WIDTH - 1)) * 360 - 180;\n      colorEarthPixel(image.data, offset, latitude, longitude, state, climate, hydroClimate, vegetation, spatialDetail);\n    }\n    if (shouldCancel()) return null;\n    if (performance.now() - sliceStarted >= TEXTURE_BUILD_BUDGET_MS) {\n      await yieldForTextureBuild();\n      if (shouldCancel()) return null;\n      sliceStarted = performance.now();\n    }\n  }\n  context.putImageData(image, 0, 0);\n  const texture = new THREE.CanvasTexture(canvas);\n  texture.colorSpace = THREE.SRGBColorSpace;\n  texture.anisotropy = 4;\n  return texture;\n}\n\n'''
+          if marker not in s: raise SystemExit('cloud marker missing')
+          s=s.replace(marker,async_block+marker,1)
+          s=s.replace('    this.interacting = false;\n    this.lastTextureRefreshMs = 0;\n','    this.interacting = false;\n    this.lastTextureRefreshMs = 0;\n    this.textureBuildVersion = 0;\n    this.textureBuildInFlight = false;\n',1)
+          s=s.replace('    this.controls.addEventListener("start", () => {\n      this.interacting = true;\n','    this.controls.addEventListener("start", () => {\n      this.interacting = true;\n      this.textureBuildVersion += 1;\n      this.textureBuildInFlight = false;\n',1)
+          a=s.index('  updateState(state, force = false, spatialDetail = this.spatialDetail) {')
+          b=s.index('\n  resize() {',a)
+          new='''  updateState(state, force = false, spatialDetail = this.spatialDetail) {\n    this.lastState = state;\n    this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);\n    const now = performance.now();\n    if (!force && this.interacting) return;\n    if (!force && this.textureBuildInFlight) return;\n    if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;\n    if (!force && now - this.lastTextureRefreshMs < MIN_TEXTURE_REFRESH_INTERVAL_MS) return;\n    const buildVersion = ++this.textureBuildVersion;\n    const buildState = state;\n    const buildDetail = this.spatialDetail;\n    this.textureBuildInFlight = true;\n    this.lastTextureRefreshMs = now;\n    createEarthTextureAsync(buildState, this.climate, this.hydroClimate, this.vegetation, buildDetail, () => buildVersion !== this.textureBuildVersion || this.interacting).then((next) => {\n      if (!next || buildVersion !== this.textureBuildVersion || this.interacting) { next?.dispose(); return; }\n      this.earthMaterial.map?.dispose();\n      this.earthMaterial.map = next;\n      this.earthMaterial.needsUpdate = true;\n      if (this.hydroClimate) {\n        const nextClouds = createCloudTexture(buildState, this.climate, this.hydroClimate, buildDetail);\n        this.cloudMaterial.map?.dispose();\n        this.cloudMaterial.map = nextClouds;\n        this.cloudMaterial.needsUpdate = true;\n      }\n      this.lastTextureYear = buildState.yearBP;\n      this.lastTextureRefreshMs = performance.now();\n    }).catch((error) => console.warn("Earth texture refresh failed; keeping the previous texture.", error)).finally(() => {\n      if (buildVersion === this.textureBuildVersion) this.textureBuildInFlight = false;\n    });\n  }\n'''
+          s=s[:a]+new+s[b:]
+          p.write_text(s)
+          PY
       - run: npm test
       - run: npm run build
+      - name: Commit clean result
+        run: |
+          rm -f .github/workflows/async-texture-pass.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/render/earth-view.js .github/workflows/async-texture-pass.yml
+          git commit -m "Make scientific texture refresh asynchronous"
+          git push origin HEAD:agent/performance-async-textures
