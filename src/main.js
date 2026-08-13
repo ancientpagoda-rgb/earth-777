@@ -1,6 +1,8 @@
 import { SOURCES } from "./data/provenance.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
-import { FreeEarthEngine, regionalState } from "./sim/free-earth.js";
+import { FreeEarthEngine } from "./sim/free-earth.js";
+import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
+import { regionalState } from "./sim/regional-state.js";
 import { EarthView } from "./render/earth-view.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -37,6 +39,7 @@ let lastFrame = performance.now();
 let lastUiUpdate = 0;
 let selected = null;
 let climate777 = null;
+let hydroClimate = null;
 const engine = new FreeEarthEngine(seed);
 const earthView = new EarthView($("#earth"), engine.snapshot(), handleRegionSelect);
 
@@ -47,6 +50,11 @@ function formatYear(yearBP) {
 function signed(value, digits = 2) {
   const rounded = Number(value).toFixed(digits);
   return Number(value) > 0 ? `+${rounded}` : rounded.replace("-", "−");
+}
+
+function spatialDetailFor(system, fallback = 0.35) {
+  const target = engine.fidelityDiagnostics().targets.find((entry) => entry.id === system);
+  return Number.isFinite(target?.spatialDetail) ? target.spatialDetail : fallback;
 }
 
 function iceDescription(index) {
@@ -79,7 +87,7 @@ function updateInterface(state, forceTexture = false) {
   ui.elapsed.textContent = state.elapsedYears < 1 ? "checkpoint" : `+${Math.round(state.elapsedYears).toLocaleString()} years`;
   updateJournal(state);
   if (selected) renderRegion(state, selected.latitude, selected.longitude);
-  earthView.updateState(state, forceTexture);
+  earthView.updateState(state, forceTexture, spatialDetailFor("hydrology"));
 }
 
 function updateJournal(state) {
@@ -100,12 +108,18 @@ function updateJournal(state) {
 
 function handleRegionSelect(region) {
   selected = region;
+  engine.setObserverRelevance({ climate: 1, hydrology: 1, vegetation: 0.8 });
   ui.surface.disabled = false;
   renderRegion(engine.snapshot(), region.latitude, region.longitude);
 }
 
 function renderRegion(state, latitude, longitude) {
-  const region = regionalState(state, latitude, longitude, climate777);
+  const regionalDetail = Math.max(spatialDetailFor("hydrology"), 0.82);
+  const region = regionalState(state, latitude, longitude, {
+    climateLayer: climate777,
+    hydroClimate,
+    spatialDetail: regionalDetail
+  });
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
   const lonLabel = `${Math.abs(longitude).toFixed(1)}°${longitude >= 0 ? "E" : "W"}`;
   ui.locationTitle.textContent = region.biome;
@@ -113,7 +127,8 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
   climateDetails.push(`moisture index ${Math.round(region.moisture * 100)}%`);
-  ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Estimated climate"}: ${climateDetails.join(" · ")}.`;
+  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`runoff potential ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${climateDetails.join(" · ")}.`;
   ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}`;
 }
 
@@ -126,6 +141,7 @@ function setPlaying(next) {
 
 function setSeed(nextSeed) {
   seed = Number(nextSeed) >>> 0;
+  engine.setObserverRelevance({});
   engine.reset(seed);
   selected = null;
   ui.surface.disabled = true;
@@ -213,7 +229,8 @@ updateInterface(engine.snapshot(), true);
 loadKrapp777Climate()
   .then((layer) => {
     climate777 = layer;
-    earthView.setClimate(layer);
+    hydroClimate = new SpatialHydroClimate(layer);
+    earthView.setHydroClimate(hydroClimate, spatialDetailFor("hydrology"));
     if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
   })
   .catch((error) => console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error));
