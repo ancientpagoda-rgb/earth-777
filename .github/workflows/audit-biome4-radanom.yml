@@ -1,0 +1,34 @@
+name: Audit BIOME4 radiation anomaly
+
+on:
+  push:
+    branches:
+      - agent/biome4-vpd-transpiration
+    paths:
+      - .github/workflows/audit-biome4-radanom.yml
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-vpd-transpiration
+      - name: Print radiation-anomaly source use
+        run: |
+          curl -fsSL 'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' -o /tmp/b.tgz
+          mkdir -p /tmp/b && tar -xzf /tmp/b.tgz -C /tmp/b
+          f=$(find /tmp/b -name biome4.f | head -1)
+          grep -n -C 5 'radanom' "$f" | head -180
+      - name: Remove transient workflow
+        run: |
+          rm -f .github/workflows/audit-biome4-radanom.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove transient BIOME4 radiation-anomaly audit'
+          git push origin HEAD:agent/biome4-vpd-transpiration
