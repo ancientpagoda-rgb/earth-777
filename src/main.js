@@ -1,6 +1,7 @@
 import { SOURCES } from "./data/provenance.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
 import { loadKrapp777Vegetation } from "./data/krapp-777-vegetation.js";
+import { loadBiome4Soil } from "./data/biome4-soil.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
 import { MassConservingHydrology } from "./sim/MassConservingHydrology.js";
@@ -135,7 +136,14 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
   climateDetails.push(`soil moisture ${Math.round(region.moisture * 100)}%`);
-  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  if (region.soilProfileApplied && Number.isFinite(region.soilWaterCapacity)) {
+    climateDetails.push(`BIOME4 soil capacity ${Math.round(region.soilWaterCapacity).toLocaleString()} mm`);
+  } else if (region.soilStatus && region.soilStatus !== "unavailable") {
+    climateDetails.push(`BIOME4 soil ${region.soilStatus} · fallback bucket`);
+  }
+  if (Number.isFinite(region.surfaceRunoff)) climateDetails.push(`surface runoff ${Math.round(region.surfaceRunoff).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.deepDrainage)) climateDetails.push(`deep drainage ${Math.round(region.deepDrainage).toLocaleString()} mm/yr`);
+  if (Number.isFinite(region.runoffPotential) && !Number.isFinite(region.surfaceRunoff)) climateDetails.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.npp)) climateDetails.push(`BIOME4 NPP ${region.npp.toFixed(1)} source units`);
   if (Number.isFinite(region.lai)) climateDetails.push(`LAI ${region.lai.toFixed(2)}`);
   if (Number.isFinite(region.vegetationTransitionPressure) && region.vegetationTransitionPressure > 0.02) {
@@ -251,7 +259,13 @@ updateInterface(engine.snapshot(), true);
 loadKrapp777Climate()
   .then(async (climateLayer) => {
     climate777 = climateLayer;
-    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer));
+    let soilLayer = null;
+    try {
+      soilLayer = await loadBiome4Soil();
+    } catch (error) {
+      console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error);
+    }
+    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
     const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
     earthView.setHydroClimate(hydroClimate, surfaceDetail);
     try {

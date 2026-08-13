@@ -3,7 +3,8 @@ const round = (value, digits = 4) => Number(value.toFixed(digits));
 
 export const PRIESTLEY_TAYLOR_ALPHA = 1.26;
 export const DEFAULT_SOIL_WATER_CAPACITY_MM = 150;
-export const WATER_BALANCE_POLICY = "priestley-taylor-soil-bucket-v1";
+export const WATER_BALANCE_POLICY = "priestley-taylor-spatial-soil-v2";
+export const BIOME4_TWO_LAYER_WATER_POLICY = "biome4-two-layer-daily-water-v1";
 
 const SOLAR_CONSTANT_MJ_M2_MIN = 0.0820;
 const LATENT_HEAT_MJ_KG = 2.45;
@@ -79,7 +80,7 @@ function climateMonthInput(entry, monthIndex) {
   };
 }
 
-function simulateYear(monthlyClimate, latitude, elevationMeters, startStorageMm, capacityMm) {
+function simulateSingleLayerYear(monthlyClimate, latitude, elevationMeters, startStorageMm, capacityMm) {
   let storage = clamp(startStorageMm, 0, capacityMm);
   const startStorage = storage;
   let totalPrecipitation = 0;
@@ -117,6 +118,8 @@ function simulateYear(monthlyClimate, latitude, elevationMeters, startStorageMm,
       potentialEvapotranspirationMm: round(potentialEvapotranspiration, 4),
       actualEvapotranspirationMm: round(actualEvapotranspiration, 4),
       runoffMm: round(runoff, 4),
+      surfaceRunoffMm: round(runoff, 4),
+      deepDrainageMm: 0,
       startStorageMm: round(monthStartStorage, 4),
       endStorageMm: round(storage, 4)
     }));
@@ -125,6 +128,7 @@ function simulateYear(monthlyClimate, latitude, elevationMeters, startStorageMm,
   const storageChange = storage - startStorage;
   const residual = totalPrecipitation - totalActualEvapotranspiration - totalRunoff - storageChange;
   return {
+    policy: WATER_BALANCE_POLICY,
     startStorageMm: startStorage,
     endStorageMm: storage,
     storageChangeMm: storageChange,
@@ -132,10 +136,197 @@ function simulateYear(monthlyClimate, latitude, elevationMeters, startStorageMm,
     potentialEvapotranspirationMm: totalPotentialEvapotranspiration,
     actualEvapotranspirationMm: totalActualEvapotranspiration,
     runoffMm: totalRunoff,
+    surfaceRunoffMm: totalRunoff,
+    deepDrainageMm: 0,
     meanStorageMm: meanStorageAccumulator / 12,
     residualMm: residual,
     months: Object.freeze(months)
   };
+}
+
+function normalizedBiome4SoilProfile(profile) {
+  if (!profile?.validSoil) return null;
+  const topCapacityMm = Math.max(0, Number(profile.topWaterCapacityMm) || 0);
+  const bottomCapacityMm = Math.max(0, Number(profile.bottomWaterCapacityMm) || 0);
+  const topPercolationCoefficient = Math.max(0, Number(profile.topPercolationCoefficient) || 0);
+  const bottomPercolationCoefficient = Math.max(0, Number(profile.bottomPercolationCoefficient) || 0);
+  return Object.freeze({
+    topCapacityMm,
+    bottomCapacityMm,
+    totalCapacityMm: topCapacityMm + bottomCapacityMm,
+    topPercolationCoefficient,
+    bottomPercolationCoefficient,
+    source: profile.source ?? null,
+    status: profile.status ?? "soil"
+  });
+}
+
+function removeEvapotranspiration(topStorage, bottomStorage, demand) {
+  const total = topStorage + bottomStorage;
+  if (total <= 0 || demand <= 0) return { topStorage, bottomStorage, removed: 0 };
+  const removed = Math.min(total, demand);
+  const topShare = topStorage / total;
+  const topRemoval = Math.min(topStorage, removed * topShare);
+  const bottomRemoval = Math.min(bottomStorage, removed - topRemoval);
+  const remainder = removed - topRemoval - bottomRemoval;
+  if (remainder > 0) {
+    const extraTop = Math.min(topStorage - topRemoval, remainder);
+    topStorage -= extraTop;
+    const extraBottom = Math.min(bottomStorage - bottomRemoval, remainder - extraTop);
+    bottomStorage -= extraBottom;
+  }
+  return {
+    topStorage: Math.max(0, topStorage - topRemoval),
+    bottomStorage: Math.max(0, bottomStorage - bottomRemoval),
+    removed
+  };
+}
+
+function dailyPercolation(storage, capacity, coefficient) {
+  if (storage <= 0 || capacity <= 0 || coefficient <= 0) return 0;
+  const wetness = clamp(storage / capacity, 0, 1);
+  // This follows BIOME4's operational daily form: k * wetness^4. The
+  // inputdata.nc metadata says mm/hr, but the BIOME4 daily routine applies
+  // the coefficient once per day without multiplying by 24.
+  return Math.min(storage, coefficient * wetness ** 4);
+}
+
+function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil) {
+  let topStorage = clamp(start.topStorageMm, 0, soil.topCapacityMm);
+  let bottomStorage = clamp(start.bottomStorageMm, 0, soil.bottomCapacityMm);
+  const yearStartTop = topStorage;
+  const yearStartBottom = bottomStorage;
+  let precipitationTotal = 0;
+  let petTotal = 0;
+  let aetTotal = 0;
+  let surfaceRunoffTotal = 0;
+  let deepDrainageTotal = 0;
+  let meanStorageDaySum = 0;
+  let simulatedDays = 0;
+  const months = [];
+
+  for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+    const climate = climateMonthInput(monthlyClimate[monthIndex], monthIndex);
+    const days = Math.max(1, Math.round(MONTH_DAYS[monthIndex]));
+    const monthlyPet = monthlyPotentialEvapotranspirationMm({
+      ...climate,
+      latitude,
+      elevationMeters
+    });
+    const dailyPrecipitation = climate.precipitationMm / days;
+    const dailyPet = monthlyPet / days;
+    const monthStartTop = topStorage;
+    const monthStartBottom = bottomStorage;
+    let monthAet = 0;
+    let monthSurfaceRunoff = 0;
+    let monthDeepDrainage = 0;
+
+    for (let day = 0; day < days; day += 1) {
+      topStorage += dailyPrecipitation;
+
+      const totalCapacity = soil.totalCapacityMm;
+      const totalStorage = topStorage + bottomStorage;
+      const wetness = totalCapacity > 0 ? clamp(totalStorage / totalCapacity, 0, 1) : 0;
+      const aetDemand = dailyPet * (0.15 + 0.85 * Math.sqrt(wetness));
+      const evap = removeEvapotranspiration(topStorage, bottomStorage, aetDemand);
+      topStorage = evap.topStorage;
+      bottomStorage = evap.bottomStorage;
+      monthAet += evap.removed;
+
+      // Any top-layer capacity overflow infiltrates to the lower layer before
+      // the BIOME4-style wetness-dependent percolation transfer is evaluated.
+      if (topStorage > soil.topCapacityMm) {
+        bottomStorage += topStorage - soil.topCapacityMm;
+        topStorage = soil.topCapacityMm;
+      }
+      const topPercolation = dailyPercolation(
+        topStorage,
+        soil.topCapacityMm,
+        soil.topPercolationCoefficient
+      );
+      topStorage -= topPercolation;
+      bottomStorage += topPercolation;
+
+      if (bottomStorage > soil.bottomCapacityMm) {
+        const overflow = bottomStorage - soil.bottomCapacityMm;
+        monthSurfaceRunoff += overflow;
+        bottomStorage = soil.bottomCapacityMm;
+      }
+      const deepDrainage = dailyPercolation(
+        bottomStorage,
+        soil.bottomCapacityMm,
+        soil.bottomPercolationCoefficient
+      );
+      bottomStorage -= deepDrainage;
+      monthDeepDrainage += deepDrainage;
+
+      meanStorageDaySum += topStorage + bottomStorage;
+      simulatedDays += 1;
+    }
+
+    precipitationTotal += climate.precipitationMm;
+    petTotal += monthlyPet;
+    aetTotal += monthAet;
+    surfaceRunoffTotal += monthSurfaceRunoff;
+    deepDrainageTotal += monthDeepDrainage;
+    months.push(Object.freeze({
+      monthIndex,
+      precipitationMm: round(climate.precipitationMm, 4),
+      potentialEvapotranspirationMm: round(monthlyPet, 4),
+      actualEvapotranspirationMm: round(monthAet, 4),
+      runoffMm: round(monthSurfaceRunoff + monthDeepDrainage, 4),
+      surfaceRunoffMm: round(monthSurfaceRunoff, 4),
+      deepDrainageMm: round(monthDeepDrainage, 4),
+      startTopStorageMm: round(monthStartTop, 4),
+      endTopStorageMm: round(topStorage, 4),
+      startBottomStorageMm: round(monthStartBottom, 4),
+      endBottomStorageMm: round(bottomStorage, 4),
+      startStorageMm: round(monthStartTop + monthStartBottom, 4),
+      endStorageMm: round(topStorage + bottomStorage, 4)
+    }));
+  }
+
+  const startStorage = yearStartTop + yearStartBottom;
+  const endStorage = topStorage + bottomStorage;
+  const storageChange = endStorage - startStorage;
+  const runoffTotal = surfaceRunoffTotal + deepDrainageTotal;
+  const residual = precipitationTotal - aetTotal - runoffTotal - storageChange;
+  return {
+    policy: BIOME4_TWO_LAYER_WATER_POLICY,
+    startTopStorageMm: yearStartTop,
+    endTopStorageMm: topStorage,
+    startBottomStorageMm: yearStartBottom,
+    endBottomStorageMm: bottomStorage,
+    startStorageMm: startStorage,
+    endStorageMm: endStorage,
+    storageChangeMm: storageChange,
+    precipitationMm: precipitationTotal,
+    potentialEvapotranspirationMm: petTotal,
+    actualEvapotranspirationMm: aetTotal,
+    runoffMm: runoffTotal,
+    surfaceRunoffMm: surfaceRunoffTotal,
+    deepDrainageMm: deepDrainageTotal,
+    meanStorageMm: simulatedDays > 0 ? meanStorageDaySum / simulatedDays : 0,
+    residualMm: residual,
+    months: Object.freeze(months)
+  };
+}
+
+function closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, soil, spinupYears) {
+  let start = {
+    topStorageMm: soil.topCapacityMm * 0.5,
+    bottomStorageMm: soil.bottomCapacityMm * 0.5
+  };
+  const cycles = Math.max(1, Math.min(50, Math.floor(spinupYears) || 1));
+  let finalYear = null;
+  for (let year = 0; year < cycles; year += 1) {
+    finalYear = simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil);
+    start = {
+      topStorageMm: finalYear.endTopStorageMm,
+      bottomStorageMm: finalYear.endBottomStorageMm
+    };
+  }
+  return finalYear;
 }
 
 export function closeAnnualWaterBalance(
@@ -144,25 +335,42 @@ export function closeAnnualWaterBalance(
     latitude,
     elevationMeters = 0,
     soilWaterCapacityMm = DEFAULT_SOIL_WATER_CAPACITY_MM,
+    soilProfile = null,
     spinupYears = 8
   } = {}
 ) {
   if (!Array.isArray(monthlyClimate) || monthlyClimate.length !== 12) {
     throw new TypeError("closeAnnualWaterBalance requires exactly 12 monthly climate records.");
   }
-  const capacity = clamp(soilWaterCapacityMm, 25, 600);
-  let storage = capacity * 0.5;
-  const cycles = Math.max(1, Math.min(50, Math.floor(spinupYears) || 1));
-  let finalYear = null;
-  for (let year = 0; year < cycles; year += 1) {
-    finalYear = simulateYear(monthlyClimate, latitude, elevationMeters, storage, capacity);
-    storage = finalYear.endStorageMm;
+
+  const biome4Soil = normalizedBiome4SoilProfile(soilProfile);
+  let finalYear;
+  let capacity;
+  let soilPolicy;
+  if (biome4Soil) {
+    capacity = biome4Soil.totalCapacityMm;
+    soilPolicy = BIOME4_TWO_LAYER_WATER_POLICY;
+    finalYear = closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, biome4Soil, spinupYears);
+  } else {
+    capacity = clamp(soilWaterCapacityMm, 25, 600);
+    soilPolicy = "uniform-single-layer-fallback";
+    let storage = capacity * 0.5;
+    const cycles = Math.max(1, Math.min(50, Math.floor(spinupYears) || 1));
+    for (let year = 0; year < cycles; year += 1) {
+      finalYear = simulateSingleLayerYear(monthlyClimate, latitude, elevationMeters, storage, capacity);
+      storage = finalYear.endStorageMm;
+    }
   }
 
-  const soilMoistureIndex = clamp(finalYear.meanStorageMm / capacity, 0, 1);
+  const soilMoistureIndex = capacity > 0 ? clamp(finalYear.meanStorageMm / capacity, 0, 1) : 0;
   return Object.freeze({
     policy: WATER_BALANCE_POLICY,
-    soilWaterCapacityMm: capacity,
+    soilPolicy,
+    soilWaterCapacityMm: round(capacity, 4),
+    topSoilWaterCapacityMm: biome4Soil ? round(biome4Soil.topCapacityMm, 4) : null,
+    bottomSoilWaterCapacityMm: biome4Soil ? round(biome4Soil.bottomCapacityMm, 4) : null,
+    topPercolationCoefficient: biome4Soil ? round(biome4Soil.topPercolationCoefficient, 6) : null,
+    bottomPercolationCoefficient: biome4Soil ? round(biome4Soil.bottomPercolationCoefficient, 6) : null,
     startStorageMm: round(finalYear.startStorageMm, 3),
     endStorageMm: round(finalYear.endStorageMm, 3),
     storageChangeMm: round(finalYear.storageChangeMm, 6),
@@ -170,10 +378,14 @@ export function closeAnnualWaterBalance(
     potentialEvapotranspirationMmPerYear: round(finalYear.potentialEvapotranspirationMm, 3),
     actualEvapotranspirationMmPerYear: round(finalYear.actualEvapotranspirationMm, 3),
     runoffMmPerYear: round(finalYear.runoffMm, 3),
+    surfaceRunoffMmPerYear: round(finalYear.surfaceRunoffMm, 3),
+    deepDrainageMmPerYear: round(finalYear.deepDrainageMm, 3),
     meanSoilWaterStorageMm: round(finalYear.meanStorageMm, 3),
     soilMoistureIndex: round(soilMoistureIndex, 4),
     massBalanceResidualMm: round(finalYear.residualMm, 9),
     months: finalYear.months,
-    epistemicStatus: "model derived closed soil-water bucket; PET uses Priestley-Taylor energy balance with FAO-56 solar geometry and a Krapp-cloud sunshine proxy"
+    epistemicStatus: biome4Soil
+      ? "model-derived closed daily two-layer water budget using study-constrained BIOME4 static WHC/percolation inputs; PET uses Priestley-Taylor/FAO solar geometry; BIOME4 percolation coefficients follow the source model's once-per-day k × wetness^4 operational semantics; deep drainage is routed immediately as runoff until groundwater/baseflow is implemented"
+      : "model-derived closed single-layer fallback water budget; PET uses Priestley-Taylor energy balance with FAO-56 solar geometry and a Krapp-cloud sunshine proxy"
   });
 }

@@ -14,14 +14,15 @@ import {
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 const quantize = (value, step) => Math.round((Number(value) || 0) / step) * step;
 
-export const MASS_CONSERVING_HYDROLOGY_POLICY = "closed-water-budget-etopo-routing-v1";
+export const MASS_CONSERVING_HYDROLOGY_POLICY = "closed-water-budget-etopo-routing-v2";
 
 export class MassConservingHydrology {
-  constructor(spatialHydroClimate) {
+  constructor(spatialHydroClimate, soilLayer = null) {
     if (!spatialHydroClimate?.sample || !spatialHydroClimate?.monthlyAt) {
       throw new TypeError("MassConservingHydrology requires a SpatialHydroClimate-like source.");
     }
     this.climate = spatialHydroClimate;
+    this.soil = soilLayer?.profileAt ? soilLayer : null;
     this.cache = new Map();
     this.cacheSignature = null;
     this.networkCache = new Map();
@@ -32,7 +33,8 @@ export class MassConservingHydrology {
     return [
       gridSpacingForSpatialDetail(spatialDetail),
       round(globalState.temperatureAnomaly ?? 0, 3),
-      round(globalState.iceIndex ?? 0, 4)
+      round(globalState.iceIndex ?? 0, 4),
+      this.soil?.meta?.assetSha256 ?? "fallback-soil"
     ].join("|");
   }
 
@@ -62,8 +64,28 @@ export class MassConservingHydrology {
       networkSpacingForSpatialDetail(spatialDetail),
       round(forcing.temperatureAnomaly ?? 0, 1),
       round(forcing.iceIndex ?? 0, 2),
-      round(forcing.seaLevel ?? 0, 0)
+      round(forcing.seaLevel ?? 0, 0),
+      this.soil?.meta?.assetSha256 ?? "fallback-soil"
     ].join("|");
+  }
+
+  _soilProfile(latitude, longitude) {
+    return this.soil?.profileAt?.(latitude, longitude) ?? null;
+  }
+
+  _balanceFor(globalState, climate, spatialDetail) {
+    const monthlyClimate = Array.from({ length: 12 }, (_, monthIndex) =>
+      this.climate.monthlyAt(globalState, monthIndex, climate.latitude, climate.longitude, spatialDetail)
+    );
+    if (monthlyClimate.some((month) => !month)) return null;
+    const elevationMeters = bedrockElevationAt(climate.latitude, climate.longitude);
+    const soilProfile = this._soilProfile(climate.latitude, climate.longitude);
+    const balance = closeAnnualWaterBalance(monthlyClimate, {
+      latitude: climate.latitude,
+      elevationMeters,
+      soilProfile: soilProfile?.validSoil ? soilProfile : null
+    });
+    return { elevationMeters, soilProfile, balance };
   }
 
   sample(globalState, latitude, longitude, spatialDetail = 0.35) {
@@ -73,35 +95,42 @@ export class MassConservingHydrology {
     const key = `${climate.latitude}:${climate.longitude}:${climate.gridSpacingDegrees}`;
     if (this.cache.has(key)) return this.cache.get(key);
 
-    const monthlyClimate = Array.from({ length: 12 }, (_, monthIndex) =>
-      this.climate.monthlyAt(globalState, monthIndex, climate.latitude, climate.longitude, spatialDetail)
-    );
-    if (monthlyClimate.some((month) => !month)) {
+    const solved = this._balanceFor(globalState, climate, spatialDetail);
+    if (!solved) {
       const fallback = Object.freeze({ ...climate });
       this.cache.set(key, fallback);
       return fallback;
     }
 
-    const elevationMeters = bedrockElevationAt(climate.latitude, climate.longitude);
-    const balance = closeAnnualWaterBalance(monthlyClimate, {
-      latitude: climate.latitude,
-      elevationMeters
-    });
+    const { elevationMeters, soilProfile, balance } = solved;
+    const soilProfileApplied = Boolean(soilProfile?.validSoil);
     const result = Object.freeze({
       ...climate,
       elevationMeters: round(elevationMeters, 1),
       soilMoistureIndex: balance.soilMoistureIndex,
       soilWaterStorageMm: balance.meanSoilWaterStorageMm,
+      soilWaterCapacityMm: balance.soilWaterCapacityMm,
+      topSoilWaterCapacityMm: balance.topSoilWaterCapacityMm,
+      bottomSoilWaterCapacityMm: balance.bottomSoilWaterCapacityMm,
+      topPercolationCoefficient: balance.topPercolationCoefficient,
+      bottomPercolationCoefficient: balance.bottomPercolationCoefficient,
       potentialEvapotranspirationMmPerYear: balance.potentialEvapotranspirationMmPerYear,
       actualEvapotranspirationMmPerYear: balance.actualEvapotranspirationMmPerYear,
       runoffMmPerYear: balance.runoffMmPerYear,
       runoffPotentialMmPerYear: balance.runoffMmPerYear,
+      surfaceRunoffMmPerYear: balance.surfaceRunoffMmPerYear,
+      deepDrainageMmPerYear: balance.deepDrainageMmPerYear,
       waterStorageChangeMmPerYear: balance.storageChangeMm,
       waterBalanceResidualMm: balance.massBalanceResidualMm,
+      waterBalanceMonths: balance.months,
       waterBalancePolicy: WATER_BALANCE_POLICY,
+      soilPolicy: balance.soilPolicy,
+      soilProfileApplied,
+      soilStatus: soilProfile?.status ?? "unavailable",
+      soilSource: soilProfileApplied ? soilProfile.source : null,
       policy: MASS_CONSERVING_HYDROLOGY_POLICY,
       climatePolicy: climate.policy,
-      epistemicStatus: `${climate.epistemicStatus}; land water fluxes are ${balance.epistemicStatus}`
+      epistemicStatus: `${climate.epistemicStatus}; land water fluxes are ${balance.epistemicStatus}${soilProfile && !soilProfileApplied ? `; BIOME4 soil status ${soilProfile.status} therefore uses the transparent fallback bucket rather than fabricated soil` : ""}`
     });
     this.cache.set(key, result);
     return result;
@@ -111,21 +140,17 @@ export class MassConservingHydrology {
     const climate = this.climate.monthlyAt(globalState, month, latitude, longitude, spatialDetail);
     if (!climate) return null;
     const annual = this.sample(globalState, latitude, longitude, spatialDetail);
-    const monthIndex = climate.monthIndex;
-    const balanceMonth = annual
-      ? closeAnnualWaterBalance(
-          Array.from({ length: 12 }, (_, index) =>
-            this.climate.monthlyAt(globalState, index, annual.latitude, annual.longitude, spatialDetail)
-          ),
-          { latitude: annual.latitude, elevationMeters: annual.elevationMeters }
-        ).months[monthIndex]
-      : null;
+    const balanceMonth = annual?.waterBalanceMonths?.[climate.monthIndex] ?? null;
     return Object.freeze({
       ...climate,
       potentialEvapotranspirationMm: balanceMonth?.potentialEvapotranspirationMm ?? null,
       actualEvapotranspirationMm: balanceMonth?.actualEvapotranspirationMm ?? null,
       runoffMm: balanceMonth?.runoffMm ?? null,
+      surfaceRunoffMm: balanceMonth?.surfaceRunoffMm ?? null,
+      deepDrainageMm: balanceMonth?.deepDrainageMm ?? null,
       soilWaterStorageMm: balanceMonth?.endStorageMm ?? null,
+      soilProfileApplied: annual?.soilProfileApplied ?? false,
+      soilStatus: annual?.soilStatus ?? null,
       waterBalancePolicy: balanceMonth ? WATER_BALANCE_POLICY : null,
       policy: MASS_CONSERVING_HYDROLOGY_POLICY
     });
@@ -193,7 +218,7 @@ export class MassConservingHydrology {
       activeRunoffCells,
       climateForcedLandCellCount: accumulation.climateForcedLandCellCount,
       climateForcingCoverageFraction: accumulation.climateForcingCoverageFraction,
-      epistemicStatus: "model-derived upstream-accumulating river network from closed local water budgets; discharge is complete only over the explicitly tracked climate-forced part of each basin; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated"
+      epistemicStatus: `model-derived upstream-accumulating river network from closed local water budgets${this.soil ? " using the official BIOME4 static spatial soil driver where valid" : ""}; discharge is complete only over the explicitly tracked climate-forced part of each basin; deep soil drainage currently joins routed runoff immediately pending groundwater/baseflow; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated`
     });
     this.networkCache.set(signature, result);
     if (this.networkCache.size > 3) this.networkCache.delete(this.networkCache.keys().next().value);
@@ -244,13 +269,16 @@ export class MassConservingHydrology {
     return Object.freeze({
       policy: MASS_CONSERVING_HYDROLOGY_POLICY,
       climate: this.climate.diagnostics?.(globalState, spatialDetail) ?? null,
+      soilSource: this.soil?.meta?.id ?? null,
+      soilResolutionDegrees: this.soil?.meta?.spacingDegrees ?? null,
+      soilAssetSha256: this.soil?.meta?.assetSha256 ?? null,
       waterBalancePolicy: WATER_BALANCE_POLICY,
       runoffRoutingPolicy: RUNOFF_ROUTING_POLICY,
       riverNetworkPolicy: RIVER_NETWORK_POLICY,
       cachedWaterBalanceCells: this.cache.size,
       cachedNetworks: this.networkCache.size,
       stateSignature: this._stateSignature(globalState, spatialDetail),
-      epistemicStatus: "model-derived closed land water budget with parcel routing and optional upstream-accumulating river network; forcing coverage is tracked explicitly and this is not a reconstructed river network"
+      epistemicStatus: "model-derived closed land water budget with optional study-constrained BIOME4 static two-layer soil, parcel routing, and upstream-accumulating river network; deep drainage is not yet groundwater/baseflow and this is not a reconstructed river network"
     });
   }
 }
