@@ -76,7 +76,9 @@ test("real 777 ka network accumulates closed local runoff and conserves it globa
   const network = model.network(state, 0.35);
   assert.equal(network.policy, RIVER_NETWORK_POLICY);
   assert.equal(network.spacingDegrees, 4);
-  assert.ok(network.activeRunoffCells > 1000);
+  const activeCoverage = network.activeRunoffCells / network.topology.landCellCount;
+  assert.ok(network.activeRunoffCells > 500);
+  assert.ok(activeCoverage > 0.5 && activeCoverage <= 1);
   assert.ok(network.accumulation.localRunoffTotalM3 > 0);
   assert.ok(network.accumulation.oceanDischargeM3 >= 0);
   assert.ok(network.accumulation.closedBasinRetentionM3 >= 0);
