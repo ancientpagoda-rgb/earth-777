@@ -52,8 +52,8 @@ if (!response.ok) {
 }
 const rawText = await response.text();
 const rawSha256 = sha256(rawText);
-const expectedSha256 = process.env.ETOPO_EXPECTED_SHA256?.trim();
-if (expectedSha256 && expectedSha256 !== rawSha256) {
+const expectedSha256 = "ec275e81a80b1c635210a17485a04ff53e985e912e030a794f46a6b6638d4d32";
+if (expectedSha256 !== rawSha256) {
   throw new Error(`ETOPO subset checksum changed: expected ${expectedSha256}, received ${rawSha256}`);
 }
 

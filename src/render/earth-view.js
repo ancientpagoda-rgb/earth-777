@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { feature } from "topojson-client";
-import landTopology from "world-atlas/land-110m.json";
+import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 
 const TAU = Math.PI * 2;
 const TEXTURE_WIDTH = 1024;
@@ -18,48 +17,18 @@ function noise(longitude, latitude) {
   );
 }
 
-function drawRing(context, ring) {
-  let previousX = null;
-  for (const [longitude, latitude] of ring) {
-    const x = ((longitude + 180) / 360) * TEXTURE_WIDTH;
-    const y = ((90 - latitude) / 180) * TEXTURE_HEIGHT;
-    if (previousX === null || Math.abs(x - previousX) > TEXTURE_WIDTH * 0.5) context.moveTo(x, y);
-    else context.lineTo(x, y);
-    previousX = x;
-  }
-}
+function colorEarthPixel(data, offset, latitude, longitude, state) {
+  const elevation = bedrockElevationAt(latitude, longitude);
+  const seaLevel = Number.isFinite(state.seaLevel) ? state.seaLevel : 0;
+  const land = elevation > seaLevel;
 
-function createLandMask() {
-  const canvas = document.createElement("canvas");
-  canvas.width = TEXTURE_WIDTH;
-  canvas.height = TEXTURE_HEIGHT;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  context.fillStyle = "#000";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "#fff";
-  const land = feature(landTopology, landTopology.objects.land);
-  const geometries = land.type === "FeatureCollection"
-    ? land.features.map((item) => item.geometry)
-    : [land.geometry];
-  for (const geometry of geometries) {
-    if (!geometry) continue;
-    const polygons = geometry.type === "MultiPolygon" ? geometry.coordinates : [geometry.coordinates];
-    for (const polygon of polygons) {
-      context.beginPath();
-      for (const ring of polygon) drawRing(context, ring);
-      context.fill("evenodd");
-    }
-  }
-  return context.getImageData(0, 0, canvas.width, canvas.height).data;
-}
-
-function colorEarthPixel(data, offset, land, latitude, longitude, state) {
   if (!land) {
     const polar = Math.abs(latitude) / 90;
-    const depth = 0.5 + noise(longitude * 0.8, latitude * 0.8) * 0.18;
-    data[offset] = 4 + depth * 7;
-    data[offset + 1] = 19 + depth * 13;
-    data[offset + 2] = 24 + depth * 19;
+    const waterDepth = Math.max(0, seaLevel - elevation);
+    const depth = clamp(waterDepth / 6500, 0, 1);
+    data[offset] = mix(13, 2, depth);
+    data[offset + 1] = mix(43, 15, depth);
+    data[offset + 2] = mix(57, 31, depth);
     if (polar > 0.84 + state.iceIndex * 0.05) {
       const ice = clamp((polar - 0.84) * 5, 0, 0.7);
       data[offset] = mix(data[offset], 154, ice);
@@ -73,7 +42,8 @@ function colorEarthPixel(data, offset, land, latitude, longitude, state) {
   const absLat = Math.abs(latitude);
   const temperature = 28 - absLat * 0.58 + state.temperatureAnomaly * (1 + absLat / 110);
   const moisture = clamp(0.58 + Math.cos(latitude * Math.PI / 45) * 0.18 + noise(longitude, latitude) * 0.28, 0, 1);
-  const rugged = noise(longitude * 2.4, latitude * 2.2);
+  const relief = clamp(elevation / 4500, -1, 1);
+  const rugged = relief * 0.72 + noise(longitude * 2.4, latitude * 2.2) * 0.28;
   let red;
   let green;
   let blue;
@@ -106,7 +76,7 @@ function colorEarthPixel(data, offset, land, latitude, longitude, state) {
   data[offset + 3] = 255;
 }
 
-function createEarthTexture(mask, state) {
+function createEarthTexture(state) {
   const canvas = document.createElement("canvas");
   canvas.width = TEXTURE_WIDTH;
   canvas.height = TEXTURE_HEIGHT;
@@ -117,7 +87,7 @@ function createEarthTexture(mask, state) {
     for (let x = 0; x < TEXTURE_WIDTH; x += 1) {
       const offset = (y * TEXTURE_WIDTH + x) * 4;
       const longitude = (x / (TEXTURE_WIDTH - 1)) * 360 - 180;
-      colorEarthPixel(image.data, offset, mask[offset] > 127, latitude, longitude, state);
+      colorEarthPixel(image.data, offset, latitude, longitude, state);
     }
   }
   context.putImageData(image, 0, 0);
@@ -179,7 +149,6 @@ export class EarthView {
   constructor(canvas, initialState, onSelect) {
     this.canvas = canvas;
     this.onSelect = onSelect;
-    this.mask = createLandMask();
     this.lastTextureYear = initialState.yearBP;
     this.pointerStart = null;
     this.selectedNormal = null;
@@ -206,7 +175,7 @@ export class EarthView {
     this.controls.zoomSpeed = 0.7;
 
     this.earthMaterial = new THREE.MeshStandardMaterial({
-      map: createEarthTexture(this.mask, initialState),
+      map: createEarthTexture(initialState),
       roughness: 0.88,
       metalness: 0.02
     });
@@ -302,7 +271,7 @@ export class EarthView {
 
   updateState(state, force = false) {
     if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
-    const next = createEarthTexture(this.mask, state);
+    const next = createEarthTexture(state);
     this.earthMaterial.map?.dispose();
     this.earthMaterial.map = next;
     this.earthMaterial.needsUpdate = true;
