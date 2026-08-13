@@ -133,11 +133,12 @@ function renderRegion(state, latitude, longitude) {
   if (river) {
     climateDetails.push(`river ${river.meanDischargeM3s.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³/s`);
     climateDetails.push(`upstream area ${Math.round(river.upstreamAreaKm2).toLocaleString()} km²`);
+    climateDetails.push(`forcing coverage ${Math.round(river.upstreamClimateForcingCoverageFraction * 100)}% of upstream area`);
     climateDetails.push(`drainage ${river.outlet} · ${river.routeCellsToOutlet} routed cells`);
   }
   ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${climateDetails.join(" · ")}.`;
   const routingNote = river
-    ? ` · ${river.spacingDegrees}° accumulating network · closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}`
+    ? ` · ${river.spacingDegrees}° accumulating network · global forcing coverage ${Math.round(river.globalClimateForcingCoverageFraction * 100)}% · closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}`
     : "";
   ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}`;
 }
@@ -212,7 +213,7 @@ ui.sourcesModal.addEventListener("click", (event) => {
   if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open"));
 });
 addEventListener("keydown", (event) => {
-  if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open");
+  if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open"));
   if (event.code === "Space" && event.target === document.body) {
     event.preventDefault();
     setPlaying(!playing);
