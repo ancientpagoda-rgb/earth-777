@@ -1,0 +1,28 @@
+name: Audit exact BIOME4 biome classifier
+
+on:
+  push:
+    branches:
+      - agent/biome4-biome-classifier
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print exact BIOME4 classifier source
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL 'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' -o /tmp/biome4.tgz
+          mkdir -p /tmp/biome4
+          tar -xzf /tmp/biome4.tgz -C /tmp/biome4
+          f=$(find /tmp/biome4 -name biome4.f | head -1)
+          line=$(grep -n -i 'subroutine  *newassignbiome' "$f" | head -1 | cut -d: -f1)
+          echo "newassignbiome starts at $line"
+          sed -n "${line},$((line+420))p" "$f"
+          echo '=== biome names / assignment helpers ==='
+          grep -n -i -E 'biomename|assignbiome|newassignbiome' "$f" | head -120
