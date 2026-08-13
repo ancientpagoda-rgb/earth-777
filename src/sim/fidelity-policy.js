@@ -9,7 +9,7 @@ const BASE_NODES = Object.freeze([
   { id: "climate", localUncertainty: 0.24, evidence: "study-constrained checkpoint + model-derived branch response" },
   { id: "ice", localUncertainty: 0.28, evidence: "model derived" },
   { id: "seaLevel", localUncertainty: 0.18, evidence: "study constrained + modeled branch divergence" },
-  { id: "hydrology", localUncertainty: 0.36, evidence: "model derived from study-constrained Krapp checkpoint; closed land-water budget + ETOPO parcel routing" },
+  { id: "hydrology", localUncertainty: 0.33, evidence: "study-constrained BIOME4 static two-layer soil + model-derived closed water balance and ETOPO river routing" },
   { id: "vegetation", localUncertainty: 0.36, evidence: "study-constrained published BIOME4 checkpoint + model-derived branch productivity response" },
   { id: "herbivores", localUncertainty: 0.60, evidence: "provisional prior" },
   { id: "carnivores", localUncertainty: 0.65, evidence: "provisional prior" },
