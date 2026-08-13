@@ -41,8 +41,8 @@ export const SOURCES = Object.freeze([
     authors: "NOAA National Centers for Environmental Information",
     url: "https://doi.org/10.25921/fd45-gt74",
     license: "unrestricted global coverage; attribution required",
-    role: "Bedrock relief, bathymetry, and the physical shape of Earth.",
-    status: "adapter prepared"
+    role: "Modern bedrock relief and bathymetry baseline. A checksum-pinned half-degree browser layer drives land/ocean classification and ocean depth; simulated paleo sea level is applied separately.",
+    status: "integrated · 360 × 720 compact bedrock grid"
   },
   {
     id: "lr04",
