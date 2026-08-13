@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "dataset": "BIOME4 4.1 comprehensive driver dataset soil fields",
+  "sourcePackage": "https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz",
+  "sourcePackageSha256": "c732b09ead940f10d7f10ac59629ad6e857437b965e10ae923327bc70c3c4a55",
+  "inputdataNcSha256": "3c6189dddd264aacfe52842c61393a8fa288c3eec0c078d1d5a45d65041dfd15",
+  "inputdataNcBytes": 23334032,
+  "license": "GPL-2.0-only as distributed in the official BIOME4 4.1 package",
+  "sourceVariables": {
+    "whc": {
+      "shape": [
+        2,
+        360,
+        720
+      ],
+      "declaredUnits": "mm/m",
+      "missingValue": -9999.0
+    },
+    "perc": {
+      "shape": [
+        2,
+        360,
+        720
+      ],
+      "declaredUnits": "mm/hr",
+      "missingValue": -9999.0
+    }
+  },
+  "sourceOperationalSemantics": {
+    "whc": "BIOME4 driver passes each layer value directly as layer water-holding capacity; source-code comments call these capacities mm even though inputdata.nc declares mm/m",
+    "perc": "BIOME4 passes each layer value directly as the daily percolation coefficient k; daily soil-water code evaluates k * wetness^4 without a 24-hour conversion, despite inputdata.nc declaring mm/hr",
+    "flags": {
+      "-9999": "missing/water",
+      "-4": "land ice",
+      "-1": "barren"
+    },
+    "otherLargeValues": "999.9 WHC and 999 percolation are not special-cased by BIOME4 and are therefore preserved as numeric model inputs"
+  },
+  "statusCounts": {
+    "soil": 84373,
+    "water-or-missing": 172096,
+    "land-ice": 2731,
+    "barren": 0,
+    "unknown": 0
+  },
+  "soilStats": {
+    "whcTop": {
+      "minimum": 0.0,
+      "maximum": 999.9000244140625,
+      "median": 57.0,
+      "finiteCells": 84373
+    },
+    "whcBottom": {
+      "minimum": 0.0,
+      "maximum": 999.9000244140625,
+      "median": 122.5,
+      "finiteCells": 84373
+    },
+    "percolationTop": {
+      "minimum": 0.0,
+      "maximum": 999.0,
+      "median": 0.8600000143051147,
+      "finiteCells": 84373
+    },
+    "percolationBottom": {
+      "minimum": 0.0,
+      "maximum": 999.0,
+      "median": 0.8600000143051147,
+      "finiteCells": 84373
+    }
+  },
+  "preprocessing": "source float32 values preserved without quantization; grid reordered north-to-south and longitude -180..180; one uint8 status map derived from documented BIOME4 WHC flags",
+  "output": {
+    "asset": "public/data/biome4-soil.bin.gz",
+    "assetSha256": "9fe94404851f8ff73b90c38eedd775e160061b65b7e8b5783c3d7872731133de",
+    "compressedBytes": 138298,
+    "uncompressedBytes": 4406400
+  }
+}
