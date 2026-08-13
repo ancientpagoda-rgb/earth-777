@@ -1,0 +1,96 @@
+name: Finalize BIOME4 PFT climate eligibility
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-climate-eligibility
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-climate-eligibility
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply final integration edits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p=Path(path); s=p.read_text()
+              n=s.count(old)
+              if n != count:
+                  raise SystemExit(f'{path}: expected {count} matches, found {n}: {old[:80]!r}')
+              p.write_text(s.replace(old,new,count))
+
+          replace('src/sim/Biome4PftEligibility.js',
+              '  const suppliedMinimum = Number(absoluteMinimumTemperatureCelsius);\n',
+              '  const suppliedMinimum = absoluteMinimumTemperatureCelsius == null ? Number.NaN : Number(absoluteMinimumTemperatureCelsius);\n')
+          replace('src/sim/Biome4PftEligibility.js',
+              '  const snow = Number(maximumSnowDepthModelUnits);\n',
+              '  const snow = maximumSnowDepthModelUnits == null ? Number.NaN : Number(maximumSnowDepthModelUnits);\n')
+
+          replace('src/main.js',
+              '  if (Number.isFinite(region.lai)) climateDetails.push(`LAI ${region.lai.toFixed(2)}`);\n',
+              '  if (Number.isFinite(region.lai)) climateDetails.push(`LAI ${region.lai.toFixed(2)}`);\n'
+              '  if (Array.isArray(region.climateEligiblePftIds) && region.climateEligiblePftIds.length) {\n'
+              '    climateDetails.push(`PFT climate candidates ${region.climateEligiblePftIds.join("/")}`);\n'
+              '  }\n'
+              '  if (Array.isArray(region.climateUnresolvedPftIds) && region.climateUnresolvedPftIds.length) {\n'
+              '    climateDetails.push(`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · snow physics pending`);\n'
+              '  }\n')
+
+          replace('src/data/checkpoint-777.js',
+              '    vegetation: Object.freeze({ status: "published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ continuous response", target: "dynamic PFT competition and categorical biome transitions", sources: ["krapp-2021", "biome4-4.1-soil"] }),',
+              '    vegetation: Object.freeze({ status: "published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ response + independently implemented BIOME4 4.1 PFT climate eligibility", target: "rooting/phenology, optimized PFT LAI/NPP, snow/fire/dryness diagnostics, competition and categorical biome transitions", sources: ["krapp-2021", "biome4-4.1-soil"] }),')
+
+          replace('src/data/provenance.js',
+              '    role: "Static 0.5° two-layer water-holding-capacity and percolation inputs used by BIOME4. Earth 777 preserves the source float32 fields and documented water/ice/barren flags; the hydrology solver follows the source model\'s once-per-day percolation-coefficient semantics.",\n    status: "integrated · 0.5° two-layer soil driver"',
+              '    role: "Static 0.5° two-layer water-holding-capacity and percolation inputs plus factual BIOME4 4.1 PFT parameter/constraint semantics. Earth 777 preserves the source soil floats and implements the climate-eligibility sieve independently rather than copying BIOME4 program structure.",\n    status: "integrated · 0.5° soil driver + PFT climate-eligibility parameter reference"')
+
+          replace('README.md',
+              '- the official BIOME4 4.1 static 0.5° two-layer water-holding-capacity and percolation fields, preserved as source float32 values in a 138 KB compressed browser layer;\n',
+              '- the official BIOME4 4.1 static 0.5° two-layer water-holding-capacity and percolation fields, preserved as source float32 values in a 138 KB compressed browser layer;\n'
+              '- an independently implemented BIOME4 4.1 PFT climate-eligibility sieve for all 13 PFT parameter records, using the source coldest/warmest-month, absolute-minimum and GDD constraints while leaving the snow-dependent tundra-shrub gate unresolved until snowpack exists;\n')
+          replace('README.md',
+              'The vegetation checkpoint is the authors’ published BIOME4 output at exactly 777 ka: categorical biome, annual NPP, annual LAI, and twelve signed monthly NPP fields. Earth 777 verifies all 13 original OSF files, preserves negative monthly NPP, and compacts the checkpoint to a deterministic 1.14 MB gzip layer. At the checkpoint those values are used directly. After the checkpoint, NPP and LAI respond continuously to the branch water budget and CO₂; the published categorical biome is retained as a reference until dynamic plant-functional-type competition is implemented. The official BIOME4 source audit shows that faithful categorical transitions require 13 PFTs, PFT-specific climate eligibility, optimized LAI/NPP, daily water state, growing-degree-day/fire/dryness diagnostics, woody/grass competition, and the empirical biome classifier. The new spatial soil layer is therefore a prerequisite, not a claim that this full PFT competition is already implemented. NPP source files do not declare a units attribute, so the interface reports BIOME4 NPP in source units rather than inventing units.',
+              'The vegetation checkpoint is the authors’ published BIOME4 output at exactly 777 ka: categorical biome, annual NPP, annual LAI, and twelve signed monthly NPP fields. Earth 777 verifies all 13 original OSF files, preserves negative monthly NPP, and compacts the checkpoint to a deterministic 1.14 MB gzip layer. At the checkpoint those values are used directly. After the checkpoint, NPP and LAI respond continuously to the branch water budget and CO₂; the published categorical biome is retained as a reference until dynamic plant-functional-type competition is implemented. Earth 777 now also independently reproduces BIOME4 4.1’s 13-PFT climatic eligibility sieve from the distributed parameter semantics: coldest and warmest monthly temperature, absolute-minimum temperature, and GDD0/GDD5 are evaluated with the model’s source boundary conventions and monthly-to-daily interpolation. BIOME4 PFT 1 remains disabled as in that distribution. The tundra-shrub snow-depth constraint is explicitly unresolved until a snowpack model supplies the required diagnostic. Climate eligibility is only a candidate sieve: optimized PFT LAI/NPP, rooting/phenology, fire/dryness diagnostics, woody/grass competition and the empirical biome classifier are still required before Earth 777 may change categorical biome. NPP source files do not declare a units attribute, so the interface reports BIOME4 NPP in source units rather than inventing units.')
+          replace('README.md',
+              '5. Implement the remaining BIOME4-compatible PFT prerequisites and then dynamic PFT competition/categorical vegetation transitions: PFT-specific climate eligibility, rooting/water use, optimized LAI/NPP, GDD/fire/dryness diagnostics, competition and classification.',
+              '5. **Integrated prerequisite:** independent BIOME4 4.1 PFT climate eligibility. Next implement rooting/phenology and water use, optimized PFT LAI/NPP, snow/fire/dryness diagnostics, competition and classification before enabling categorical biome transitions.')
+
+          replace('test/vegetation.test.js',
+              '  assert.equal(modeled.lai, Number(published.lai.toFixed(3)));\n',
+              '  assert.equal(modeled.lai, Number(published.lai.toFixed(3)));\n'
+              '  assert.ok(Array.isArray(modeled.climateEligiblePftIds));\n'
+              '  assert.ok(Array.isArray(modeled.climateUnresolvedPftIds));\n'
+              '  assert.ok(modeled.pftClimateIndices);\n'
+              '  assert.equal(modeled.checkpointCategoryRetained, true);\n')
+          replace('test/vegetation.test.js',
+              '  assert.match(evolved.epistemicStatus, /categorical biome transitions are not yet simulated/);\n',
+              '  assert.match(evolved.epistemicStatus, /categorical biome transitions are not yet simulated/);\n'
+              '  assert.ok(Array.isArray(evolved.climateEligiblePftIds));\n'
+              '  assert.equal(evolved.biomeCode, baseline.biomeCode);\n')
+          PY
+      - name: Test and build
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Commit validated integration and remove helper
+        run: |
+          rm .github/workflows/finalize-pft-climate-eligibility.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Integrate BIOME4 PFT climate eligibility diagnostics'
+          git push origin HEAD:agent/biome4-pft-climate-eligibility
