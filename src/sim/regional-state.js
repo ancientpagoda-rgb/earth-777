@@ -24,6 +24,7 @@ export function regionalState(
   }
 
   const moisture = Number.isFinite(hydro.soilMoistureIndex) ? hydro.soilMoistureIndex : 0.5;
+  const closedBudget = Number.isFinite(hydro.waterBalanceResidualMm);
   return Object.freeze({
     latitude,
     longitude,
@@ -31,14 +32,29 @@ export function regionalState(
     annualPrecipitation: Number.isFinite(hydro.precipitationMmPerYear) ? round(hydro.precipitationMmPerYear, 0) : null,
     cloudCover: Number.isFinite(hydro.cloudCoverPercent) ? round(hydro.cloudCoverPercent, 1) : null,
     moisture: round(moisture, 2),
-    runoffPotential: Number.isFinite(hydro.runoffPotentialMmPerYear) ? round(hydro.runoffPotentialMmPerYear, 0) : null,
+    runoffPotential: Number.isFinite(hydro.runoffMmPerYear)
+      ? round(hydro.runoffMmPerYear, 0)
+      : Number.isFinite(hydro.runoffPotentialMmPerYear) ? round(hydro.runoffPotentialMmPerYear, 0) : null,
+    potentialEvapotranspiration: Number.isFinite(hydro.potentialEvapotranspirationMmPerYear)
+      ? round(hydro.potentialEvapotranspirationMmPerYear, 0)
+      : null,
+    actualEvapotranspiration: Number.isFinite(hydro.actualEvapotranspirationMmPerYear)
+      ? round(hydro.actualEvapotranspirationMmPerYear, 0)
+      : null,
+    soilWaterStorage: Number.isFinite(hydro.soilWaterStorageMm) ? round(hydro.soilWaterStorageMm, 0) : null,
+    waterBalanceResidual: Number.isFinite(hydro.waterBalanceResidualMm) ? hydro.waterBalanceResidualMm : null,
     biome: biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture),
-    climateSource: "krapp-777 + branch-hydroclimate",
+    climateSource: closedBudget
+      ? "krapp-777 + branch-hydroclimate + closed-water-budget"
+      : "krapp-777 + branch-hydroclimate",
     checkpointClimate: globalState.elapsedYears <= 0,
     gridSpacingDegrees: hydro.gridSpacingDegrees,
     hydroClimatePolicy: hydro.policy,
-    confidence: globalState.elapsedYears > 0
-      ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff are diagnostic proxies`
-      : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`
+    waterBalancePolicy: hydro.waterBalancePolicy ?? null,
+    confidence: closedBudget
+      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed soil-water bucket conserve precipitation into AET, runoff, and storage change`
+      : globalState.elapsedYears > 0
+        ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies`
+        : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`
   });
 }
