@@ -1,0 +1,39 @@
+name: Audit BIOME4 transpiration source lines
+
+on:
+  push:
+    branches:
+      - agent/biome4-vpd-transpiration
+    paths:
+      - .github/workflows/audit-biome4-transpiration-lines.yml
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-vpd-transpiration
+      - name: Print exact source ranges
+        run: |
+          curl -fsSL 'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' -o /tmp/b.tgz
+          mkdir -p /tmp/b && tar -xzf /tmp/b.tgz -C /tmp/b
+          f=$(find /tmp/b -name biome4.f | head -1)
+          echo '=== growth conductance 1360-1520 ==='
+          sed -n '1360,1520p' "$f"
+          echo '=== hydrology 2300-2425 ==='
+          sed -n '2300,2425p' "$f"
+          echo '=== ppeett 2940-3045 ==='
+          sed -n '2940,3045p' "$f"
+      - name: Remove transient workflow
+        run: |
+          rm -f .github/workflows/audit-biome4-transpiration-lines.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove transient BIOME4 transpiration-line audit'
+          git push origin HEAD:agent/biome4-vpd-transpiration
