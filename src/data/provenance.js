@@ -19,12 +19,12 @@ export const SOURCES = Object.freeze([
   },
   {
     id: "biome4-4.1-soil",
-    title: "BIOME4 4.1 comprehensive driver dataset — static soil fields",
+    title: "BIOME4 4.1 comprehensive driver dataset — static soil and PFT climate fields",
     authors: "BIOME4 4.1 / PMIP distribution",
     url: "https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz",
     license: "GPL-2.0-only for the transformed soil-data asset; upstream COPYING retained in data/licenses",
-    role: "Static 0.5° two-layer water-holding-capacity and percolation inputs plus factual BIOME4 4.1 PFT climate, rooting, transpiration and phenology parameter semantics. Earth 777 preserves source soil floats and independently implements the climate sieve plus selected-region daily rooting/water/phenology diagnostics rather than copying BIOME4 program structure.",
-    status: "integrated · 0.5° soil driver + PFT climate/rooting/phenology parameter reference"
+    role: "Static 0.5° two-layer water-holding-capacity/percolation inputs, the static absolute-minimum-temperature (`tmin`) driver, and factual BIOME4 4.1 PFT climate, rooting, transpiration and phenology parameter semantics. Earth 777 preserves source soil floats and `tmin` int16 values, independently implements the climate/snow sieve plus selected-region daily rooting/water/phenology diagnostics, and does not copy BIOME4 program structure.",
+    status: "integrated · 0.5° soil + tmin drivers + PFT climate/snow/rooting/phenology compatibility"
   },
   {
     id: "priestley-taylor-1972",
