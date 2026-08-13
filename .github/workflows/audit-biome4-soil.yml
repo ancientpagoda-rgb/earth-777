@@ -1,0 +1,69 @@
+name: Audit official BIOME4 soil inputs
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-transitions
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-transitions
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install netCDF4 numpy
+      - name: Inspect official package soil inputs and copying terms
+        run: |
+          set -euo pipefail
+          curl -fL --retry 4 --retry-all-errors \
+            'https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz' \
+            -o /tmp/biome41.tar.gz
+          mkdir -p /tmp/biome4
+          tar -xzf /tmp/biome41.tar.gz -C /tmp/biome4
+          echo '=== ARCHIVE SHA256 ==='
+          sha256sum /tmp/biome41.tar.gz
+          echo '=== COPYING HEADER ==='
+          sed -n '1,120p' /tmp/biome4/COPYING
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import netCDF4 as nc
+          import numpy as np
+          path=Path('/tmp/biome4/inputdata.nc')
+          print('\n=== INPUTDATA SHA256 ===')
+          print(hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_size)
+          with nc.Dataset(path) as ds:
+              print('\n=== GLOBAL ATTRIBUTES ===')
+              for a in ds.ncattrs(): print(a, '=', getattr(ds,a))
+              print('\n=== DIMENSIONS ===')
+              for k,v in ds.dimensions.items(): print(k, len(v), 'unlimited' if v.isunlimited() else '')
+              print('\n=== VARIABLES ===')
+              for name,var in ds.variables.items():
+                  attrs={a:getattr(var,a) for a in var.ncattrs()}
+                  print(name, 'dtype=',var.dtype,'dims=',var.dimensions,'shape=',var.shape,'attrs=',attrs)
+                  if var.ndim and np.prod(var.shape) <= 10_000_000 and name.lower() not in {'longitude','latitude','lon','lat','time'}:
+                      arr=np.ma.asarray(var[:],dtype=float)
+                      raw=np.asarray(np.ma.filled(arr,np.nan),dtype=float)
+                      mask=np.ma.getmaskarray(arr)|~np.isfinite(raw)|(np.abs(raw)>1e20)
+                      finite=raw[~mask]
+                      if finite.size:
+                          print('  stats min=',float(finite.min()),'max=',float(finite.max()),'mean=',float(finite.mean()),'finite=',int(finite.size),'missing=',int(mask.sum()))
+                          vals=np.unique(finite)
+                          if vals.size <= 30: print('  unique=',vals.tolist())
+          PY
+      - name: Remove transient audit workflow
+        run: |
+          rm .github/workflows/audit-biome4-soil.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove transient BIOME4 soil audit workflow'
+          git push origin HEAD:agent/biome4-pft-transitions
