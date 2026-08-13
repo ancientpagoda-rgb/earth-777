@@ -28,7 +28,7 @@ export const CHECKPOINT_777 = Object.freeze({
   layers: Object.freeze({
     terrain: Object.freeze({ status: "integrated ETOPO 2022 bedrock baseline", target: "time-varying paleo topography and isostasy", sources: ["etopo-2022"] }),
     climate: Object.freeze({ status: "Krapp 777 ka checkpoint + model-derived gridded branch response", target: "coupled branch-evolving atmospheric circulation", sources: ["krapp-2021"] }),
-    hydrology: Object.freeze({ status: "CWF-driven virtual grid with moisture/runoff diagnostics", target: "mass-conserving surface/soil/river water balance", sources: ["krapp-2021", "etopo-2022"] }),
+    hydrology: Object.freeze({ status: "closed monthly soil-water budget + ETOPO downhill parcel routing", target: "upstream-accumulating river network with lake, groundwater, snow, and channel storage", sources: ["krapp-2021", "etopo-2022", "priestley-taylor-1972", "fao56"] }),
     orbital: Object.freeze({ status: "Vavrus-anchored La2004 series", target: "Direct 1 kyr astronomical forcing", sources: ["ruddiman-2018-mis19", "la2004"] }),
     seaLevel: Object.freeze({ status: "reconstruction with uncertainty", target: "Spratt–Lisiecki five-record stack", sources: ["spratt-lisiecki-2016"] }),
     vegetation: Object.freeze({ status: "climate-derived emulator", target: "Krapp BIOME4/NPP", sources: ["krapp-2021"] }),
