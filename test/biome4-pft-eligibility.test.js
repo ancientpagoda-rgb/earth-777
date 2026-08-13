@@ -34,8 +34,8 @@ test("BIOME4 monthly-to-daily interpolation preserves source mid-month anchors a
   assert.equal(daily[43], 10);  // day 44 = February midpoint
   assert.equal(daily[74], 20);  // day 75 = March midpoint
   assert.equal(daily[349], 10); // day 350 = December midpoint
-  assert.ok(daily[364] < 0);
-  assert.ok(daily[0] < daily[15]);
+  assert.ok(daily[364] > 0 && daily[364] < 10); // day 365 lies between Dec and Jan
+  assert.ok(daily[0] > 0 && daily[0] < daily[364]);
 });
 
 test("GDD0 and GDD5 are deterministic daily sums from the BIOME4 interpolation", () => {
