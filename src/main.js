@@ -210,10 +210,10 @@ for (const button of document.querySelectorAll("[data-speed]")) {
 ui.sourcesButton.addEventListener("click", () => ui.sourcesModal.classList.add("is-open"));
 ui.sourcesClose.addEventListener("click", () => ui.sourcesModal.classList.remove("is-open"));
 ui.sourcesModal.addEventListener("click", (event) => {
-  if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open"));
+  if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open");
 });
 addEventListener("keydown", (event) => {
-  if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open"));
+  if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open");
   if (event.code === "Space" && event.target === document.body) {
     event.preventDefault();
     setPlaying(!playing);
