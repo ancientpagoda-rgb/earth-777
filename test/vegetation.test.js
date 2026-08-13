@@ -86,6 +86,10 @@ test("spatial vegetation is exactly the published checkpoint at elapsed year zer
   assert.equal(modeled.biomeCode, published.biomeCode);
   assert.equal(modeled.npp, Number(published.npp.toFixed(2)));
   assert.equal(modeled.lai, Number(published.lai.toFixed(3)));
+  assert.ok(Array.isArray(modeled.climateEligiblePftIds));
+  assert.ok(Array.isArray(modeled.climateUnresolvedPftIds));
+  assert.ok(modeled.pftClimateIndices);
+  assert.equal(modeled.checkpointCategoryRetained, true);
 });
 
 test("post-checkpoint vegetation changes continuously while retaining the published category as a reference", () => {
@@ -109,4 +113,6 @@ test("post-checkpoint vegetation changes continuously while retaining the publis
   assert.ok(evolved.productivityFactor >= 0.15 && evolved.productivityFactor <= 2.5);
   assert.ok(evolved.transitionPressure >= 0 && evolved.transitionPressure <= 1);
   assert.match(evolved.epistemicStatus, /categorical biome transitions are not yet simulated/);
+  assert.ok(Array.isArray(evolved.climateEligiblePftIds));
+  assert.equal(evolved.biomeCode, baseline.biomeCode);
 });

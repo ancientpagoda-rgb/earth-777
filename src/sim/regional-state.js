@@ -63,6 +63,10 @@ export function regionalState(
     lai: Number.isFinite(vegetationState?.lai) ? round(vegetationState.lai, 2) : null,
     vegetationProductivityFactor: Number.isFinite(vegetationState?.productivityFactor) ? vegetationState.productivityFactor : null,
     vegetationTransitionPressure: Number.isFinite(vegetationState?.transitionPressure) ? vegetationState.transitionPressure : null,
+    climateEligiblePftIds: vegetationState?.climateEligiblePftIds ?? Object.freeze([]),
+    climateUnresolvedPftIds: vegetationState?.climateUnresolvedPftIds ?? Object.freeze([]),
+    pftClimateIndices: vegetationState?.pftClimateIndices ?? null,
+    pftEligibilityPolicy: vegetationState?.pftEligibilityPolicy ?? null,
     vegetationSource: vegetationState?.source ?? null,
     checkpointVegetation: Boolean(vegetationState) && globalState.elapsedYears <= 0,
     climateSource: closedBudget
@@ -73,7 +77,7 @@ export function regionalState(
     hydroClimatePolicy: hydro.policy,
     waterBalancePolicy: hydro.waterBalancePolicy ?? null,
     confidence: closedBudget
-      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; vegetation uses the published 777 ka BIOME4 category/NPP/LAI baseline with continuous hydro-CO₂ response after the checkpoint" : ""}`
+      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; vegetation uses the published 777 ka BIOME4 category/NPP/LAI baseline with continuous hydro-CO₂ response and an independently implemented BIOME4 climate-eligibility sieve; categorical transitions remain disabled" : ""}`
       : globalState.elapsedYears > 0
         ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies`
         : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`

@@ -23,8 +23,8 @@ export const SOURCES = Object.freeze([
     authors: "BIOME4 4.1 / PMIP distribution",
     url: "https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz",
     license: "GPL-2.0-only for the transformed soil-data asset; upstream COPYING retained in data/licenses",
-    role: "Static 0.5° two-layer water-holding-capacity and percolation inputs used by BIOME4. Earth 777 preserves the source float32 fields and documented water/ice/barren flags; the hydrology solver follows the source model's once-per-day percolation-coefficient semantics.",
-    status: "integrated · 0.5° two-layer soil driver"
+    role: "Static 0.5° two-layer water-holding-capacity and percolation inputs plus factual BIOME4 4.1 PFT parameter/constraint semantics. Earth 777 preserves the source soil floats and implements the climate-eligibility sieve independently rather than copying BIOME4 program structure.",
+    status: "integrated · 0.5° soil driver + PFT climate-eligibility parameter reference"
   },
   {
     id: "priestley-taylor-1972",
