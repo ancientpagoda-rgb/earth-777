@@ -11,7 +11,7 @@ const LATENT_HEAT_MJ_KG = 2.45;
 const MONTH_DAYS = Object.freeze([31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]);
 const MID_MONTH_DAY = Object.freeze([15, 45, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349]);
 
-function pressureKPa(elevationMeters = 0) {
+export function atmosphericPressureKPa(elevationMeters = 0) {
   const elevation = clamp(elevationMeters, -500, 9000);
   return 101.3 * ((293 - 0.0065 * elevation) / 293) ** 5.26;
 }
@@ -61,7 +61,7 @@ export function monthlyPotentialEvapotranspirationMm({
   // available net-shortwave estimate rather than fabricate humidity/wind
   // required by a full Penman-Monteith calculation.
   const delta = saturationVapourPressureSlope(temperature);
-  const gamma = 0.000665 * pressureKPa(elevationMeters);
+  const gamma = 0.000665 * atmosphericPressureKPa(elevationMeters);
   const equilibriumFraction = delta / Math.max(1e-9, delta + gamma);
   const potentialMmPerDay =
     PRIESTLEY_TAYLOR_ALPHA * equilibriumFraction * netShortwave / LATENT_HEAT_MJ_KG;

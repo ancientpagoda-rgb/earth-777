@@ -103,6 +103,7 @@ export class MassConservingHydrology {
         dailyWaterTrace: null,
         monthlyTemperatureCelsius: solved?.monthlyClimate?.map((month) => month?.temperatureCelsius ?? null) ?? null,
         monthlyCloudCoverPercent: solved?.monthlyClimate?.map((month) => month?.cloudCoverPercent ?? null) ?? null,
+        monthlyPrecipitationMmPerYear: solved?.monthlyClimate?.map((month) => month?.precipitationMmPerYear ?? null) ?? null,
         epistemicStatus: "daily PFT water-access trace unavailable because BIOME4 does not define a valid two-layer soil profile at this materialized cell"
       });
     }
@@ -118,6 +119,7 @@ export class MassConservingHydrology {
       bottomSoilWaterCapacityMm: solved.balance.bottomSoilWaterCapacityMm,
       monthlyTemperatureCelsius: Object.freeze(solved.monthlyClimate.map((month) => month.temperatureCelsius)),
       monthlyCloudCoverPercent: Object.freeze(solved.monthlyClimate.map((month) => month.cloudCoverPercent)),
+      monthlyPrecipitationMmPerYear: Object.freeze(solved.monthlyClimate.map((month) => month.precipitationMmPerYear)),
       dailyWaterTrace: solved.balance.daily,
       waterBalanceResidualMm: solved.balance.massBalanceResidualMm,
       epistemicStatus: "opt-in final-spinup-year daily two-layer soil state from the same conserved Earth 777 water balance; exposed for PFT diagnostics without changing the hydrology solution"
