@@ -6,9 +6,8 @@ import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 const TAU = Math.PI * 2;
 const TEXTURE_WIDTH = 512;
 const TEXTURE_HEIGHT = 256;
-const STATIC_PIXEL_RATIO_CAP = 1.25;
-const INTERACTION_PIXEL_RATIO_CAP = 1.0;
-const MIN_TEXTURE_REFRESH_INTERVAL_MS = 1_500;
+const STATIC_PIXEL_RATIO_CAP = 1.0;
+const MIN_TEXTURE_REFRESH_INTERVAL_MS = 3_000;
 const TEXTURE_BUILD_BUDGET_MS = 5;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -72,21 +71,18 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate = nul
   }
 
   const absLat = Math.abs(latitude);
-  const branchClimate = hydroClimate?.sample?.(state, latitude, longitude, spatialDetail) ?? null;
-  const vegetationState = vegetation?.sample?.(state, latitude, longitude, spatialDetail) ?? null;
-  const checkpointClimate = branchClimate ? null : climate?.annualAt?.(latitude, longitude) ?? null;
+  // Presentation must stay cheap: use the published checkpoint rasters directly here.
+  // Full branch hydrology/PFT science remains available through regional inspection.
+  const checkpointClimate = climate?.annualAt?.(latitude, longitude) ?? null;
+  const vegetationState = vegetation?.checkpoint?.annualAt?.(latitude, longitude) ?? null;
   const checkpointGlobalAnomaly = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
   const freeEarthTemperatureDelta = (state.temperatureAnomaly ?? checkpointGlobalAnomaly) - checkpointGlobalAnomaly;
-  const temperature = Number.isFinite(branchClimate?.temperatureCelsius)
-    ? branchClimate.temperatureCelsius
-    : Number.isFinite(checkpointClimate?.temperatureCelsius)
-      ? checkpointClimate.temperatureCelsius + freeEarthTemperatureDelta
-      : 28 - absLat * 0.58 + state.temperatureAnomaly * (1 + absLat / 110);
-  const moisture = Number.isFinite(branchClimate?.soilMoistureIndex)
-    ? branchClimate.soilMoistureIndex
-    : Number.isFinite(checkpointClimate?.precipitationMmPerYear)
-      ? moistureFromCheckpoint(checkpointClimate.precipitationMmPerYear, checkpointClimate.cloudCoverPercent)
-      : clamp(0.58 + Math.cos(latitude * Math.PI / 45) * 0.18 + noise(longitude, latitude) * 0.28, 0, 1);
+  const temperature = Number.isFinite(checkpointClimate?.temperatureCelsius)
+    ? checkpointClimate.temperatureCelsius + freeEarthTemperatureDelta
+    : 28 - absLat * 0.58 + state.temperatureAnomaly * (1 + absLat / 110);
+  const moisture = Number.isFinite(checkpointClimate?.precipitationMmPerYear)
+    ? moistureFromCheckpoint(checkpointClimate.precipitationMmPerYear, checkpointClimate.cloudCoverPercent)
+    : clamp(0.58 + Math.cos(latitude * Math.PI / 45) * 0.18 + noise(longitude, latitude) * 0.28, 0, 1);
   const relief = clamp(elevation / 4500, -1, 1);
   const rugged = relief * 0.72 + noise(longitude * 2.4, latitude * 2.2) * 0.28;
   let red;
@@ -191,10 +187,7 @@ function createCloudTexture(state, climate = null, hydroClimate = null, spatialD
     const latitude = 90 - y / canvas.height * 180;
     if (Math.abs(latitude) > 76) continue;
     const longitude = x / canvas.width * 360 - 180;
-    const branchCloud = hydroClimate?.sample?.(state, latitude, longitude, spatialDetail)?.cloudCoverPercent;
-    const checkpointCloud = Number.isFinite(branchCloud)
-      ? branchCloud
-      : climate?.annualValueAt?.("cloudCover", latitude, longitude);
+    const checkpointCloud = climate?.annualValueAt?.("cloudCover", latitude, longitude);
     const cloudFraction = Number.isFinite(checkpointCloud) ? clamp(checkpointCloud / 100, 0, 1) : 0.55;
     if ((Math.sin(i * 191.3) * 0.5 + 0.5) > 0.25 + cloudFraction * 0.75) continue;
     const width = 12 + (Math.sin(i * 71.3) * 0.5 + 0.5) * 44;
@@ -217,7 +210,7 @@ function createCloudTexture(state, climate = null, hydroClimate = null, spatialD
   return texture;
 }
 
-function createStars(count = 1700) {
+function createStars(count = 900) {
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
     const radius = 18 + Math.random() * 22;
@@ -253,7 +246,7 @@ export class EarthView {
     this.textureBuildInFlight = false;
     this.textureNeedsRefresh = false;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, STATIC_PIXEL_RATIO_CAP));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -277,14 +270,9 @@ export class EarthView {
       this.interacting = true;
       this.textureBuildVersion += 1;
       this.textureBuildInFlight = false;
-      this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, INTERACTION_PIXEL_RATIO_CAP));
-      this.resize();
     });
     this.controls.addEventListener("end", () => {
       this.interacting = false;
-      this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, STATIC_PIXEL_RATIO_CAP));
-      this.resize();
-      this.updateState(this.lastState, false, this.spatialDetail);
     });
 
     this.earthMaterial = new THREE.MeshStandardMaterial({
@@ -292,7 +280,7 @@ export class EarthView {
       roughness: 0.88,
       metalness: 0.02
     });
-    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 96, 64), this.earthMaterial);
+    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 72, 48), this.earthMaterial);
     this.earth.rotation.y = -0.35;
     this.scene.add(this.earth);
 
@@ -303,7 +291,7 @@ export class EarthView {
       depthWrite: false,
       blending: THREE.NormalBlending
     });
-    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 64, 48), this.cloudMaterial);
+    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 48, 32), this.cloudMaterial);
     this.clouds.rotation.y = 0.2;
     this.scene.add(this.clouds);
 
@@ -326,7 +314,7 @@ export class EarthView {
         }
       `
     });
-    this.atmosphere = new THREE.Mesh(new THREE.SphereGeometry(1.55, 64, 48), atmosphereMaterial);
+    this.atmosphere = new THREE.Mesh(new THREE.SphereGeometry(1.55, 48, 32), atmosphereMaterial);
     this.scene.add(this.atmosphere);
 
     this.marker = new THREE.Mesh(
@@ -373,6 +361,10 @@ export class EarthView {
     this.marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this.selectedNormal);
     this.marker.visible = true;
     this.onSelect?.({ latitude, longitude, normal: this.selectedNormal.clone() });
+  }
+
+  isInteracting() {
+    return this.interacting;
   }
 
   focusSelection() {
