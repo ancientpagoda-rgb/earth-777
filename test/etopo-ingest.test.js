@@ -15,12 +15,15 @@ test("ETOPO OPeNDAP request uses centered 30-cell hyperslabs", () => {
   assert.equal(ETOPO_COLS, 720);
 });
 
-test("ETOPO ASCII parser extracts grid and coordinate maps", () => {
-  const fixture = `Dataset {\n  Grid {\n    ARRAY:\n      Float32 z[lat = 2][lon = 3];\n  } z;\n} sample;\n---------------------------------------------\nz.z\n[2][3]\n[0], -10, 0, 12\n[1], 25, 31, 44\nz.lat\n[2]\n[0], 89.75, 89.25\nz.lon\n[3]\n[0], -179.75, -179.25, -178.75\n`;
+test("ETOPO ASCII parser extracts elevations and reconstructs cell-center coordinates", () => {
+  const fixture = `Dataset {\n  Grid {\n    ARRAY:\n      Float32 z[lat = 2][lon = 3];\n  } z;\n} sample;\n---------------------------------------------\nz.z\n[2][3]\n[0], -10, 0, 12\n[1], 25, 31, 44\n`;
   const parsed = parseEtopoAscii(fixture, { rows: 2, cols: 3 });
   assert.deepEqual(parsed.elevations, [-10, 0, 12, 25, 31, 44]);
-  assert.deepEqual(parsed.latitudes, [89.75, 89.25]);
-  assert.deepEqual(parsed.longitudes, [-179.75, -179.25, -178.75]);
+  assert.ok(Math.abs(parsed.latitudes[0] - 89.74166666666666) < 1e-12);
+  assert.ok(Math.abs(parsed.latitudes[1] - 89.24166666666666) < 1e-12);
+  assert.ok(Math.abs(parsed.longitudes[0] + 179.74166666666667) < 1e-12);
+  assert.ok(Math.abs(parsed.longitudes[1] + 179.24166666666667) < 1e-12);
+  assert.ok(Math.abs(parsed.longitudes[2] + 178.74166666666667) < 1e-12);
 });
 
 test("ETOPO int16 encoding is deterministic and meter-preserving", () => {
