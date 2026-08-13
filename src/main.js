@@ -2,6 +2,7 @@ import { SOURCES } from "./data/provenance.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
+import { MassConservingHydrology } from "./sim/MassConservingHydrology.js";
 import { regionalState } from "./sim/regional-state.js";
 import { EarthView } from "./render/earth-view.js";
 
@@ -120,14 +121,16 @@ function renderRegion(state, latitude, longitude) {
     hydroClimate,
     spatialDetail: regionalDetail
   });
+  const runoffRoute = hydroClimate?.routeRunoff?.(state, latitude, longitude, regionalDetail, { maxSteps: 256 }) ?? null;
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
   const lonLabel = `${Math.abs(longitude).toFixed(1)}°${longitude >= 0 ? "E" : "W"}`;
   ui.locationTitle.textContent = region.biome;
   const climateDetails = [`mean annual temperature ${signed(region.annualTemperature, 1)} °C`];
   if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
-  climateDetails.push(`moisture index ${Math.round(region.moisture * 100)}%`);
-  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`runoff potential ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  climateDetails.push(`soil moisture ${Math.round(region.moisture * 100)}%`);
+  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  if (runoffRoute && region.runoffPotential > 0) climateDetails.push(`drainage ${runoffRoute.outlet} · ${runoffRoute.path.length} routed cells`);
   ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${climateDetails.join(" · ")}.`;
   ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}`;
 }
@@ -229,7 +232,7 @@ updateInterface(engine.snapshot(), true);
 loadKrapp777Climate()
   .then((layer) => {
     climate777 = layer;
-    hydroClimate = new SpatialHydroClimate(layer);
+    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(layer));
     earthView.setHydroClimate(hydroClimate, spatialDetailFor("hydrology"));
     if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
   })
