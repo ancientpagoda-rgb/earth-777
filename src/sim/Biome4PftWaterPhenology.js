@@ -149,7 +149,7 @@ export function biome4SummergreenPhenologyFraction(
   const dailyTemperature = biome4DailyTemperatureInterpolation(monthly);
   const grassCase = GRASS_CASE_PFT_IDS.has(pft.id);
   const rampRaw = grassCase ? pft.parameters.leafOutGdd0 : pft.parameters.leafOutGdd5;
-  const ramp = Number.isFinite(Number(rampRaw)) ? Number(rampRaw) : -99;
+  const ramp = rampRaw == null ? -99 : (Number.isFinite(Number(rampRaw)) ? Number(rampRaw) : -99);
   const onsetTemperature = pft.id === 7 ? 0 : 5;
   const { coldMonths, hotMonth, isothermalGuardUsed } = coldAndHotMonths(monthly);
   const fraction = new Float64Array(365);
@@ -248,9 +248,11 @@ export function evaluateBiome4PftWaterPhenology(
     });
   }
 
-  const genericPhenology = pft.parameters.phenology === "evergreen"
-    ? { fraction: Float64Array.from({ length: 365 }, () => 1), grassCase: GRASS_CASE_PFT_IDS.has(pft.id), isothermalHotMonthGuardUsed: false }
-    : biome4SummergreenPhenologyFraction(pft, monthlyTemperature, dailyDaylength);
+  const grassCase = GRASS_CASE_PFT_IDS.has(pft.id);
+  const usesGenericColdPhenology = pft.parameters.phenology === "summergreen" || (pft.parameters.phenology === "raingreen" && grassCase);
+  const genericPhenology = usesGenericColdPhenology
+    ? biome4SummergreenPhenologyFraction(pft, monthlyTemperature, dailyDaylength)
+    : { fraction: Float64Array.from({ length: 365 }, () => 1), grassCase, isothermalHotMonthGuardUsed: false };
 
   const daily = [];
   let greenDays = 0;

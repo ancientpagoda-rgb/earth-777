@@ -191,7 +191,7 @@ function dailyPercolation(storage, capacity, coefficient) {
   return Math.min(storage, coefficient * wetness ** 4);
 }
 
-function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil) {
+function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil, captureDailyTrace = false) {
   let topStorage = clamp(start.topStorageMm, 0, soil.topCapacityMm);
   let bottomStorage = clamp(start.bottomStorageMm, 0, soil.bottomCapacityMm);
   const yearStartTop = topStorage;
@@ -204,6 +204,7 @@ function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, 
   let meanStorageDaySum = 0;
   let simulatedDays = 0;
   const months = [];
+  const dailyTrace = captureDailyTrace ? [] : null;
 
   for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
     const climate = climateMonthInput(monthlyClimate[monthIndex], monthIndex);
@@ -222,6 +223,8 @@ function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, 
     let monthDeepDrainage = 0;
 
     for (let day = 0; day < days; day += 1) {
+      const startTopWetness = soil.topCapacityMm > 0 ? clamp(topStorage / soil.topCapacityMm, 0, 1) : 0;
+      const startBottomWetness = soil.bottomCapacityMm > 0 ? clamp(bottomStorage / soil.bottomCapacityMm, 0, 1) : 0;
       topStorage += dailyPrecipitation;
 
       const totalCapacity = soil.totalCapacityMm;
@@ -260,6 +263,24 @@ function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, 
       bottomStorage -= deepDrainage;
       monthDeepDrainage += deepDrainage;
 
+      if (dailyTrace) {
+        dailyTrace.push(Object.freeze({
+          dayOfYear: simulatedDays + 1,
+          monthIndex,
+          dayOfMonth: day + 1,
+          startTopWetness: round(startTopWetness, 6),
+          startBottomWetness: round(startBottomWetness, 6),
+          endTopWetness: round(soil.topCapacityMm > 0 ? clamp(topStorage / soil.topCapacityMm, 0, 1) : 0, 6),
+          endBottomWetness: round(soil.bottomCapacityMm > 0 ? clamp(bottomStorage / soil.bottomCapacityMm, 0, 1) : 0, 6),
+          startTopStorageMm: round(startTopWetness * soil.topCapacityMm, 4),
+          startBottomStorageMm: round(startBottomWetness * soil.bottomCapacityMm, 4),
+          endTopStorageMm: round(topStorage, 4),
+          endBottomStorageMm: round(bottomStorage, 4),
+          precipitationMm: round(dailyPrecipitation, 6),
+          potentialEvapotranspirationMm: round(dailyPet, 6),
+          actualEvapotranspirationMm: round(evap.removed, 6)
+        }));
+      }
       meanStorageDaySum += topStorage + bottomStorage;
       simulatedDays += 1;
     }
@@ -308,11 +329,12 @@ function simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, 
     deepDrainageMm: deepDrainageTotal,
     meanStorageMm: simulatedDays > 0 ? meanStorageDaySum / simulatedDays : 0,
     residualMm: residual,
-    months: Object.freeze(months)
+    months: Object.freeze(months),
+    daily: dailyTrace ? Object.freeze(dailyTrace) : null
   };
 }
 
-function closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, soil, spinupYears) {
+function closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, soil, spinupYears, includeDailyTrace = false) {
   let start = {
     topStorageMm: soil.topCapacityMm * 0.5,
     bottomStorageMm: soil.bottomCapacityMm * 0.5
@@ -320,7 +342,7 @@ function closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, so
   const cycles = Math.max(1, Math.min(50, Math.floor(spinupYears) || 1));
   let finalYear = null;
   for (let year = 0; year < cycles; year += 1) {
-    finalYear = simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil);
+    finalYear = simulateTwoLayerYear(monthlyClimate, latitude, elevationMeters, start, soil, includeDailyTrace && year === cycles - 1);
     start = {
       topStorageMm: finalYear.endTopStorageMm,
       bottomStorageMm: finalYear.endBottomStorageMm
@@ -336,7 +358,8 @@ export function closeAnnualWaterBalance(
     elevationMeters = 0,
     soilWaterCapacityMm = DEFAULT_SOIL_WATER_CAPACITY_MM,
     soilProfile = null,
-    spinupYears = 8
+    spinupYears = 8,
+    includeDailyTrace = false
   } = {}
 ) {
   if (!Array.isArray(monthlyClimate) || monthlyClimate.length !== 12) {
@@ -350,7 +373,7 @@ export function closeAnnualWaterBalance(
   if (biome4Soil) {
     capacity = biome4Soil.totalCapacityMm;
     soilPolicy = BIOME4_TWO_LAYER_WATER_POLICY;
-    finalYear = closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, biome4Soil, spinupYears);
+    finalYear = closeTwoLayerWaterBalance(monthlyClimate, latitude, elevationMeters, biome4Soil, spinupYears, includeDailyTrace);
   } else {
     capacity = clamp(soilWaterCapacityMm, 25, 600);
     soilPolicy = "uniform-single-layer-fallback";
@@ -384,6 +407,7 @@ export function closeAnnualWaterBalance(
     soilMoistureIndex: round(soilMoistureIndex, 4),
     massBalanceResidualMm: round(finalYear.residualMm, 9),
     months: finalYear.months,
+    daily: finalYear.daily ?? null,
     epistemicStatus: biome4Soil
       ? "model-derived closed daily two-layer water budget using study-constrained BIOME4 static WHC/percolation inputs; PET uses Priestley-Taylor/FAO solar geometry; BIOME4 percolation coefficients follow the source model's once-per-day k × wetness^4 operational semantics; deep drainage is routed immediately as runoff until groundwater/baseflow is implemented"
       : "model-derived closed single-layer fallback water budget; PET uses Priestley-Taylor energy balance with FAO-56 solar geometry and a Krapp-cloud sunshine proxy"

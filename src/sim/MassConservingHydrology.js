@@ -73,7 +73,7 @@ export class MassConservingHydrology {
     return this.soil?.profileAt?.(latitude, longitude) ?? null;
   }
 
-  _balanceFor(globalState, climate, spatialDetail) {
+  _balanceFor(globalState, climate, spatialDetail, includeDailyTrace = false) {
     const monthlyClimate = Array.from({ length: 12 }, (_, monthIndex) =>
       this.climate.monthlyAt(globalState, monthIndex, climate.latitude, climate.longitude, spatialDetail)
     );
@@ -83,9 +83,45 @@ export class MassConservingHydrology {
     const balance = closeAnnualWaterBalance(monthlyClimate, {
       latitude: climate.latitude,
       elevationMeters,
-      soilProfile: soilProfile?.validSoil ? soilProfile : null
+      soilProfile: soilProfile?.validSoil ? soilProfile : null,
+      includeDailyTrace
     });
-    return { elevationMeters, soilProfile, balance };
+    return { elevationMeters, soilProfile, balance, monthlyClimate };
+  }
+
+  dailyWaterTrace(globalState, latitude, longitude, spatialDetail = 0.35) {
+    const climate = this.climate.sample(globalState, latitude, longitude, spatialDetail);
+    if (!climate) return null;
+    const solved = this._balanceFor(globalState, climate, spatialDetail, true);
+    if (!solved?.balance?.daily || !solved.soilProfile?.validSoil) {
+      return Object.freeze({
+        latitude: climate.latitude,
+        longitude: climate.longitude,
+        gridSpacingDegrees: climate.gridSpacingDegrees,
+        soilProfileApplied: false,
+        soilStatus: solved?.soilProfile?.status ?? "unavailable",
+        dailyWaterTrace: null,
+        monthlyTemperatureCelsius: solved?.monthlyClimate?.map((month) => month?.temperatureCelsius ?? null) ?? null,
+        monthlyCloudCoverPercent: solved?.monthlyClimate?.map((month) => month?.cloudCoverPercent ?? null) ?? null,
+        epistemicStatus: "daily PFT water-access trace unavailable because BIOME4 does not define a valid two-layer soil profile at this materialized cell"
+      });
+    }
+    return Object.freeze({
+      latitude: climate.latitude,
+      longitude: climate.longitude,
+      gridSpacingDegrees: climate.gridSpacingDegrees,
+      elevationMeters: solved.elevationMeters,
+      soilProfileApplied: true,
+      soilStatus: solved.soilProfile.status,
+      soilSource: solved.soilProfile.source,
+      topSoilWaterCapacityMm: solved.balance.topSoilWaterCapacityMm,
+      bottomSoilWaterCapacityMm: solved.balance.bottomSoilWaterCapacityMm,
+      monthlyTemperatureCelsius: Object.freeze(solved.monthlyClimate.map((month) => month.temperatureCelsius)),
+      monthlyCloudCoverPercent: Object.freeze(solved.monthlyClimate.map((month) => month.cloudCoverPercent)),
+      dailyWaterTrace: solved.balance.daily,
+      waterBalanceResidualMm: solved.balance.massBalanceResidualMm,
+      epistemicStatus: "opt-in final-spinup-year daily two-layer soil state from the same conserved Earth 777 water balance; exposed for PFT diagnostics without changing the hydrology solution"
+    });
   }
 
   sample(globalState, latitude, longitude, spatialDetail = 0.35) {
