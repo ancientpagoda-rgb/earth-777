@@ -58,6 +58,10 @@ test("fixed-LAI growth is deterministic, finite, and closes the second-year wate
   assert.ok(Number.isFinite(a.operationalObjectiveNpp));
   assert.ok(Number.isFinite(a.annualAllocationNpp));
   assert.ok(Math.abs(a.hydrology.waterBalanceResidualMm) < 1e-6);
+  assert.ok(a.fireDryness);
+  assert.ok(a.fireDryness.fire.scaledPotentialFireDays >= 0);
+  assert.ok(a.fireDryness.dryness.driestMonthNumber >= 1 && a.fireDryness.dryness.driestMonthNumber <= 12);
+  assert.equal(a.fireDryness.occupancyFeedbackEnabled, false);
   assert.ok(a.hydrology.greenDays >= 0 && a.hydrology.greenDays <= 365);
   assert.equal(a.nppObjectiveDiscrepancy.earth777Policy.includes("operational monthly-sum objective"), true);
 });
@@ -95,6 +99,8 @@ test("PFT 10 evaluates complete C4 and C3 candidate pathways before applying the
   assert.equal(result.monthlyNpp.length, 12);
   assert.ok(result.c4AdvantageMonths >= 0 && result.c4AdvantageMonths <= 12);
   assert.equal(result.mixedC3C4MonthsEnabled, result.c4AdvantageMonths >= 3);
+  assert.ok(result.fireDryness);
+  assert.equal(result.fireDryness.occupancyFeedbackEnabled, false);
   assert.ok(Math.abs(result.c3.hydrology.waterBalanceResidualMm) < 1e-6);
   assert.ok(Math.abs(result.c4.hydrology.waterBalanceResidualMm) < 1e-6);
 });
@@ -104,6 +110,14 @@ test("full candidate LAI optimizer performs sixteen source-operational growth ev
   assert.equal(optimized.policy, BIOME4_PFT_LAI_OPTIMIZATION_POLICY);
   assert.equal(optimized.evaluationCount, 16);
   assert.equal(optimized.checkpointCategoryMutationEnabled, false);
+  assert.equal(optimized.fireDrynessIntegrated, true);
+  assert.equal(optimized.fireDrynessStatus, optimized.fireDryness ? "resolved" : "nonproductive-no-optimum");
+  if (optimized.fireDryness) {
+    assert.equal(optimized.fireDryness.categoricalBiomeTransitionsEnabled, false);
+  } else {
+    assert.equal(optimized.optimumEvaluation, null);
+    assert.equal(optimized.optimumNpp, 0);
+  }
   assert.ok(optimized.optimumLai >= 0);
   assert.ok(optimized.optimumNpp >= 0);
   if (optimized.optimumEvaluation) {

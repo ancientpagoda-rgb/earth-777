@@ -65,6 +65,7 @@ test("selected-region PFT diagnostics consume the conserved trace without enabli
   assert.equal(diagnostics.hydrologyFeedbackEnabled, false);
   assert.equal(diagnostics.parallelVirtualHydrologyEnabled, true);
   assert.equal(diagnostics.laiNppOptimizationEnabled, true);
+  assert.equal(diagnostics.fireDrynessDiagnosticsEnabled, true);
   assert.equal(diagnostics.competitiveOccupancyEnabled, false);
   for (const candidate of diagnostics.candidates) {
     if (!candidate.virtualHydrology) continue;
@@ -72,12 +73,23 @@ test("selected-region PFT diagnostics consume the conserved trace without enabli
     assert.equal(candidate.virtualHydrology.sharedHydrologyMutated, false);
     if (candidate.climateEligibilityStatus === "eligible") {
       assert.ok(candidate.laiNppOptimization);
+      if (candidate.fireDryness) {
+        assert.equal(candidate.fireDrynessStatus, "resolved");
+        assert.equal(candidate.fireDryness.occupancyFeedbackEnabled, false);
+      } else {
+        assert.equal(candidate.fireDrynessStatus, "nonproductive-no-optimum");
+        assert.equal(candidate.laiNppOptimization.fireDryness, null);
+        assert.equal(candidate.laiNppOptimization.optimumEvaluation, null);
+        assert.equal(candidate.laiNppOptimization.optimumNpp, 0);
+      }
       assert.equal(candidate.laiNppOptimization.evaluationCount, 16);
       assert.equal(candidate.laiNppOptimization.checkpointCategoryMutationEnabled, false);
       assert.ok(Number.isFinite(candidate.laiNppOptimization.optimumNpp));
       assert.ok(candidate.laiNppOptimization.optimumLai >= 0);
     } else {
       assert.equal(candidate.laiNppOptimization, null);
+      assert.equal(candidate.fireDryness, null);
+      assert.equal(candidate.fireDrynessStatus, "not-optimized");
     }
   }
   assert.ok(diagnostics.candidateCount >= diagnostics.resolvedCount);
@@ -94,6 +106,7 @@ test("PFT diagnostics are deterministic and cached separately from lightweight v
   assert.equal(info.pftWaterPhenologyIntegrated, true);
   assert.equal(info.pftHydrologyFeedbackEnabled, false);
   assert.equal(info.pftLaiNppOptimizationIntegrated, true);
+  assert.equal(info.pftFireDrynessDiagnosticsIntegrated, true);
   assert.equal(info.pftCompetitionEnabled, false);
   assert.equal(info.categoricalBiomeTransitionsEnabled, false);
   assert.ok(info.cachedPftDiagnostics >= 1);

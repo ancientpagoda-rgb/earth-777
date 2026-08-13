@@ -15,6 +15,7 @@ import { biome4AtmosphericEquilibriumDemand } from "./Biome4AtmosphericDemand.js
 import { biome4DailySnowWaterForcing } from "./Biome4Snow.js";
 import { biome4ConductanceControlledAet } from "./Biome4VirtualPftHydrology.js";
 import { atmosphericPressureKPa } from "./WaterBalance.js";
+import { biome4FireDrynessDiagnostic } from "./Biome4FireDryness.js";
 
 const DAYS_IN_MONTH = Object.freeze([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]);
 const RESPIRATION_FACTOR = Object.freeze([0.8, 0.8, 1.4, 1.6, 0.8, 4.0, 4.0, 1.6, 0.8, 1.4, 4.0, 4.0, 4.0]);
@@ -491,6 +492,14 @@ export function biome4PftGrowthAtLai({
       mixed && c4.carbon.monthlyNpp[month] > value ? c4.carbon.monthlyNpp[month] : value
     );
     const objectiveNpp = monthlyNpp.reduce((sum, value) => sum + value, 0);
+    // Source fire is called after the second (C3) rerun, so PFT 10 uses the
+    // C3 wet trajectory even when monthly NPP later selects some C4 months.
+    const fireDryness = biome4FireDrynessDiagnostic({
+      pftId: pft.id,
+      lai: leafArea,
+      npp: objectiveNpp,
+      hydrology: c3.hydrology
+    });
     return Object.freeze({
       policy: BIOME4_PFT_GROWTH_POLICY,
       pftId: pft.id,
@@ -503,6 +512,7 @@ export function biome4PftGrowthAtLai({
       mixedC3C4MonthsEnabled: mixed,
       c3,
       c4,
+      fireDryness,
       nppObjectiveDiscrepancy: BIOME4_NPP_OBJECTIVE_DISCREPANCY,
       c4MonthRuleDiscrepancy: BIOME4_C4_MONTH_RULE_DISCREPANCY,
       sourceRepairs: BIOME4_GROWTH_SOURCE_REPAIRS,
@@ -513,6 +523,12 @@ export function biome4PftGrowthAtLai({
 
   const pathway = pft.id === 9 ? "c4" : "c3";
   const evaluated = evaluatePathway({ elevationMeters, co2Ppm }, pft, leafArea, pathway, shared);
+  const fireDryness = biome4FireDrynessDiagnostic({
+    pftId: pft.id,
+    lai: leafArea,
+    npp: evaluated.carbon.operationalMonthlySumNpp,
+    hydrology: evaluated.hydrology
+  });
   return Object.freeze({
     policy: BIOME4_PFT_GROWTH_POLICY,
     pftId: pft.id,
@@ -527,6 +543,7 @@ export function biome4PftGrowthAtLai({
     hydrology: evaluated.hydrology,
     photosynthesis: evaluated.photosynthesis,
     carbon: evaluated.carbon,
+    fireDryness,
     nppObjectiveDiscrepancy: BIOME4_NPP_OBJECTIVE_DISCREPANCY,
     sourceRepairs: BIOME4_GROWTH_SOURCE_REPAIRS,
     pressurePa: round(pressurePa, 2),
@@ -586,8 +603,11 @@ export function optimizeBiome4PftLaiNpp(input) {
     pftCode: pft.code,
     pftName: pft.name,
     checkpointCategoryMutationEnabled: false,
+    fireDrynessIntegrated: true,
+    fireDryness: search.optimumEvaluation?.fireDryness ?? null,
+    fireDrynessStatus: search.optimumEvaluation?.fireDryness ? "resolved" : "nonproductive-no-optimum",
     sourceRepairs: BIOME4_GROWTH_SOURCE_REPAIRS,
     nppObjectiveDiscrepancy: BIOME4_NPP_OBJECTIVE_DISCREPANCY,
-    epistemicStatus: "BIOME4 4.1 source-operational LAI/NPP optimization reproduced independently for one climate-eligible parallel PFT candidate. The result is not yet a competitive occupancy decision and cannot change the published checkpoint biome category."
+    epistemicStatus: "BIOME4 4.1 source-operational LAI/NPP optimization reproduced independently for one climate-eligible parallel PFT candidate. The optimized result carries source-operational fire and top-layer dryness diagnostics when findnpp selects a nonnegative growth trajectory; climate-eligible candidates that remain negative at every tested LAI are explicitly labeled nonproductive-no-optimum instead of receiving fabricated fire/dryness. No competitive occupancy decision or biome-category mutation is enabled."
   });
 }
