@@ -181,6 +181,7 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
   downstream.fill(-3); // -3 ocean/non-land, -2 closed sink, -1 ocean outlet.
 
   const landIndices = [];
+  let landAreaKm2 = 0;
   let oceanOutletCells = 0;
   let closedBasinSinkCells = 0;
 
@@ -192,6 +193,7 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
     if (!(elevation > seaLevelMeters)) continue;
     landMask[index] = 1;
     landIndices.push(index);
+    landAreaKm2 += cellAreaKm2[index];
   }
 
   for (const index of landIndices) {
@@ -224,33 +226,48 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
     cellAreaKm2,
     routingOrder: Int32Array.from(landIndices),
     landCellCount: landIndices.length,
+    landAreaKm2,
     oceanOutletCells,
     closedBasinSinkCells,
     epistemicStatus: "model-derived D8-style topology over compact modern ETOPO bedrock and simulated sea level"
   });
 }
 
-export function accumulateRunoffNetwork(topology, localRunoffMmPerYear) {
+export function accumulateRunoffNetwork(topology, localRunoffMmPerYear, climateForcedMask = null) {
   if (!topology?.routingOrder || !topology?.downstream || !topology?.cellAreaKm2) {
     throw new TypeError("accumulateRunoffNetwork requires a runoff-network topology");
   }
   if (!localRunoffMmPerYear || localRunoffMmPerYear.length !== topology.count) {
     throw new RangeError(`Local runoff array length must equal topology cell count ${topology.count}`);
   }
+  if (climateForcedMask && climateForcedMask.length !== topology.count) {
+    throw new RangeError(`Climate-forced mask length must equal topology cell count ${topology.count}`);
+  }
 
   const localAnnualVolumeM3 = new Float64Array(topology.count);
   const accumulatedAnnualVolumeM3 = new Float64Array(topology.count);
   const upstreamAreaKm2 = new Float64Array(topology.count);
   const upstreamCellCount = new Uint32Array(topology.count);
+  const climateForcedUpstreamAreaKm2 = new Float64Array(topology.count);
+  const climateForcedUpstreamCellCount = new Uint32Array(topology.count);
   let localRunoffTotalM3 = 0;
+  let climateForcedLandAreaKm2 = 0;
+  let climateForcedLandCellCount = 0;
 
   for (const index of topology.routingOrder) {
     const runoffMm = Math.max(0, Number(localRunoffMmPerYear[index]) || 0);
     const localVolume = runoffMm * topology.cellAreaKm2[index] * 1000;
+    const climateForced = climateForcedMask ? Boolean(climateForcedMask[index]) : true;
     localAnnualVolumeM3[index] = localVolume;
     accumulatedAnnualVolumeM3[index] = localVolume;
     upstreamAreaKm2[index] = topology.cellAreaKm2[index];
     upstreamCellCount[index] = 1;
+    if (climateForced) {
+      climateForcedUpstreamAreaKm2[index] = topology.cellAreaKm2[index];
+      climateForcedUpstreamCellCount[index] = 1;
+      climateForcedLandAreaKm2 += topology.cellAreaKm2[index];
+      climateForcedLandCellCount += 1;
+    }
     localRunoffTotalM3 += localVolume;
   }
 
@@ -266,6 +283,8 @@ export function accumulateRunoffNetwork(topology, localRunoffMmPerYear) {
       accumulatedAnnualVolumeM3[downstreamIndex] += accumulatedAnnualVolumeM3[index];
       upstreamAreaKm2[downstreamIndex] += upstreamAreaKm2[index];
       upstreamCellCount[downstreamIndex] += upstreamCellCount[index];
+      climateForcedUpstreamAreaKm2[downstreamIndex] += climateForcedUpstreamAreaKm2[index];
+      climateForcedUpstreamCellCount[downstreamIndex] += climateForcedUpstreamCellCount[index];
     } else if (downstreamIndex === -1) {
       oceanDischargeM3 += accumulatedAnnualVolumeM3[index];
       oceanDrainageAreaKm2 += upstreamAreaKm2[index];
@@ -288,6 +307,11 @@ export function accumulateRunoffNetwork(topology, localRunoffMmPerYear) {
     meanDischargeM3s,
     upstreamAreaKm2,
     upstreamCellCount,
+    climateForcedUpstreamAreaKm2,
+    climateForcedUpstreamCellCount,
+    climateForcedLandAreaKm2,
+    climateForcedLandCellCount,
+    climateForcingCoverageFraction: topology.landAreaKm2 > 0 ? climateForcedLandAreaKm2 / topology.landAreaKm2 : 0,
     localRunoffTotalM3,
     oceanDischargeM3,
     closedBasinRetentionM3,
@@ -296,7 +320,7 @@ export function accumulateRunoffNetwork(topology, localRunoffMmPerYear) {
     closureErrorM3,
     relativeClosureError: localRunoffTotalM3 > 0 ? closureErrorM3 / localRunoffTotalM3 : 0,
     massConserved: Math.abs(closureErrorM3) <= Math.max(1e-6, localRunoffTotalM3 * 1e-12),
-    epistemicStatus: "model-derived upstream accumulation of closed local runoff; no channel storage, transmission loss, groundwater exchange, lake evaporation, or floodplain hydraulics"
+    epistemicStatus: "model-derived upstream accumulation of closed local runoff; climate-unforced land is tracked explicitly rather than silently treated as fully constrained; no channel storage, transmission loss, groundwater exchange, lake evaporation, or floodplain hydraulics"
   });
 }
 
