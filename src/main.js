@@ -213,6 +213,7 @@ updateInterface(engine.snapshot(), true);
 loadKrapp777Climate()
   .then((layer) => {
     climate777 = layer;
+    earthView.setClimate(layer);
     if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
   })
   .catch((error) => console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error));
