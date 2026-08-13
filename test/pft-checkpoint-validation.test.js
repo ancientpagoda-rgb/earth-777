@@ -22,8 +22,8 @@ const hydrology = new MassConservingHydrology(new SpatialHydroClimate(climate), 
 const spatial = new SpatialVegetation(vegetation, hydrology, drivers);
 
 test("checkpoint classifier probe stays diagnostic on real 777 ka inputs", () => {
-  const latitude = 39;
-  const longitude = -95;
+  const latitude = Number(process.env.VALIDATION_LAT ?? 39);
+  const longitude = Number(process.env.VALIDATION_LON ?? -95);
   const annual = spatial.sample(state, latitude, longitude, 0.9);
   const diagnostics = spatial.pftDiagnostics(state, latitude, longitude, 0.9);
   const trace = hydrology.dailyWaterTrace(state, latitude, longitude, 0.9);
@@ -39,5 +39,5 @@ test("checkpoint classifier probe stays diagnostic on real 777 ka inputs", () =>
   assert.ok(result.publishedBiomeCode >= 1 && result.publishedBiomeCode <= 28);
   assert.ok(result.predictedBiomeCode >= 0 && result.predictedBiomeCode <= 28);
   assert.equal(typeof result.checkpointMatch, "boolean");
-  console.log("BIOME4 checkpoint probe", JSON.stringify({ published: result.publishedBiomeCode, predicted: result.predictedBiomeCode, match: result.checkpointMatch, rule: result.classifier.rule }));
+  console.log("BIOME4 checkpoint probe", JSON.stringify({ latitude, longitude, published: result.publishedBiomeCode, predicted: result.predictedBiomeCode, match: result.checkpointMatch, rule: result.classifier.rule }));
 });
