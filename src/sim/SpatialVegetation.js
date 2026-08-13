@@ -1,5 +1,6 @@
 import { checkpointState, CHECKPOINT_777 } from "../data/checkpoint-777.js";
 import { evaluateBiome4PftClimateEligibility } from "./Biome4PftEligibility.js";
+import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -54,6 +55,7 @@ export class SpatialVegetation {
       : hydrology;
     this.checkpointState = checkpointState();
     this.cache = new Map();
+    this.pftDiagnosticCache = new Map();
     this.cacheSignature = null;
   }
 
@@ -70,6 +72,7 @@ export class SpatialVegetation {
     const signature = this._signature(globalState, spatialDetail);
     if (signature !== this.cacheSignature) {
       this.cache.clear();
+      this.pftDiagnosticCache.clear();
       this.cacheSignature = signature;
     }
   }
@@ -129,6 +132,75 @@ export class SpatialVegetation {
     return result;
   }
 
+  pftDiagnostics(globalState, latitude, longitude, spatialDetail = 0.35) {
+    const detail = clamp(spatialDetail, 0, 1);
+    this._prepare(globalState, detail);
+    const annual = this.sample(globalState, latitude, longitude, detail);
+    if (!annual) return null;
+    const key = `${annual.latitude}:${annual.longitude}:${annual.gridSpacingDegrees}`;
+    if (this.pftDiagnosticCache.has(key)) return this.pftDiagnosticCache.get(key);
+
+    const trace = this.hydrology.dailyWaterTrace?.(globalState, annual.latitude, annual.longitude, detail) ?? null;
+    const climateEligible = new Set(annual.climateEligiblePftIds);
+    const climateUnresolved = new Set(annual.climateUnresolvedPftIds);
+    const candidateIds = [...new Set([...annual.climateEligiblePftIds, ...annual.climateUnresolvedPftIds])].sort((a, b) => a - b);
+
+    if (!trace?.dailyWaterTrace) {
+      const unresolved = Object.freeze({
+        status: "unresolved-water-trace",
+        latitude: annual.latitude,
+        longitude: annual.longitude,
+        gridSpacingDegrees: annual.gridSpacingDegrees,
+        biomeCode: annual.biomeCode,
+        biomeLabel: annual.biomeLabel,
+        checkpointCategoryRetained: true,
+        hydrologyFeedbackEnabled: false,
+        candidateCount: candidateIds.length,
+        resolvedCount: 0,
+        candidatePftIds: Object.freeze(candidateIds),
+        candidates: Object.freeze([]),
+        raingreenDiscrepancyPftIds: Object.freeze([]),
+        soilStatus: trace?.soilStatus ?? null,
+        epistemicStatus: trace?.epistemicStatus ?? "PFT daily rooting and phenology diagnostics require a valid BIOME4 two-layer soil trace; no monthly soil approximation is substituted."
+      });
+      this.pftDiagnosticCache.set(key, unresolved);
+      return unresolved;
+    }
+
+    const candidates = candidateIds.map((pftId) => Object.freeze({
+      ...evaluateBiome4PftWaterPhenology(pftId, {
+        latitude: trace.latitude,
+        monthlyTemperatureCelsius: trace.monthlyTemperatureCelsius,
+        monthlyCloudCoverPercent: trace.monthlyCloudCoverPercent,
+        dailyWaterTrace: trace.dailyWaterTrace
+      }),
+      climateEligibilityStatus: climateEligible.has(pftId) ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown"
+    }));
+    const raingreenDiscrepancyPftIds = candidates
+      .filter((candidate) => candidate.raingreenThresholdDiscrepancy)
+      .map((candidate) => candidate.pftId);
+    const result = Object.freeze({
+      status: "resolved",
+      latitude: annual.latitude,
+      longitude: annual.longitude,
+      gridSpacingDegrees: annual.gridSpacingDegrees,
+      biomeCode: annual.biomeCode,
+      biomeLabel: annual.biomeLabel,
+      checkpointCategoryRetained: true,
+      hydrologyFeedbackEnabled: false,
+      candidateCount: candidates.length,
+      resolvedCount: candidates.filter((candidate) => candidate.status === "resolved-diagnostic").length,
+      candidatePftIds: Object.freeze(candidateIds),
+      candidates: Object.freeze(candidates),
+      raingreenDiscrepancyPftIds: Object.freeze(raingreenDiscrepancyPftIds),
+      waterBalanceResidualMm: trace.waterBalanceResidualMm,
+      soilSource: trace.soilSource,
+      epistemicStatus: "BIOME4-parameter daily rooting, water-supply and source-operational phenology diagnostics over Earth 777's conserved two-layer soil trace; no PFT-specific transpiration feedback, LAI/NPP optimization, competition, or categorical biome transition is enabled."
+    });
+    this.pftDiagnosticCache.set(key, result);
+    return result;
+  }
+
   monthlyAt(globalState, month, latitude, longitude, spatialDetail = 0.35) {
     const annual = this.sample(globalState, latitude, longitude, spatialDetail);
     if (!annual) return null;
@@ -150,11 +222,14 @@ export class SpatialVegetation {
       policy: SPATIAL_VEGETATION_POLICY,
       stateSignature: this._signature(globalState, spatialDetail),
       cachedCells: this.cache.size,
+      cachedPftDiagnostics: this.pftDiagnosticCache.size,
       checkpointSource: this.checkpoint.meta?.id ?? null,
       checkpointResolutionDegrees: this.checkpoint.meta?.spacingDegrees ?? null,
       pftClimateEligibilityIntegrated: true,
+      pftWaterPhenologyIntegrated: true,
+      pftHydrologyFeedbackEnabled: false,
       snowConstraintState: "unresolved where required until maximum snow depth is simulated",
-      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response and independently implemented BIOME4-parameter climate candidate sieve; no claim of full BIOME4 PFT competition or categorical biome transitions after 777 ka"
+      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, and opt-in daily PFT rooting/water/phenology diagnostics; no claim of full BIOME4 PFT competition or categorical biome transitions after 777 ka"
     });
   }
 }
