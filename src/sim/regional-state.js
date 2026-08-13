@@ -27,6 +27,7 @@ export function regionalState(
   const closedBudget = Number.isFinite(hydro.waterBalanceResidualMm);
   const vegetationState = vegetation?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
   const fallbackBiome = biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture);
+  const soilProfileApplied = Boolean(hydro.soilProfileApplied);
   return Object.freeze({
     latitude,
     longitude,
@@ -37,6 +38,8 @@ export function regionalState(
     runoffPotential: Number.isFinite(hydro.runoffMmPerYear)
       ? round(hydro.runoffMmPerYear, 0)
       : Number.isFinite(hydro.runoffPotentialMmPerYear) ? round(hydro.runoffPotentialMmPerYear, 0) : null,
+    surfaceRunoff: Number.isFinite(hydro.surfaceRunoffMmPerYear) ? round(hydro.surfaceRunoffMmPerYear, 0) : null,
+    deepDrainage: Number.isFinite(hydro.deepDrainageMmPerYear) ? round(hydro.deepDrainageMmPerYear, 0) : null,
     potentialEvapotranspiration: Number.isFinite(hydro.potentialEvapotranspirationMmPerYear)
       ? round(hydro.potentialEvapotranspirationMmPerYear, 0)
       : null,
@@ -44,6 +47,15 @@ export function regionalState(
       ? round(hydro.actualEvapotranspirationMmPerYear, 0)
       : null,
     soilWaterStorage: Number.isFinite(hydro.soilWaterStorageMm) ? round(hydro.soilWaterStorageMm, 0) : null,
+    soilWaterCapacity: Number.isFinite(hydro.soilWaterCapacityMm) ? round(hydro.soilWaterCapacityMm, 0) : null,
+    topSoilWaterCapacity: Number.isFinite(hydro.topSoilWaterCapacityMm) ? round(hydro.topSoilWaterCapacityMm, 1) : null,
+    bottomSoilWaterCapacity: Number.isFinite(hydro.bottomSoilWaterCapacityMm) ? round(hydro.bottomSoilWaterCapacityMm, 1) : null,
+    topPercolationCoefficient: Number.isFinite(hydro.topPercolationCoefficient) ? hydro.topPercolationCoefficient : null,
+    bottomPercolationCoefficient: Number.isFinite(hydro.bottomPercolationCoefficient) ? hydro.bottomPercolationCoefficient : null,
+    soilProfileApplied,
+    soilStatus: hydro.soilStatus ?? null,
+    soilSource: hydro.soilSource ?? null,
+    soilPolicy: hydro.soilPolicy ?? null,
     waterBalanceResidual: Number.isFinite(hydro.waterBalanceResidualMm) ? hydro.waterBalanceResidualMm : null,
     biome: vegetationState?.biomeLabel ?? fallbackBiome,
     biomeCode: vegetationState?.biomeCode ?? null,
@@ -61,7 +73,7 @@ export function regionalState(
     hydroClimatePolicy: hydro.policy,
     waterBalancePolicy: hydro.waterBalancePolicy ?? null,
     confidence: closedBudget
-      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed soil-water bucket conserve precipitation into AET, runoff, and storage change${vegetationState ? "; vegetation uses the published 777 ka BIOME4 category/NPP/LAI baseline with continuous hydro-CO₂ response after the checkpoint" : ""}`
+      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; vegetation uses the published 777 ka BIOME4 category/NPP/LAI baseline with continuous hydro-CO₂ response after the checkpoint" : ""}`
       : globalState.elapsedYears > 0
         ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies`
         : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`
