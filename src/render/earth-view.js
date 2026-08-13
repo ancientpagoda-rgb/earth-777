@@ -251,6 +251,7 @@ export class EarthView {
     this.lastTextureRefreshMs = 0;
     this.textureBuildVersion = 0;
     this.textureBuildInFlight = false;
+    this.textureNeedsRefresh = false;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, STATIC_PIXEL_RATIO_CAP));
@@ -403,9 +404,10 @@ export class EarthView {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
     const now = performance.now();
+    if (force) this.textureNeedsRefresh = true;
     if (!force && this.interacting) return;
     if (!force && this.textureBuildInFlight) return;
-    if (!force && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
+    if (!force && !this.textureNeedsRefresh && Math.abs(state.yearBP - this.lastTextureYear) < 2_500) return;
     if (!force && now - this.lastTextureRefreshMs < MIN_TEXTURE_REFRESH_INTERVAL_MS) return;
     const buildVersion = ++this.textureBuildVersion;
     const buildState = state;
@@ -425,6 +427,7 @@ export class EarthView {
       }
       this.lastTextureYear = buildState.yearBP;
       this.lastTextureRefreshMs = performance.now();
+      this.textureNeedsRefresh = false;
     }).catch((error) => console.warn("Earth texture refresh failed; keeping the previous texture.", error)).finally(() => {
       if (buildVersion === this.textureBuildVersion) this.textureBuildInFlight = false;
     });
