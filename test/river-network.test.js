@@ -28,19 +28,24 @@ test("CWF river-network detail is bounded to browser-safe 4 and 2 degree grids",
   assert.equal(networkSpacingForSpatialDetail(1), 2);
 });
 
-test("synthetic upstream accumulation conserves volume and drainage area", () => {
+test("synthetic upstream accumulation conserves volume, area, and forcing coverage", () => {
   const topology = {
     policy: RIVER_NETWORK_POLICY,
     count: 3,
     routingOrder: Int32Array.from([0, 1, 2]),
     downstream: Int32Array.from([1, 2, -1]),
-    cellAreaKm2: Float64Array.from([1, 1, 1])
+    cellAreaKm2: Float64Array.from([1, 1, 1]),
+    landAreaKm2: 3
   };
-  const accumulated = accumulateRunoffNetwork(topology, Float32Array.from([10, 20, 30]));
+  const forced = Uint8Array.from([1, 1, 1]);
+  const accumulated = accumulateRunoffNetwork(topology, Float32Array.from([10, 20, 30]), forced);
   assert.deepEqual([...accumulated.localAnnualVolumeM3], [10_000, 20_000, 30_000]);
   assert.deepEqual([...accumulated.accumulatedAnnualVolumeM3], [10_000, 30_000, 60_000]);
   assert.deepEqual([...accumulated.upstreamAreaKm2], [1, 2, 3]);
   assert.deepEqual([...accumulated.upstreamCellCount], [1, 2, 3]);
+  assert.deepEqual([...accumulated.climateForcedUpstreamAreaKm2], [1, 2, 3]);
+  assert.deepEqual([...accumulated.climateForcedUpstreamCellCount], [1, 2, 3]);
+  assert.equal(accumulated.climateForcingCoverageFraction, 1);
   assert.equal(accumulated.localRunoffTotalM3, 60_000);
   assert.equal(accumulated.oceanDischargeM3, 60_000);
   assert.equal(accumulated.closedBasinRetentionM3, 0);
@@ -54,6 +59,7 @@ test("ETOPO network topology is acyclic because every land link descends", () =>
     seaLevelMeters: checkpointState().seaLevel
   });
   assert.ok(topology.landCellCount > 1000);
+  assert.ok(topology.landAreaKm2 > 0);
   assert.ok(topology.oceanOutletCells > 0);
   assert.ok(topology.closedBasinSinkCells > 0);
   for (const index of topology.routingOrder) {
@@ -70,15 +76,19 @@ test("ETOPO network topology is acyclic because every land link descends", () =>
   }
 });
 
-test("real 777 ka network accumulates closed local runoff and conserves it globally", () => {
+test("real 777 ka network conserves generated runoff and reports its forcing domain", () => {
   const state = checkpointState();
   const model = hydrology();
   const network = model.network(state, 0.35);
   assert.equal(network.policy, RIVER_NETWORK_POLICY);
   assert.equal(network.spacingDegrees, 4);
-  const activeCoverage = network.activeRunoffCells / network.topology.landCellCount;
-  assert.ok(network.activeRunoffCells > 500);
-  assert.ok(activeCoverage > 0.5 && activeCoverage <= 1);
+  assert.equal(network.activeRunoffCells, network.accumulation.climateForcedLandCellCount);
+  assert.equal(network.climateForcedLandCellCount, network.accumulation.climateForcedLandCellCount);
+  assert.ok(network.activeRunoffCells > 0);
+  assert.ok(network.accumulation.climateForcedLandAreaKm2 > 0);
+  assert.ok(network.accumulation.climateForcingCoverageFraction > 0);
+  assert.ok(network.accumulation.climateForcingCoverageFraction <= 1);
+  assert.equal(network.climateForcingCoverageFraction, network.accumulation.climateForcingCoverageFraction);
   assert.ok(network.accumulation.localRunoffTotalM3 > 0);
   assert.ok(network.accumulation.oceanDischargeM3 >= 0);
   assert.ok(network.accumulation.closedBasinRetentionM3 >= 0);
@@ -93,7 +103,7 @@ test("real 777 ka network accumulates closed local runoff and conserves it globa
   );
 });
 
-test("regional river sample reports accumulated discharge rather than only local runoff", () => {
+test("regional river sample reports accumulated discharge and basin forcing coverage", () => {
   const state = checkpointState();
   const model = hydrology();
   const river = model.networkSample(state, 0, 20, 0.35);
@@ -102,6 +112,13 @@ test("regional river sample reports accumulated discharge rather than only local
   assert.equal(river.spacingDegrees, 4);
   assert.ok(river.upstreamAreaKm2 > 0);
   assert.ok(river.upstreamCellCount >= 1);
+  assert.ok(river.upstreamClimateForcedAreaKm2 >= 0);
+  assert.ok(river.upstreamClimateForcedAreaKm2 <= river.upstreamAreaKm2);
+  assert.ok(river.upstreamClimateForcedCellCount <= river.upstreamCellCount);
+  assert.ok(river.upstreamClimateForcingCoverageFraction >= 0);
+  assert.ok(river.upstreamClimateForcingCoverageFraction <= 1);
+  assert.ok(river.globalClimateForcingCoverageFraction > 0);
+  assert.ok(river.globalClimateForcingCoverageFraction <= 1);
   assert.ok(river.accumulatedAnnualVolumeM3 >= river.localAnnualVolumeM3);
   assert.ok(river.meanDischargeM3s >= 0);
   assert.equal(river.networkMassConserved, true);
