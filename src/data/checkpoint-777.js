@@ -28,7 +28,7 @@ export const CHECKPOINT_777 = Object.freeze({
   layers: Object.freeze({
     terrain: Object.freeze({ status: "integrated ETOPO 2022 bedrock baseline", target: "time-varying paleo topography and isostasy", sources: ["etopo-2022"] }),
     climate: Object.freeze({ status: "Krapp 777 ka checkpoint + model-derived gridded branch response", target: "coupled branch-evolving atmospheric circulation", sources: ["krapp-2021"] }),
-    hydrology: Object.freeze({ status: "closed monthly soil-water budget + upstream-accumulating ETOPO river network", target: "lake, groundwater, snow, floodplain, and channel storage with sub-degree observed routing", sources: ["krapp-2021", "etopo-2022", "priestley-taylor-1972", "fao56"] }),
+    hydrology: Object.freeze({ status: "closed monthly soil+snow water budget, seasonal temperature-index melt, and upstream-accumulating ETOPO river network", target: "glacier mass balance, groundwater/baseflow, lakes, floodplains, and channel storage with sub-degree observed routing", sources: ["krapp-2021", "etopo-2022", "priestley-taylor-1972", "fao56", "hock-2003"] }),
     orbital: Object.freeze({ status: "Vavrus-anchored La2004 series", target: "Direct 1 kyr astronomical forcing", sources: ["ruddiman-2018-mis19", "la2004"] }),
     seaLevel: Object.freeze({ status: "reconstruction with uncertainty", target: "Spratt–Lisiecki five-record stack", sources: ["spratt-lisiecki-2016"] }),
     vegetation: Object.freeze({ status: "published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ continuous response", target: "dynamic PFT competition and categorical biome transitions", sources: ["krapp-2021"] }),

@@ -36,6 +36,15 @@ export const SOURCES = Object.freeze([
     status: "integrated · model formulation"
   },
   {
+    id: "hock-2003",
+    title: "Temperature index melt modelling in mountain areas",
+    authors: "Regine Hock / Journal of Hydrology (2003)",
+    url: "https://doi.org/10.1016/S0022-1694(03)00257-9",
+    license: "published method review; no source data redistributed",
+    role: "Literature basis for temperature-index snow/ice melt. Earth 777 uses a simple degree-day form with an explicitly provisional melt factor rather than claiming a calibrated 777 ka coefficient.",
+    status: "integrated · model formulation reference"
+  },
+  {
     id: "la2004",
     title: "La2004 astronomical solution",
     authors: "Laskar et al. / Astronomy & Astrophysics (2004)",
