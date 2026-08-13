@@ -47,7 +47,7 @@ let lastRegionUpdate = 0;
 let pendingSimulationYears = 0;
 const SIMULATION_INTERVAL_MS = 100;
 const UI_UPDATE_INTERVAL_MS = 250;
-const REGION_UPDATE_INTERVAL_MS = 1_000;
+const REGION_UPDATE_INTERVAL_MS = 5_000;
 let selected = null;
 let climate777 = null;
 let hydroClimate = null;
@@ -271,15 +271,22 @@ function frame(now) {
   const deltaSeconds = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   if (playing) {
-    pendingSimulationYears += deltaSeconds * speed;
-    if (now - lastSimulationUpdate >= SIMULATION_INTERVAL_MS) {
-      const state = engine.advance(pendingSimulationYears);
+    if (earthView.isInteracting()) {
+      // Camera responsiveness wins over wall-clock catch-up. Simulation time pauses
+      // while the user manipulates the globe, so no science burst follows pointer-up.
       pendingSimulationYears = 0;
       lastSimulationUpdate = now;
-      if (state.yearBP <= 0) setPlaying(false);
-      if (now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
-        updateInterface(state);
-        lastUiUpdate = now;
+    } else {
+      pendingSimulationYears += deltaSeconds * speed;
+      if (now - lastSimulationUpdate >= SIMULATION_INTERVAL_MS) {
+        const state = engine.advance(pendingSimulationYears);
+        pendingSimulationYears = 0;
+        lastSimulationUpdate = now;
+        if (state.yearBP <= 0) setPlaying(false);
+        if (now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+          updateInterface(state);
+          lastUiUpdate = now;
+        }
       }
     }
   }

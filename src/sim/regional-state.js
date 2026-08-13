@@ -16,7 +16,7 @@ export function regionalState(
   globalState,
   latitude,
   longitude,
-  { climateLayer = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35 } = {}
+  { climateLayer = null, hydroClimate = null, vegetation = null, spatialDetail = 0.35, includePftDiagnostics = false } = {}
 ) {
   const hydro = hydroClimate?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
   if (!hydro || !Number.isFinite(hydro.temperatureCelsius)) {
@@ -26,7 +26,9 @@ export function regionalState(
   const moisture = Number.isFinite(hydro.soilMoistureIndex) ? hydro.soilMoistureIndex : 0.5;
   const closedBudget = Number.isFinite(hydro.waterBalanceResidualMm);
   const vegetationState = vegetation?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
-  const pftWaterPhenology = vegetation?.pftDiagnostics?.(globalState, latitude, longitude, spatialDetail) ?? null;
+  const pftWaterPhenology = includePftDiagnostics
+    ? vegetation?.pftDiagnostics?.(globalState, latitude, longitude, spatialDetail) ?? null
+    : null;
   const fallbackBiome = biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture);
   const soilProfileApplied = Boolean(hydro.soilProfileApplied);
   return Object.freeze({
