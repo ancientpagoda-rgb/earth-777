@@ -1,0 +1,38 @@
+name: Integrate BIOME4 LAI NPP optimization
+
+on:
+  push:
+    branches:
+      - agent/biome4-pft-lai-npp-optimization
+    paths:
+      - scripts/integrate-biome4-lai-npp.py
+      - .github/workflows/integrate-biome4-lai-npp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/biome4-pft-lai-npp-optimization
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: python3 scripts/integrate-biome4-lai-npp.py
+      - run: npm test
+      - run: npm run build
+      - name: Commit integrated optimizer and remove one-time helpers
+        run: |
+          rm -f scripts/integrate-biome4-lai-npp.py
+          rm -f .github/workflows/integrate-biome4-lai-npp.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Integrate BIOME4 PFT LAI and NPP optimization'
+          git push origin HEAD:agent/biome4-pft-lai-npp-optimization
