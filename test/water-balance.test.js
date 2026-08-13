@@ -11,6 +11,8 @@ import {
   closeAnnualWaterBalance,
   extraterrestrialRadiationMjM2Day,
   monthlyPotentialEvapotranspirationMm,
+  snowfallFraction,
+  temperatureIndexSnowmeltMm,
   WATER_BALANCE_POLICY
 } from "../src/sim/WaterBalance.js";
 import { routeRunoffParcel, RUNOFF_ROUTING_POLICY } from "../src/sim/RunoffRouting.js";
@@ -23,6 +25,15 @@ function syntheticMonthlyClimate({ temperatureCelsius = 15, precipitationMmPerYe
     temperatureCelsius,
     precipitationMmPerYear,
     cloudCoverPercent
+  }));
+}
+
+function seasonalSnowClimate() {
+  const temperatures = [-9, -7, -3, 2, 8, 13, 16, 14, 8, 2, -3, -8];
+  return temperatures.map((temperatureCelsius) => ({
+    temperatureCelsius,
+    precipitationMmPerYear: 1200,
+    cloudCoverPercent: 50
   }));
 }
 
@@ -50,7 +61,29 @@ test("FAO solar geometry and Priestley-Taylor PET remain finite and seasonal", (
   assert.ok(summerPet > winterPet);
 });
 
-test("closed soil-water bucket conserves precipitation exactly within numerical tolerance", () => {
+test("rain-snow partition and temperature-index melt are bounded", () => {
+  assert.equal(snowfallFraction(-5), 1);
+  assert.equal(snowfallFraction(-1), 1);
+  assert.equal(snowfallFraction(0), 0.5);
+  assert.equal(snowfallFraction(1), 0);
+  assert.equal(snowfallFraction(8), 0);
+
+  assert.equal(temperatureIndexSnowmeltMm({
+    temperatureCelsius: -2,
+    snowWaterEquivalentMm: 100,
+    monthIndex: 2
+  }), 0);
+  const melt = temperatureIndexSnowmeltMm({
+    temperatureCelsius: 2,
+    snowWaterEquivalentMm: 100,
+    monthIndex: 2,
+    meltFactorMmPerCDay: 3
+  });
+  assert.ok(melt > 0);
+  assert.ok(melt <= 100);
+});
+
+test("warm closed soil-snow bucket conserves precipitation with no artificial snow", () => {
   const balance = closeAnnualWaterBalance(syntheticMonthlyClimate(), {
     latitude: 35,
     elevationMeters: 250,
@@ -59,6 +92,9 @@ test("closed soil-water bucket conserves precipitation exactly within numerical 
   });
   assert.equal(balance.policy, WATER_BALANCE_POLICY);
   assert.ok(Math.abs(balance.precipitationMmPerYear - 1200) < 0.01);
+  assert.equal(balance.snowfallMmPerYear, 0);
+  assert.equal(balance.snowmeltMmPerYear, 0);
+  assert.equal(balance.endSnowWaterEquivalentMm, 0);
   assert.ok(balance.actualEvapotranspirationMmPerYear >= 0);
   assert.ok(balance.runoffMmPerYear >= 0);
   assert.ok(balance.meanSoilWaterStorageMm >= 0 && balance.meanSoilWaterStorageMm <= 150);
@@ -68,6 +104,41 @@ test("closed soil-water bucket conserves precipitation exactly within numerical 
     balance.runoffMmPerYear +
     balance.storageChangeMm;
   assert.ok(Math.abs(balance.precipitationMmPerYear - reconstructed) < 0.01);
+});
+
+test("seasonal snowpack delays cold precipitation and releases it as melt", () => {
+  const balance = closeAnnualWaterBalance(seasonalSnowClimate(), {
+    latitude: 55,
+    elevationMeters: 600,
+    soilWaterCapacityMm: 150,
+    spinupYears: 12
+  });
+  assert.ok(balance.snowfallMmPerYear > 0);
+  assert.ok(balance.snowmeltMmPerYear > 0);
+  assert.ok(balance.maximumSnowWaterEquivalentMm > 0);
+  assert.ok(balance.months.some((month) => month.snowfallMm > 0 && month.snowmeltMm === 0));
+  assert.ok(balance.months.some((month) => month.snowmeltMm > 0));
+  assert.ok(Math.abs(balance.massBalanceResidualMm) < 1e-6);
+  assert.ok(Math.abs(
+    balance.precipitationMmPerYear -
+    balance.actualEvapotranspirationMmPerYear -
+    balance.runoffMmPerYear -
+    balance.storageChangeMm
+  ) < 0.01);
+});
+
+test("perennially cold precipitation remains conserved as growing snow storage", () => {
+  const balance = closeAnnualWaterBalance(
+    syntheticMonthlyClimate({ temperatureCelsius: -10, precipitationMmPerYear: 600, cloudCoverPercent: 60 }),
+    { latitude: 75, elevationMeters: 1000, spinupYears: 2 }
+  );
+  assert.ok(balance.snowfallMmPerYear > 599);
+  assert.equal(balance.rainfallMmPerYear, 0);
+  assert.equal(balance.snowmeltMmPerYear, 0);
+  assert.ok(balance.endSnowWaterEquivalentMm > balance.startSnowWaterEquivalentMm);
+  assert.ok(balance.snowWaterEquivalentChangeMm > 599);
+  assert.equal(balance.runoffMmPerYear, 0);
+  assert.ok(Math.abs(balance.massBalanceResidualMm) < 1e-6);
 });
 
 test("ETOPO runoff parcel routing conserves annual water volume and never climbs", () => {
@@ -86,7 +157,7 @@ test("ETOPO runoff parcel routing conserves annual water volume and never climbs
   }
 });
 
-test("Krapp branch climate feeds a closed regional water budget", () => {
+test("Krapp branch climate feeds a closed regional soil-snow water budget", () => {
   const state = checkpointState();
   const hydrology = new MassConservingHydrology(new SpatialHydroClimate(climate));
   const sample = hydrology.sample(state, 0, 20, 0.65);
@@ -96,8 +167,11 @@ test("Krapp branch climate feeds a closed regional water budget", () => {
   assert.ok(Number.isFinite(sample.actualEvapotranspirationMmPerYear));
   assert.ok(Number.isFinite(sample.runoffMmPerYear));
   assert.ok(Number.isFinite(sample.soilWaterStorageMm));
+  assert.ok(Number.isFinite(sample.snowfallMmPerYear));
+  assert.ok(Number.isFinite(sample.snowmeltMmPerYear));
+  assert.ok(Number.isFinite(sample.snowWaterEquivalentMm));
   assert.ok(Math.abs(sample.waterBalanceResidualMm) < 1e-6);
-  assert.match(sample.epistemicStatus, /closed soil-water bucket/);
+  assert.match(sample.epistemicStatus, /soil \+ snow water bucket/);
 
   const route = hydrology.routeRunoff(state, 0, 20, 0.65, { maxSteps: 60 });
   assert.ok(route);
