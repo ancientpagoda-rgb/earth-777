@@ -121,7 +121,7 @@ function renderRegion(state, latitude, longitude) {
     hydroClimate,
     spatialDetail: regionalDetail
   });
-  const runoffRoute = hydroClimate?.routeRunoff?.(state, latitude, longitude, regionalDetail, { maxSteps: 256 }) ?? null;
+  const river = hydroClimate?.networkSample?.(state, latitude, longitude, regionalDetail) ?? null;
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
   const lonLabel = `${Math.abs(longitude).toFixed(1)}°${longitude >= 0 ? "E" : "W"}`;
   ui.locationTitle.textContent = region.biome;
@@ -129,10 +129,17 @@ function renderRegion(state, latitude, longitude) {
   if (Number.isFinite(region.annualPrecipitation)) climateDetails.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) climateDetails.push(`cloud ${region.cloudCover.toFixed(1)}%`);
   climateDetails.push(`soil moisture ${Math.round(region.moisture * 100)}%`);
-  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
-  if (runoffRoute && region.runoffPotential > 0) climateDetails.push(`drainage ${runoffRoute.outlet} · ${runoffRoute.path.length} routed cells`);
+  if (Number.isFinite(region.runoffPotential)) climateDetails.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
+  if (river) {
+    climateDetails.push(`river ${river.meanDischargeM3s.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³/s`);
+    climateDetails.push(`upstream area ${Math.round(river.upstreamAreaKm2).toLocaleString()} km²`);
+    climateDetails.push(`drainage ${river.outlet} · ${river.routeCellsToOutlet} routed cells`);
+  }
   ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${climateDetails.join(" · ")}.`;
-  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}`;
+  const routingNote = river
+    ? ` · ${river.spacingDegrees}° accumulating network · closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}`
+    : "";
+  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}`;
 }
 
 function setPlaying(next) {
@@ -202,7 +209,7 @@ for (const button of document.querySelectorAll("[data-speed]")) {
 ui.sourcesButton.addEventListener("click", () => ui.sourcesModal.classList.add("is-open"));
 ui.sourcesClose.addEventListener("click", () => ui.sourcesModal.classList.remove("is-open"));
 ui.sourcesModal.addEventListener("click", (event) => {
-  if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open");
+  if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open"));
 });
 addEventListener("keydown", (event) => {
   if (event.key === "Escape") ui.sourcesModal.classList.remove("is-open");
