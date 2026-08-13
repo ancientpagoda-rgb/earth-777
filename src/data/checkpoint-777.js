@@ -18,7 +18,7 @@ export const CHECKPOINT_777 = Object.freeze({
     climaticPrecession: datum(108.9, "degrees", "high", "study", ["ruddiman-2018-mis19"]),
     co2: datum(245, "ppm", "high", "study", ["ruddiman-2018-mis19"], 3),
     methane: datum(631, "ppb", "high", "study", ["ruddiman-2018-mis19"], 30),
-    nitrousOxide: datum(270, "ppb", "medium", "study", ["ruddiman-2018-mis19"], 8),
+    nitrousOxide: datum(270, "ppb", "high", "study", ["ruddiman-2018-mis19"], 8),
     globalTemperatureAnomaly: datum(-1.27, "K vs 1850 PI", "medium", "model", ["ruddiman-2018-mis19"], 0.35),
     seaLevelAnomaly: datum(-12.76, "m vs modern", "medium", "study", ["spratt-lisiecki-2016"], 9.52),
     iceVolumeIndex: datum(0.18, "0 interglacial–1 glacial", "low", "prior", ["lr04", "ruddiman-2018-mis19"], 0.15),
@@ -27,7 +27,8 @@ export const CHECKPOINT_777 = Object.freeze({
   }),
   layers: Object.freeze({
     terrain: Object.freeze({ status: "integrated ETOPO 2022 bedrock baseline", target: "time-varying paleo topography and isostasy", sources: ["etopo-2022"] }),
-    climate: Object.freeze({ status: "integrated Krapp 777 ka monthly 0.5° checkpoint", target: "branch-evolving gridded climate", sources: ["krapp-2021"] }),
+    climate: Object.freeze({ status: "Krapp 777 ka checkpoint + model-derived gridded branch response", target: "coupled branch-evolving atmospheric circulation", sources: ["krapp-2021"] }),
+    hydrology: Object.freeze({ status: "CWF-driven virtual grid with moisture/runoff diagnostics", target: "mass-conserving surface/soil/river water balance", sources: ["krapp-2021", "etopo-2022"] }),
     orbital: Object.freeze({ status: "Vavrus-anchored La2004 series", target: "Direct 1 kyr astronomical forcing", sources: ["ruddiman-2018-mis19", "la2004"] }),
     seaLevel: Object.freeze({ status: "reconstruction with uncertainty", target: "Spratt–Lisiecki five-record stack", sources: ["spratt-lisiecki-2016"] }),
     vegetation: Object.freeze({ status: "climate-derived emulator", target: "Krapp BIOME4/NPP", sources: ["krapp-2021"] }),
