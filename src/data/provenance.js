@@ -18,6 +18,15 @@ export const SOURCES = Object.freeze([
     status: "integrated · 777 ka climate + BIOME4 vegetation"
   },
   {
+    id: "biome4-4.1-soil",
+    title: "BIOME4 4.1 comprehensive driver dataset — static soil fields",
+    authors: "BIOME4 4.1 / PMIP distribution",
+    url: "https://pmip2.lsce.ipsl.fr/share/synth/biome4/biome41.tar.gz",
+    license: "GPL-2.0-only for the transformed soil-data asset; upstream COPYING retained in data/licenses",
+    role: "Static 0.5° two-layer water-holding-capacity and percolation inputs used by BIOME4. Earth 777 preserves the source float32 fields and documented water/ice/barren flags; the hydrology solver follows the source model's once-per-day percolation-coefficient semantics.",
+    status: "integrated · 0.5° two-layer soil driver"
+  },
+  {
     id: "priestley-taylor-1972",
     title: "On the Assessment of Surface Heat Flux and Evaporation Using Large-Scale Parameters",
     authors: "Priestley & Taylor / Monthly Weather Review (1972)",
