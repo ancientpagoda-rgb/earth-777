@@ -1,0 +1,53 @@
+name: BIOME4 checkpoint validation matrix
+
+on:
+  push:
+    branches:
+      - agent/biome4-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - site: central-north-america
+            lat: 39
+            lon: -95
+          - site: central-europe
+            lat: 50
+            lon: 10
+          - site: central-siberia
+            lat: 60
+            lon: 90
+          - site: amazonia
+            lat: -5
+            lon: -60
+          - site: east-africa
+            lat: 0
+            lon: 35
+          - site: interior-australia
+            lat: -25
+            lon: 135
+          - site: central-china
+            lat: 35
+            lon: 105
+          - site: southern-africa
+            lat: -30
+            lon: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate ${{ matrix.site }}
+        env:
+          VALIDATION_LAT: ${{ matrix.lat }}
+          VALIDATION_LON: ${{ matrix.lon }}
+        run: node --test test/pft-checkpoint-validation.test.js
