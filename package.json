@@ -8,7 +8,9 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "data:ingest": "node scripts/ingest-paleo-forcing.mjs",
+    "data:paleo": "node scripts/ingest-paleo-forcing.mjs",
+    "data:terrain": "node scripts/ingest-etopo-2022.mjs",
+    "data:ingest": "npm run data:paleo && npm run data:terrain",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
