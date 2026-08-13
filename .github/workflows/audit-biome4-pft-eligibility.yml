@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect exact official BIOME4 PFT tables and eligibility rules
+      - name: Inspect exact BIOME4 climate-index routines
         run: |
           set -euo pipefail
           curl -fL --retry 4 --retry-all-errors \
@@ -25,19 +25,17 @@ jobs:
           from pathlib import Path
           p=Path('/tmp/biome4/biome4.f')
           lines=p.read_text(errors='ignore').splitlines()
-          starts=[]
+          wanted=('subroutine climdata','subroutine daily','subroutine snow')
           for i,line in enumerate(lines):
               low=line.lower().strip()
-              if low.startswith('subroutine pftdata') or low.startswith('subroutine constraints'):
-                  starts.append((i,low))
-          for start,name in starts:
+              if not any(low.startswith(name) for name in wanted):
+                  continue
               end=len(lines)
-              for j in range(start+1,len(lines)):
-                  low=lines[j].lower().strip()
-                  if low.startswith('subroutine ') or low.startswith('function '):
+              for j in range(i+1,len(lines)):
+                  nxt=lines[j].lower().strip()
+                  if nxt.startswith('subroutine ') or nxt.startswith('function '):
                       end=j
                       break
-              print(f'=== {name} lines {start+1}-{end} ===')
-              for n in range(start,end):
-                  print(f'{n+1:5d}: {lines[n]}')
+              print(f'=== {low} lines {i+1}-{end} ===')
+              for n in range(i,end): print(f'{n+1:5d}: {lines[n]}')
           PY
