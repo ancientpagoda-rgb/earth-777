@@ -85,7 +85,7 @@ npm run data:pft-drivers
 2. **Integrated:** Krapp et al. 777 ka monthly temperature, precipitation, and cloud cover at 0.5°.
 3. **Integrated phase two:** official BIOME4 static two-layer 0.5° soil, closed daily land-water budget, and upstream-accumulating ETOPO river discharge with explicit forcing coverage and conservation closure; groundwater/baseflow, lakes, snow/floodplain/channel storage and hydraulics remain future work.
 4. **Integrated checkpoint:** Krapp BIOME4 777 ka biome, annual NPP/LAI, and signed monthly NPP, with deliberately limited continuous branch productivity response.
-5. **Integrated prerequisites:** independent BIOME4 4.1 PFT climate eligibility using the pinned static `tmin` driver and degree-day snow gate, plus selected-region rooting/water-supply/phenology diagnostics. Next couple PFT-specific water demand back into the conserved hydrology, then implement optimized PFT LAI/NPP, fire/dryness diagnostics, competition and classification before enabling categorical biome transitions.
+5. **Integrated prerequisites:** independent BIOME4 4.1 PFT climate eligibility using the pinned static `tmin` driver and degree-day snow gate, selected-region rooting/water-supply/phenology diagnostics, and parallel mass-conserving candidate hydrology trials. Next integrate source-supported humidity/VPD so canopy conductance can constrain candidate transpiration physically, then optimize PFT LAI/NPP, add fire/dryness diagnostics, competition and classification before any categorical biome transition is enabled.
 6. Add LR04 as an independent validation track for the integrated Spratt–Lisiecki layer.
 7. Build probabilistic fauna envelopes from Neotoma/PBDB occurrences.
 8. Build hominin evidence envelopes from ROCEEH ROAD.
