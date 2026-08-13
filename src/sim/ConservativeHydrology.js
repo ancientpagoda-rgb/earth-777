@@ -405,7 +405,7 @@ export class ConservativeHydrology {
         storageChangeM3,
         closureErrorM3,
         relativeClosureError: landPrecipitationM3 > 0 ? closureErrorM3 / landPrecipitationM3 : 0,
-        routingClosureErrorM3,
+        routingClosureErrorM3: routedClosureErrorM3,
         relativeRoutingClosureError: localRunoffM3 > 0 ? routedClosureErrorM3 / localRunoffM3 : 0
       })
     });
