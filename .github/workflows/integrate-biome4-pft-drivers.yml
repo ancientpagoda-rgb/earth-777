@@ -27,6 +27,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import json
 
           p=Path('src/sim/SpatialVegetation.js')
           s=p.read_text()
@@ -70,7 +71,8 @@ jobs:
           '''
           assert old in s, 'old climateEligibility block not found'
           s=s.replace(old,new)
-          s=s.replace('constructor(checkpointVegetation, hydrology) {', 'constructor(checkpointVegetation, hydrology, pftDrivers = null) {')
+          assert 'constructor(checkpointVegetation, hydrology) {' in s
+          s=s.replace('constructor(checkpointVegetation, hydrology) {', 'constructor(checkpointVegetation, hydrology, pftDrivers = null) {',1)
           s=s.replace('    this.hydrology = hydrology;\n', '    this.hydrology = hydrology;\n    this.pftDrivers = pftDrivers;\n',1)
           s=s.replace('climateEligibility(this.hydrology, globalState, sampleLatitude, sampleLongitude, detail)', 'climateEligibility(this.hydrology, this.pftDrivers, globalState, sampleLatitude, sampleLongitude, detail)')
           s=s.replace('      pftClimateIndices: pftClimate?.indices ?? null,\n', '      pftClimateIndices: pftClimate?.indices ?? null,\n      pftAbsoluteMinimumDriverSource: pftClimate?.absoluteMinimumDriverSource ?? null,\n      pftMaximumSnowDepthModelUnits: pftClimate?.snow?.maximumSnowDepthModelUnits ?? null,\n')
@@ -79,37 +81,23 @@ jobs:
 
           p=Path('src/main.js')
           s=p.read_text()
-          s=s.replace('import { loadBiome4Soil } from "./data/biome4-soil.js";\n', 'import { loadBiome4Soil } from "./data/biome4-soil.js";\nimport { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";\n')
-          old='''    let soilLayer = null;
-            try {
-              soilLayer = await loadBiome4Soil();
-            } catch (error) {
-              console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error);
-            }
-            hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
-          '''
-          new='''    let soilLayer = null;
-            let pftDrivers = null;
-            try {
-              soilLayer = await loadBiome4Soil();
-            } catch (error) {
-              console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error);
-            }
-            try {
+          s=s.replace('import { loadBiome4Soil } from "./data/biome4-soil.js";\n', 'import { loadBiome4Soil } from "./data/biome4-soil.js";\nimport { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";\n',1)
+          assert '    let soilLayer = null;\n' in s
+          s=s.replace('    let soilLayer = null;\n', '    let soilLayer = null;\n    let pftDrivers = null;\n',1)
+          hydro_line='    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);\n'
+          assert hydro_line in s
+          pft_load='''    try {
               pftDrivers = await loadBiome4PftDrivers();
             } catch (error) {
               console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", error);
             }
-            hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
           '''
-          assert old in s, 'main soil block not found'
-          s=s.replace(old,new)
-          s=s.replace('new SpatialVegetation(vegetationLayer, hydroClimate)', 'new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers)')
+          s=s.replace(hydro_line, pft_load + hydro_line,1)
+          s=s.replace('new SpatialVegetation(vegetationLayer, hydroClimate)', 'new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers)',1)
           s=s.replace('`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · snow physics pending`', '`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · source-driver coverage`')
           p.write_text(s)
 
           p=Path('package.json')
-          import json
           pkg=json.loads(p.read_text())
           pkg['scripts']['data:pft-drivers']='python3 scripts/ingest-biome4-pft-drivers.py'
           ingest=pkg['scripts']['data:ingest']
