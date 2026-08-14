@@ -42,6 +42,7 @@ export function createSurfacePresentation(canvas) {
 
   const terrain = new TerrainChunkManager(scene, { chunkSizeKm: 2, radius: 2, segments: 18, verticalScale: 0.55 });
   const ecology = new SurfaceEcologyManager(scene, terrain);
+  terrain.attachEcology(ecology);
 
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(220, 220),
@@ -51,5 +52,5 @@ export function createSurfacePresentation(canvas) {
   water.renderOrder = 1;
   scene.add(water);
 
-  return { scene, camera, controls, terrain, ecology, water, sky, sun };
+  return { scene, camera, controls, terrain, water, sky, sun };
 }
