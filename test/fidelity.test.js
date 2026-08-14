@@ -71,16 +71,18 @@ test("CWF ranking is deterministic", () => {
   assert.equal(first[0].id, "a");
 });
 
-test("Earth 777 fidelity plan is bounded, labeled as policy, and deterministic", () => {
+test("Earth 777 fidelity plan is bounded, labeled as policy, deterministic, and includes deep-Earth/life systems", () => {
   const state = new FreeEarthEngine(777001).advance(12_000);
   const first = createFidelityPlan(state);
   const second = createFidelityPlan(state);
 
   assert.deepEqual(first, second);
-  assert.equal(first.policy, "consequence-weighted-fidelity-v1");
+  assert.equal(first.policy, "consequence-weighted-fidelity-v2");
   assert.match(first.epistemicStatus, /not a scientific measurement/);
   assert.equal(first.graphConverged, true);
-  assert.ok(first.targets.length >= 8);
+  assert.ok(first.targets.length >= 18);
+  const ids = new Set(first.targets.map((target) => target.id));
+  for (const id of ["tectonics", "ocean", "evolution", "hominins", "culture"]) assert.ok(ids.has(id));
 
   const allocation = first.targets.reduce((sum, target) => sum + target.allocation, 0);
   assert.ok(Math.abs(allocation - 1) < 1e-9);
