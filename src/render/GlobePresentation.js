@@ -39,7 +39,13 @@ export function createGlobePresentation(canvas) {
   controls.rotateSpeed = 0.48;
   controls.zoomSpeed = 0.7;
 
-  const earthMaterial = new THREE.MeshStandardMaterial({ color: 0x36503c, roughness: 0.88, metalness: 0.02 });
+  const earthMaterial = new THREE.MeshStandardMaterial({
+    color: 0x36503c,
+    roughness: 0.88,
+    metalness: 0.02,
+    emissive: 0x08100c,
+    emissiveIntensity: 0.18
+  });
   const earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 64, 40), earthMaterial);
   earth.rotation.y = -0.35;
   scene.add(earth);
@@ -62,11 +68,16 @@ export function createGlobePresentation(canvas) {
   marker.visible = false;
   scene.add(marker);
   scene.add(createStars());
-  scene.add(new THREE.HemisphereLight(0x9bc9b3, 0x10130f, 0.82));
-  const sun = new THREE.DirectionalLight(0xffe1a9, 2.9);
+
+  // Keep the entire globe readable while retaining a clear day-side highlight.
+  scene.add(new THREE.AmbientLight(0xb8c9c0, 1.15));
+  scene.add(new THREE.HemisphereLight(0xb8d7c7, 0x30382f, 1.25));
+
+  const sun = new THREE.DirectionalLight(0xffe1a9, 2.35);
   sun.position.set(-3.5, 2.6, 4.8);
   scene.add(sun);
-  const rim = new THREE.DirectionalLight(0x5f9e91, 0.85);
+
+  const rim = new THREE.DirectionalLight(0x5f9e91, 0.48);
   rim.position.set(4, -1.5, -3);
   scene.add(rim);
 
