@@ -36,7 +36,7 @@ test("monthly Krapp access accepts names and numeric month indexes", () => {
   assert.deepEqual(byName, byIndex);
 });
 
-test("regional state uses Krapp checkpoint climate and only models temperature drift", () => {
+test("regional state preserves the Krapp checkpoint but allows branch hydroclimate to evolve", () => {
   const layer = loadLayer();
   const checkpoint = checkpointState();
   const base = regionalState(checkpoint, 0, 25, layer);
@@ -47,9 +47,10 @@ test("regional state uses Krapp checkpoint climate and only models temperature d
 
   const later = regionalState({ ...checkpoint, elapsedYears: 1_000, temperatureAnomaly: checkpoint.temperatureAnomaly + 1 }, 0, 25, layer);
   assert.ok(Math.abs((later.annualTemperature - base.annualTemperature) - 1) < 0.11);
-  assert.equal(later.annualPrecipitation, base.annualPrecipitation);
-  assert.equal(later.cloudCover, base.cloudCover);
-  assert.match(later.confidence, /held at checkpoint baseline/);
+  assert.notEqual(later.annualPrecipitation, base.annualPrecipitation);
+  assert.notEqual(later.cloudCover, base.cloudCover);
+  assert.equal(later.climateSource, "krapp-2021-777ka + branch-response");
+  assert.match(later.confidence, /model-derived temperature, orbital, ice and hydrological response/);
 });
 
 test("regional climate safely falls back when no Krapp layer is supplied", () => {
