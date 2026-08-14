@@ -10,7 +10,7 @@ import {
   trackedCarbonPgC,
   trackedNitrogenTgN
 } from "../src/sim/EarthBiogeochemistry.js";
-import { auditTrajectory } from "../src/sim/EarthSystemIntegrity.js";
+import { EARTH_SYSTEM_STATUS, auditTrajectory } from "../src/sim/EarthSystemIntegrity.js";
 import { FreeEarthEngine, regionalState, stageForYearBP } from "../src/sim/free-earth.js";
 
 test("checkpoint carries the published MIS 19 boundary conditions", () => {
@@ -117,7 +117,7 @@ test("regional materialization is finite and classified", () => {
   assert.ok(region.biome.length > 3);
 });
 
-test("integrity audit catches accidentally frozen internal state", () => {
+test("integrity audit catches accidentally frozen internal state and declares evolving terrain", () => {
   const engine = new FreeEarthEngine(991);
   const states = [engine.snapshot(), engine.advance(2_500), engine.advance(7_500), engine.advance(20_000)];
   const audit = auditTrajectory(states);
@@ -125,5 +125,9 @@ test("integrity audit catches accidentally frozen internal state", () => {
   assert.ok(!audit.unexpectedlyUnchanged.includes("co2"));
   assert.ok(!audit.unexpectedlyUnchanged.includes("methane"));
   assert.ok(!audit.unexpectedlyUnchanged.includes("nitrousOxide"));
-  assert.ok(audit.declaredFixedSystems.includes("terrain"));
+  assert.ok(!audit.unexpectedlyUnchanged.includes("tectonicTimeMyr"));
+  assert.ok(!audit.declaredFixedSystems.includes("terrain"));
+  assert.equal(EARTH_SYSTEM_STATUS.terrain.status, "dynamic-partial");
+  assert.equal(EARTH_SYSTEM_STATUS.tectonics.status, "dynamic-partial");
+  assert.equal(EARTH_SYSTEM_STATUS.culture.status, "dynamic-partial");
 });

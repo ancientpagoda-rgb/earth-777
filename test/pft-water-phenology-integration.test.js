@@ -55,7 +55,7 @@ test("normal vegetation sampling remains lightweight and keeps the published cat
   assert.equal("dailyWaterTrace" in sample, false);
 });
 
-test("selected-region PFT diagnostics consume the conserved trace without enabling biome transitions", () => {
+test("selected-region PFT diagnostics consume the conserved trace and run competition without mutating checkpoint state", () => {
   const baseline = spatial.sample(state, joint.latitude, joint.longitude, 0.9);
   const diagnostics = spatial.pftDiagnostics(state, joint.latitude, joint.longitude, 0.9);
   assert.ok(diagnostics);
@@ -66,7 +66,12 @@ test("selected-region PFT diagnostics consume the conserved trace without enabli
   assert.equal(diagnostics.parallelVirtualHydrologyEnabled, true);
   assert.equal(diagnostics.laiNppOptimizationEnabled, true);
   assert.equal(diagnostics.fireDrynessDiagnosticsEnabled, true);
-  assert.equal(diagnostics.competitiveOccupancyEnabled, false);
+  assert.equal(diagnostics.competitiveOccupancyEnabled, true);
+  assert.equal(diagnostics.categoricalBiomeTransitionsEnabled, true);
+  assert.ok(diagnostics.competition);
+  assert.ok(diagnostics.succession);
+  assert.equal(diagnostics.succession.progress, 0);
+  assert.equal(diagnostics.succession.biomeLabel, baseline.biomeLabel);
   for (const candidate of diagnostics.candidates) {
     if (!candidate.virtualHydrology) continue;
     assert.ok(Math.abs(candidate.virtualHydrology.massBalanceResidualMm) < 1e-6);
@@ -107,7 +112,7 @@ test("PFT diagnostics are deterministic and cached separately from lightweight v
   assert.equal(info.pftHydrologyFeedbackEnabled, false);
   assert.equal(info.pftLaiNppOptimizationIntegrated, true);
   assert.equal(info.pftFireDrynessDiagnosticsIntegrated, true);
-  assert.equal(info.pftCompetitionEnabled, false);
-  assert.equal(info.categoricalBiomeTransitionsEnabled, false);
+  assert.equal(info.pftCompetitionEnabled, true);
+  assert.equal(info.categoricalBiomeTransitionsEnabled, true);
   assert.ok(info.cachedPftDiagnostics >= 1);
 });
