@@ -123,6 +123,7 @@ export class EarthView {
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
+    this.terrain.setEarthSystemState?.(state, state.seed);
     this.applyPerformanceSettings(false);
     const now = performance.now();
     if ((force || Math.abs(state.yearBP - this.lastTextureYear) >= EARTH_REFRESH_YEARS) && !this.interacting && (force || now - this.lastEarthRefreshMs >= EARTH_INTERVAL_MS)) this._requestEarthRaster(state);
