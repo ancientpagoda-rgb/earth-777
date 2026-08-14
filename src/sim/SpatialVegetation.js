@@ -5,30 +5,44 @@ import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";
 import { runBiome4VirtualPftHydrologyTrial } from "./Biome4VirtualPftHydrology.js";
 import { optimizeBiome4PftLaiNpp } from "./Biome4PftGrowth.js";
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
+import { BIOGEOCHEMISTRY_BASELINE } from "./EarthBiogeochemistry.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
+const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 
-export const SPATIAL_VEGETATION_POLICY = "biome4-checkpoint-hydro-co2-response-v1";
+export const SPATIAL_VEGETATION_POLICY = "biome4-checkpoint-hydro-co2-n-response-v2";
+
+function saturatingSupply(value, halfSaturation) {
+  const amount = Math.max(0, Number(value) || 0);
+  return amount / (amount + halfSaturation);
+}
 
 function responseFactor(globalState, currentHydrology, checkpointHydrology) {
   let waterRatio = 1;
   const currentAet = currentHydrology?.actualEvapotranspirationMmPerYear;
   const checkpointAet = checkpointHydrology?.actualEvapotranspirationMmPerYear;
   if (Number.isFinite(currentAet) && Number.isFinite(checkpointAet) && checkpointAet > 5) {
-    waterRatio = clamp(currentAet / checkpointAet, 0.15, 4);
+    const currentSupply = saturatingSupply(currentAet, 650);
+    const checkpointSupply = saturatingSupply(checkpointAet, 650);
+    waterRatio = positive(currentSupply) / positive(checkpointSupply);
   } else {
     const currentMoisture = currentHydrology?.soilMoistureIndex;
     const checkpointMoisture = checkpointHydrology?.soilMoistureIndex;
     if (Number.isFinite(currentMoisture) && Number.isFinite(checkpointMoisture) && checkpointMoisture > 0.02) {
-      waterRatio = clamp(currentMoisture / checkpointMoisture, 0.15, 4);
+      waterRatio = Math.sqrt(positive(currentMoisture) / positive(checkpointMoisture));
     }
   }
 
-  const co2 = clamp(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value, 120, 600);
+  const co2 = positive(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value);
   const checkpointCo2 = CHECKPOINT_777.boundary.co2.value;
-  const co2Ratio = clamp((co2 / checkpointCo2) ** 0.25, 0.75, 1.35);
-  return clamp(waterRatio ** 0.65 * co2Ratio, 0.15, 2.5);
+  const co2Assimilation = saturatingSupply(co2, 180);
+  const checkpointCo2Assimilation = saturatingSupply(checkpointCo2, 180);
+  const co2Response = (co2Assimilation / checkpointCo2Assimilation) ** 0.65;
+
+  const nitrogenBaseline = BIOGEOCHEMISTRY_BASELINE.nitrogen.terrestrialReactiveTgN;
+  const nitrogenAvailability = positive(globalState.terrestrialReactiveNitrogenTgN ?? nitrogenBaseline) / nitrogenBaseline;
+  return positive(waterRatio ** 0.65 * co2Response * nitrogenAvailability ** 0.16, 0.001);
 }
 
 function climateEligibility(hydrology, pftDrivers, globalState, latitude, longitude, detail) {
@@ -81,6 +95,7 @@ export class SpatialVegetation {
       round(globalState.temperatureAnomaly ?? 0, 3),
       round(globalState.iceIndex ?? 0, 4),
       round(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value, 2),
+      round(globalState.terrestrialReactiveNitrogenTgN ?? BIOGEOCHEMISTRY_BASELINE.nitrogen.terrestrialReactiveTgN, 0),
       round(spatialDetail, 2)
     ].join("|");
   }
@@ -90,6 +105,7 @@ export class SpatialVegetation {
       round(globalState.temperatureAnomaly ?? 0, 1),
       round(globalState.iceIndex ?? 0, 2),
       round(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value, 0),
+      round(globalState.terrestrialReactiveNitrogenTgN ?? BIOGEOCHEMISTRY_BASELINE.nitrogen.terrestrialReactiveTgN, 0),
       round(spatialDetail, 1)
     ].join("|");
   }
@@ -125,9 +141,7 @@ export class SpatialVegetation {
 
     const pftClimate = climateEligibility(this.hydrology, this.pftDrivers, globalState, sampleLatitude, sampleLongitude, detail);
     const npp = published.npp * factor;
-    const lai = Number.isFinite(published.lai)
-      ? published.lai * clamp(factor ** 0.55, 0.25, 1.8)
-      : null;
+    const lai = Number.isFinite(published.lai) ? published.lai * factor ** 0.55 : null;
     const transitionPressure = isCheckpoint ? 0 : clamp(Math.abs(Math.log(Math.max(1e-6, factor))) / Math.log(2.5), 0, 1);
     const result = Object.freeze({
       latitude: sampleLatitude,
@@ -153,7 +167,7 @@ export class SpatialVegetation {
       policy: SPATIAL_VEGETATION_POLICY,
       epistemicStatus: isCheckpoint
         ? "study-constrained published BIOME4 model output at 777 ka; BIOME4-parameter PFT climate eligibility is independently recomputed as a diagnostic only"
-        : "published BIOME4 777 ka category/NPP/LAI baseline + model-derived hydroclimate and CO2 productivity response; independently recomputed BIOME4-parameter climate eligibility identifies candidate PFTs, but NPP/LAI competition and categorical biome transitions are not yet simulated"
+        : "published BIOME4 777 ka category/NPP/LAI baseline + model-derived hydroclimate, saturating CO2 assimilation and reactive-nitrogen productivity response; independently recomputed BIOME4-parameter climate eligibility identifies candidate PFTs, but occupancy competition and categorical biome transitions are not yet simulated"
     });
     this.cache.set(key, result);
     return result;
@@ -237,11 +251,7 @@ export class SpatialVegetation {
         }
       }
       const fireDryness = laiNppOptimization?.fireDryness ?? null;
-      const fireDrynessStatus = fireDryness
-        ? "resolved"
-        : laiNppOptimization
-          ? "nonproductive-no-optimum"
-          : "not-optimized";
+      const fireDrynessStatus = fireDryness ? "resolved" : laiNppOptimization ? "nonproductive-no-optimum" : "not-optimized";
       return Object.freeze({
         ...diagnostic,
         climateEligibilityStatus: isClimateEligible ? "eligible" : climateUnresolved.has(pftId) ? "unresolved" : "unknown",
@@ -251,9 +261,7 @@ export class SpatialVegetation {
         fireDrynessStatus
       });
     });
-    const raingreenDiscrepancyPftIds = candidates
-      .filter((candidate) => candidate.raingreenThresholdDiscrepancy)
-      .map((candidate) => candidate.pftId);
+    const raingreenDiscrepancyPftIds = candidates.filter((candidate) => candidate.raingreenThresholdDiscrepancy).map((candidate) => candidate.pftId);
     const result = Object.freeze({
       status: "resolved",
       latitude: annual.latitude,
@@ -318,7 +326,7 @@ export class SpatialVegetation {
       categoricalBiomeTransitionsEnabled: false,
       snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",
       absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),
-      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, parallel conductance/equilibrium-demand water trials, and selected-region source-operational LAI/NPP optimization plus fire/top-layer-dryness diagnostics for productive eligible candidates, with nonproductive eligible candidates explicitly unresolved for fire/dryness rather than fabricated; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled"
+      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response from evolving hydroclimate, saturating CO2 assimilation and reactive nitrogen, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, parallel conductance/equilibrium-demand water trials, and selected-region source-operational LAI/NPP optimization plus fire/top-layer-dryness diagnostics for productive eligible candidates, with nonproductive eligible candidates explicitly unresolved for fire/dryness rather than fabricated; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled"
     });
   }
 }
