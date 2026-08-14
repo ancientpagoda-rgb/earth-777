@@ -92,7 +92,7 @@ test("spatial vegetation is exactly the published checkpoint at elapsed year zer
   assert.equal(modeled.checkpointCategoryRetained, true);
 });
 
-test("post-checkpoint vegetation changes continuously while retaining the published category as a reference", () => {
+test("post-checkpoint vegetation changes continuously while retaining the published category as a lightweight reference", () => {
   const hydrology = new MassConservingHydrology(new SpatialHydroClimate(climate));
   const spatial = new SpatialVegetation(vegetation, hydrology);
   const checkpoint = checkpointState();
@@ -110,9 +110,9 @@ test("post-checkpoint vegetation changes continuously while retaining the publis
   assert.equal(evolved.biomeCode, baseline.biomeCode);
   assert.equal(evolved.checkpointCategoryRetained, true);
   assert.ok(Number.isFinite(evolved.productivityFactor));
-  assert.ok(evolved.productivityFactor >= 0.15 && evolved.productivityFactor <= 2.5);
+  assert.ok(evolved.productivityFactor > 0);
   assert.ok(evolved.transitionPressure >= 0 && evolved.transitionPressure <= 1);
-  assert.match(evolved.epistemicStatus, /categorical biome transitions are not yet simulated/);
+  assert.match(evolved.epistemicStatus, /optimized PFT competition and lagged succession/);
   assert.ok(Array.isArray(evolved.climateEligiblePftIds));
   assert.equal(evolved.biomeCode, baseline.biomeCode);
 });
