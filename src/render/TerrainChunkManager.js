@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
+import { tectonicElevationOffsetMeters } from "../sim/DynamicLithosphere.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -34,16 +35,72 @@ export class TerrainChunkManager {
     this.origin = null;
     this.baseElevationMeters = 0;
     this.biomeProfile = null;
+    this.earthState = null;
+    this.branchSeed = 777001;
+    this.topographySignature = "none";
+    this.contourIntervalMeters = 50;
+    this.contourOpacity = 0.32;
+    this.contourUniforms = null;
     this.chunks = new Map();
     this.queue = [];
     this.queuedKeys = new Set();
     this.lastCenter = { x: Number.NaN, z: Number.NaN };
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, side: THREE.FrontSide });
+    this._installContourShader();
+  }
+
+  _installContourShader() {
+    this.material.onBeforeCompile = (shader) => {
+      shader.uniforms.uContourIntervalMeters = { value: this.contourIntervalMeters };
+      shader.uniforms.uContourOpacity = { value: this.contourOpacity };
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nattribute float elevationMeters;\nvarying float vTerrainElevationMeters;"
+        )
+        .replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\nvTerrainElevationMeters = elevationMeters;"
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          "#include <common>\nvarying float vTerrainElevationMeters;\nuniform float uContourIntervalMeters;\nuniform float uContourOpacity;"
+        )
+        .replace(
+          "#include <dithering_fragment>",
+          `float contourCoord = vTerrainElevationMeters / max(1.0, uContourIntervalMeters);
+float contourFraction = fract(contourCoord);
+float contourDistance = min(contourFraction, 1.0 - contourFraction);
+float contourAA = max(fwidth(contourCoord) * 1.35, 0.0075);
+float contourLine = 1.0 - smoothstep(0.0, contourAA * 1.8, contourDistance);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * uContourOpacity);
+#include <dithering_fragment>`
+        );
+      this.contourUniforms = shader.uniforms;
+    };
+    this.material.customProgramCacheKey = () => "earth777-terrain-contours-v1";
+  }
+
+  setEarthSystemState(state, seed = state?.seed ?? this.branchSeed) {
+    this.earthState = state ?? null;
+    this.branchSeed = Number(seed) >>> 0;
+    const elapsedBand = Math.floor((Number(state?.elapsedYears) || 0) / 2_500);
+    const boundaryBand = Math.round((Number(state?.tectonicBoundaryActivity) || 1) * 20);
+    const nextSignature = `${elapsedBand}:${boundaryBand}:${this.branchSeed}`;
+    if (nextSignature !== this.topographySignature) {
+      this.topographySignature = nextSignature;
+      if (this.origin) {
+        this.baseElevationMeters = this._elevationAt(this.origin.latitude, this.origin.longitude);
+        this.clear();
+        this.lastCenter = { x: Number.NaN, z: Number.NaN };
+      }
+    }
   }
 
   setOrigin(latitude, longitude) {
     this.origin = { latitude: Number(latitude), longitude: Number(longitude) };
-    this.baseElevationMeters = bedrockElevationAt(this.origin.latitude, this.origin.longitude);
+    this.baseElevationMeters = this._elevationAt(this.origin.latitude, this.origin.longitude);
     this.clear();
     this.lastCenter = { x: Number.NaN, z: Number.NaN };
   }
@@ -59,16 +116,34 @@ export class TerrainChunkManager {
     }
   }
 
+  setContourSettings({ intervalMeters = this.contourIntervalMeters, opacity = this.contourOpacity } = {}) {
+    this.contourIntervalMeters = Math.max(10, Number(intervalMeters) || 50);
+    this.contourOpacity = clamp(opacity, 0, 0.8);
+    if (this.contourUniforms) {
+      this.contourUniforms.uContourIntervalMeters.value = this.contourIntervalMeters;
+      this.contourUniforms.uContourOpacity.value = this.contourOpacity;
+    }
+  }
+
   configure({ radius = this.radius, segments = this.segments } = {}) {
     const nextRadius = clamp(Math.round(radius), 1, 4);
     const nextSegments = clamp(Math.round(segments), 8, 32);
     const topologyChanged = nextSegments !== this.segments;
     this.radius = nextRadius;
     this.segments = nextSegments;
+    const intervalMeters = nextSegments >= 22 ? 25 : nextSegments >= 16 ? 50 : nextSegments >= 12 ? 75 : 100;
+    const opacity = nextSegments >= 16 ? 0.34 : 0.24;
+    this.setContourSettings({ intervalMeters, opacity });
     if (topologyChanged) {
       this.clear();
       this.lastCenter = { x: Number.NaN, z: Number.NaN };
     }
+  }
+
+  _elevationAt(latitude, longitude) {
+    const bedrock = bedrockElevationAt(latitude, longitude);
+    if (!this.earthState) return bedrock;
+    return bedrock + tectonicElevationOffsetMeters(this.earthState, latitude, longitude, this.branchSeed);
   }
 
   _geographicAt(xKm, zKm) {
@@ -92,7 +167,7 @@ export class TerrainChunkManager {
   heightAt(xKm, zKm) {
     if (!this.origin) return 0;
     const { latitude, longitude } = this._geographicAt(xKm, zKm);
-    const elevationMeters = bedrockElevationAt(latitude, longitude);
+    const elevationMeters = this._elevationAt(latitude, longitude);
     return (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + this._microreliefKm(xKm, zKm, elevationMeters);
   }
 
@@ -150,6 +225,7 @@ export class TerrainChunkManager {
     const vertexSide = segments + 1;
     const positions = new Float32Array(vertexSide * vertexSide * 3);
     const colors = new Float32Array(vertexSide * vertexSide * 3);
+    const elevations = new Float32Array(vertexSide * vertexSide);
     const indices = new Uint32Array(segments * segments * 6);
     const half = this.chunkSizeKm / 2;
     const centerX = chunkX * this.chunkSizeKm;
@@ -160,11 +236,12 @@ export class TerrainChunkManager {
       for (let x = 0; x <= segments; x += 1) {
         const localX = centerX + (x / segments) * this.chunkSizeKm - half;
         const { latitude, longitude } = this._geographicAt(localX, localZ);
-        const elevationMeters = bedrockElevationAt(latitude, longitude);
+        const elevationMeters = this._elevationAt(latitude, longitude);
         const y = (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + this._microreliefKm(localX, localZ, elevationMeters);
         positions[vertexOffset * 3] = localX;
         positions[vertexOffset * 3 + 1] = y;
         positions[vertexOffset * 3 + 2] = localZ;
+        elevations[vertexOffset] = elevationMeters;
         const [r, g, b] = terrainColor(latitude, elevationMeters, elevationMeters - this.baseElevationMeters, this.biomeProfile?.groundColor);
         colors[vertexOffset * 3] = r;
         colors[vertexOffset * 3 + 1] = g;
@@ -186,6 +263,7 @@ export class TerrainChunkManager {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute("elevationMeters", new THREE.BufferAttribute(elevations, 1));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
@@ -196,7 +274,16 @@ export class TerrainChunkManager {
   }
 
   diagnostics() {
-    return Object.freeze({ loadedChunks: this.chunks.size, queuedChunks: this.queue.length, radius: this.radius, segments: this.segments, chunkSizeKm: this.chunkSizeKm });
+    return Object.freeze({
+      loadedChunks: this.chunks.size,
+      queuedChunks: this.queue.length,
+      radius: this.radius,
+      segments: this.segments,
+      chunkSizeKm: this.chunkSizeKm,
+      contourIntervalMeters: this.contourIntervalMeters,
+      contourOpacity: this.contourOpacity,
+      dynamicTopography: Boolean(this.earthState)
+    });
   }
 
   clear() {
