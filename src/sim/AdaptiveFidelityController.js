@@ -3,27 +3,12 @@ import { createFidelityPlan } from "./fidelity-policy.js";
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-const TIER_TEMPORAL_SUBSTEPS = Object.freeze({
-  high: 4,
-  medium: 2,
-  background: 1
-});
-
-const TIER_SPATIAL_DETAIL = Object.freeze({
-  high: 1,
-  medium: 0.65,
-  background: 0.35
-});
+const TIER_TEMPORAL_SUBSTEPS = Object.freeze({ high: 4, medium: 2, background: 1 });
+const TIER_SPATIAL_DETAIL = Object.freeze({ high: 1, medium: 0.65, background: 0.35 });
 
 const RUNTIME_BOUND_SYSTEMS = new Set([
-  "carbon",
-  "climate",
-  "ice",
-  "seaLevel",
-  "herbivores",
-  "carnivores",
-  "hominins",
-  "magnetism"
+  "carbon", "methane", "nitrogen", "climate", "ocean", "ice", "seaLevel",
+  "herbivores", "carnivores", "hominins", "magnetism"
 ]);
 
 function normalizeObserverRelevance(observerRelevance = {}) {
@@ -32,7 +17,7 @@ function normalizeObserverRelevance(observerRelevance = {}) {
   ));
 }
 
-export const ADAPTIVE_RUNTIME_POLICY = "consequence-weighted-fidelity-runtime-v1";
+export const ADAPTIVE_RUNTIME_POLICY = "consequence-weighted-fidelity-runtime-v2";
 
 export class AdaptiveFidelityController {
   constructor({ budget = 1, observerRelevance = {}, refreshYears = 250 } = {}) {
@@ -65,17 +50,9 @@ export class AdaptiveFidelityController {
 
   update(state = {}) {
     const elapsedYears = Number(state.elapsedYears) || 0;
-    if (
-      this.lastPlan &&
-      Math.abs(elapsedYears - this.lastPlanElapsedYears) < this.refreshYears
-    ) {
-      return this.lastPlan;
-    }
+    if (this.lastPlan && Math.abs(elapsedYears - this.lastPlanElapsedYears) < this.refreshYears) return this.lastPlan;
 
-    const plan = createFidelityPlan(state, {
-      budget: this.budget,
-      observerRelevance: this.observerRelevance
-    });
+    const plan = createFidelityPlan(state, { budget: this.budget, observerRelevance: this.observerRelevance });
     const budgetScale = clamp(this.budget, 0.25, 3);
     const targets = plan.targets.map((target) => {
       const baseSubsteps = TIER_TEMPORAL_SUBSTEPS[target.tier] ?? 1;
@@ -83,12 +60,7 @@ export class AdaptiveFidelityController {
       const spatialDetail = clamp01(
         (TIER_SPATIAL_DETAIL[target.tier] ?? 0.35) * Math.min(1.25, Math.sqrt(budgetScale))
       );
-      return Object.freeze({
-        ...target,
-        temporalSubsteps,
-        spatialDetail,
-        runtimeBound: RUNTIME_BOUND_SYSTEMS.has(target.id)
-      });
+      return Object.freeze({ ...target, temporalSubsteps, spatialDetail, runtimeBound: RUNTIME_BOUND_SYSTEMS.has(target.id) });
     });
 
     this.lastPlan = Object.freeze({
@@ -102,9 +74,7 @@ export class AdaptiveFidelityController {
     return this.lastPlan;
   }
 
-  decisionFor(id) {
-    return this.lastPlan?.targets.find((target) => target.id === id) ?? null;
-  }
+  decisionFor(id) { return this.lastPlan?.targets.find((target) => target.id === id) ?? null; }
 
   recordExecution(id, substeps = 1) {
     const count = Math.max(0, Math.floor(Number(substeps) || 0));

@@ -2,7 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { CHECKPOINT_777 } from "../src/data/checkpoint-777.js";
 import { ORBITAL_ANCHOR, paleoForcingAt } from "../src/data/paleo-forcing.js";
-import { FreeEarthEngine, regionalState } from "../src/sim/free-earth.js";
+import {
+  BIOGEOCHEMISTRY_BASELINE,
+  initializeBiogeochemistry,
+  advanceBiogeochemistry,
+  syncAtmosphereFromReservoirs,
+  trackedCarbonPgC,
+  trackedNitrogenTgN
+} from "../src/sim/EarthBiogeochemistry.js";
+import { auditTrajectory } from "../src/sim/EarthSystemIntegrity.js";
+import { FreeEarthEngine, regionalState, stageForYearBP } from "../src/sim/free-earth.js";
 
 test("checkpoint carries the published MIS 19 boundary conditions", () => {
   assert.equal(CHECKPOINT_777.yearsBeforePresent, 777_000);
@@ -41,16 +50,55 @@ test("Free Earth branches are deterministic by seed", () => {
   assert.deepEqual(first.advance(12_000), second.advance(12_000));
 });
 
-test("different branches diverge without leaving physical guardrails", () => {
+test("different branches diverge while concentrations remain physical rather than artificially capped", () => {
   const first = new FreeEarthEngine(777001).advance(25_000);
   const second = new FreeEarthEngine(777002).advance(25_000);
   assert.notEqual(first.co2, second.co2);
   for (const state of [first, second]) {
     assert.ok(Number.isFinite(state.temperatureAnomaly));
-    assert.ok(state.co2 >= 170 && state.co2 <= 330);
-    assert.ok(state.iceIndex >= 0.03 && state.iceIndex <= 1);
+    assert.ok(state.co2 > 0);
+    assert.ok(state.methane > 0);
+    assert.ok(state.nitrousOxide > 0);
+    assert.ok(state.iceIndex >= 0 && state.iceIndex <= 1);
     assert.ok(state.yearBP >= 0 && state.yearBP <= 777_000);
   }
+});
+
+test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
+  const engine = new FreeEarthEngine(77);
+  engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;
+  syncAtmosphereFromReservoirs(engine.state);
+  assert.equal(Math.round(engine.state.co2), 800);
+  const evolved = engine.advance(25);
+  assert.ok(evolved.co2 > 330);
+});
+
+test("carbon and nitrogen reservoirs conserve tracked elemental mass", () => {
+  const state = initializeBiogeochemistry({
+    co2: 245, methane: 631, nitrousOxide: 270, temperatureAnomaly: -1.27,
+    oceanTemperatureAnomaly: -1.27, iceIndex: 0.18, productivityIndex: 1, geologicActivityIndex: 1
+  });
+  const carbonBefore = trackedCarbonPgC(state);
+  const nitrogenBefore = trackedNitrogenTgN(state);
+  for (let step = 0; step < 200; step += 1) advanceBiogeochemistry(state, 25, { perturbation: Math.sin(step) * 0.2 });
+  assert.ok(Math.abs(trackedCarbonPgC(state) - carbonBefore) < 1e-4);
+  assert.ok(Math.abs(trackedNitrogenTgN(state) - nitrogenBefore) < 1e-3);
+  assert.notEqual(Number(state.methane.toFixed(6)), 631);
+  assert.notEqual(Number(state.nitrousOxide.toFixed(6)), 270);
+});
+
+test("simulated sea level is free to diverge from the reconstruction reference", () => {
+  const state = new FreeEarthEngine(1234).advance(40_000);
+  assert.ok(Number.isFinite(state.seaLevelReference));
+  assert.ok(Number.isFinite(state.seaLevel));
+  assert.notEqual(state.seaLevel, state.seaLevelReference);
+});
+
+test("geological stage advances instead of remaining frozen at the checkpoint label", () => {
+  assert.equal(stageForYearBP(777_000), "Late MIS 19c");
+  assert.equal(stageForYearBP(100_000), "Late Pleistocene");
+  assert.equal(stageForYearBP(7_000), "Holocene");
+  assert.equal(new FreeEarthEngine(88).seek(770_000).stage, "Holocene");
 });
 
 test("seeking backward reconstructs the same deterministic state", () => {
@@ -67,4 +115,15 @@ test("regional materialization is finite and classified", () => {
   const region = regionalState(state, 52, 13);
   assert.ok(Number.isFinite(region.annualTemperature));
   assert.ok(region.biome.length > 3);
+});
+
+test("integrity audit catches accidentally frozen internal state", () => {
+  const engine = new FreeEarthEngine(991);
+  const states = [engine.snapshot(), engine.advance(2_500), engine.advance(7_500), engine.advance(20_000)];
+  const audit = auditTrajectory(states);
+  assert.deepEqual(audit.nonFinite, []);
+  assert.ok(!audit.unexpectedlyUnchanged.includes("co2"));
+  assert.ok(!audit.unexpectedlyUnchanged.includes("methane"));
+  assert.ok(!audit.unexpectedlyUnchanged.includes("nitrousOxide"));
+  assert.ok(audit.declaredFixedSystems.includes("terrain"));
 });
