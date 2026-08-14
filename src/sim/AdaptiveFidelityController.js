@@ -7,8 +7,8 @@ const TIER_TEMPORAL_SUBSTEPS = Object.freeze({ high: 4, medium: 2, background: 1
 const TIER_SPATIAL_DETAIL = Object.freeze({ high: 1, medium: 0.65, background: 0.35 });
 
 const RUNTIME_BOUND_SYSTEMS = new Set([
-  "carbon", "methane", "nitrogen", "climate", "ocean", "ice", "seaLevel",
-  "herbivores", "carnivores", "hominins", "magnetism"
+  "tectonics", "carbon", "methane", "nitrogen", "climate", "ocean", "ice", "seaLevel",
+  "herbivores", "carnivores", "evolution", "hominins", "magnetism"
 ]);
 
 function normalizeObserverRelevance(observerRelevance = {}) {
@@ -17,7 +17,7 @@ function normalizeObserverRelevance(observerRelevance = {}) {
   ));
 }
 
-export const ADAPTIVE_RUNTIME_POLICY = "consequence-weighted-fidelity-runtime-v2";
+export const ADAPTIVE_RUNTIME_POLICY = "consequence-weighted-fidelity-runtime-v3";
 
 export class AdaptiveFidelityController {
   constructor({ budget = 1, observerRelevance = {}, refreshYears = 250 } = {}) {
