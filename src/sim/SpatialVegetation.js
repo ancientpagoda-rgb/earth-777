@@ -4,6 +4,8 @@ import { biome4MaximumSnowDepth } from "./Biome4Snow.js";
 import { evaluateBiome4PftWaterPhenology } from "./Biome4PftWaterPhenology.js";
 import { runBiome4VirtualPftHydrologyTrial } from "./Biome4VirtualPftHydrology.js";
 import { optimizeBiome4PftLaiNpp } from "./Biome4PftGrowth.js";
+import { biome4PftCompetitionDiagnostic } from "./Biome4PftCompetition.js";
+import { deriveCompetitiveBiomeSuccession } from "./BiomeSuccession.js";
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
 import { BIOGEOCHEMISTRY_BASELINE } from "./EarthBiogeochemistry.js";
 
@@ -11,7 +13,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 
-export const SPATIAL_VEGETATION_POLICY = "biome4-checkpoint-hydro-co2-n-response-v2";
+export const SPATIAL_VEGETATION_POLICY = "biome4-checkpoint-hydro-co2-n-competition-v3";
 
 function saturatingSupply(value, halfSaturation) {
   const amount = Math.max(0, Number(value) || 0);
@@ -70,6 +72,13 @@ function climateEligibility(hydrology, pftDrivers, globalState, latitude, longit
   });
 }
 
+function annualizedMonthlyMean(values) {
+  if (!values || typeof values[Symbol.iterator] !== "function") return null;
+  const finite = Array.from(values, Number).filter(Number.isFinite);
+  if (finite.length !== 12) return null;
+  return finite.reduce((sum, value) => sum + value, 0) / 12;
+}
+
 export class SpatialVegetation {
   constructor(checkpointVegetation, hydrology, pftDrivers = null) {
     if (!checkpointVegetation?.annualAt || !checkpointVegetation?.monthlyNppAt) {
@@ -106,6 +115,7 @@ export class SpatialVegetation {
       round(globalState.iceIndex ?? 0, 2),
       round(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value, 0),
       round(globalState.terrestrialReactiveNitrogenTgN ?? BIOGEOCHEMISTRY_BASELINE.nitrogen.terrestrialReactiveTgN, 0),
+      round(globalState.elapsedYears ?? 0, -2),
       round(spatialDetail, 1)
     ].join("|");
   }
@@ -166,8 +176,8 @@ export class SpatialVegetation {
       source: published.source,
       policy: SPATIAL_VEGETATION_POLICY,
       epistemicStatus: isCheckpoint
-        ? "study-constrained published BIOME4 model output at 777 ka; BIOME4-parameter PFT climate eligibility is independently recomputed as a diagnostic only"
-        : "published BIOME4 777 ka category/NPP/LAI baseline + model-derived hydroclimate, saturating CO2 assimilation and reactive-nitrogen productivity response; independently recomputed BIOME4-parameter climate eligibility identifies candidate PFTs, but occupancy competition and categorical biome transitions are not yet simulated"
+        ? "study-constrained published BIOME4 model output at 777 ka; BIOME4-parameter PFT climate eligibility is independently recomputed"
+        : "published BIOME4 777 ka NPP/LAI reference + branch hydroclimate, saturating CO2 assimilation and reactive-nitrogen productivity response; selected-region diagnostics run optimized PFT competition and lagged succession"
     });
     this.cache.set(key, result);
     return result;
@@ -199,13 +209,16 @@ export class SpatialVegetation {
         parallelVirtualHydrologyEnabled: false,
         laiNppOptimizationEnabled: false,
         competitiveOccupancyEnabled: false,
+        categoricalBiomeTransitionsEnabled: false,
+        competition: null,
+        succession: null,
         candidateCount: candidateIds.length,
         resolvedCount: 0,
         candidatePftIds: Object.freeze(candidateIds),
         candidates: Object.freeze([]),
         raingreenDiscrepancyPftIds: Object.freeze([]),
         soilStatus: trace?.soilStatus ?? null,
-        epistemicStatus: trace?.epistemicStatus ?? "PFT daily rooting and phenology diagnostics require a valid BIOME4 two-layer soil trace; no monthly soil approximation is substituted."
+        epistemicStatus: trace?.epistemicStatus ?? "PFT competition requires a valid BIOME4 two-layer daily water trace; no monthly soil approximation is substituted."
       });
       this.pftDiagnosticCache.set(key, unresolved);
       if (this.pftDiagnosticCache.size > 24) this.pftDiagnosticCache.delete(this.pftDiagnosticCache.keys().next().value);
@@ -261,6 +274,27 @@ export class SpatialVegetation {
         fireDrynessStatus
       });
     });
+
+    const annualPrecipitationMm = annualizedMonthlyMean(trace.monthlyPrecipitationMmPerYear);
+    let competition = null;
+    if (annual.pftClimateIndices && Number.isFinite(annualPrecipitationMm)) {
+      competition = biome4PftCompetitionDiagnostic({
+        candidates,
+        climateIndices: annual.pftClimateIndices,
+        annualPrecipitationMm
+      });
+    }
+    const succession = competition
+      ? deriveCompetitiveBiomeSuccession({
+          elapsedYears: globalState.elapsedYears,
+          checkpointBiomeLabel: annual.biomeLabel,
+          competition,
+          climateIndices: annual.pftClimateIndices,
+          annualPrecipitationMm,
+          transitionPressure: annual.transitionPressure
+        })
+      : null;
+
     const raingreenDiscrepancyPftIds = candidates.filter((candidate) => candidate.raingreenThresholdDiscrepancy).map((candidate) => candidate.pftId);
     const result = Object.freeze({
       status: "resolved",
@@ -268,13 +302,17 @@ export class SpatialVegetation {
       longitude: annual.longitude,
       gridSpacingDegrees: annual.gridSpacingDegrees,
       biomeCode: annual.biomeCode,
-      biomeLabel: annual.biomeLabel,
-      checkpointCategoryRetained: true,
+      biomeLabel: succession?.biomeLabel ?? annual.biomeLabel,
+      checkpointBiomeLabel: annual.biomeLabel,
+      checkpointCategoryRetained: (globalState.elapsedYears ?? 0) <= 0,
       hydrologyFeedbackEnabled: false,
       parallelVirtualHydrologyEnabled: true,
       laiNppOptimizationEnabled: true,
       fireDrynessDiagnosticsEnabled: true,
-      competitiveOccupancyEnabled: false,
+      competitiveOccupancyEnabled: Boolean(competition),
+      categoricalBiomeTransitionsEnabled: Boolean(succession?.status === "resolved"),
+      competition,
+      succession,
       optimizedCandidateCount: candidates.filter((candidate) => candidate.laiNppOptimization).length,
       fireDrynessResolvedCount: candidates.filter((candidate) => candidate.fireDrynessStatus === "resolved").length,
       nonproductiveOptimizedCandidateCount: candidates.filter((candidate) => candidate.fireDrynessStatus === "nonproductive-no-optimum").length,
@@ -285,7 +323,7 @@ export class SpatialVegetation {
       raingreenDiscrepancyPftIds: Object.freeze(raingreenDiscrepancyPftIds),
       waterBalanceResidualMm: trace.waterBalanceResidualMm,
       soilSource: trace.soilSource,
-      epistemicStatus: "BIOME4-parameter daily rooting/phenology diagnostics, parallel source-equation candidate water trials, and source-operational 16-evaluation LAI/NPP optimization for climate-eligible candidates only. Optimized productivity is diagnostic: no candidate is selected for occupancy, shared Earth hydrology is unchanged, and categorical biome transitions remain disabled."
+      epistemicStatus: "BIOME4 climate eligibility, daily rooting/phenology, parallel candidate water trials, optimized LAI/NPP and fire dryness feed the independently reproduced competition2 selector; its selected PFT drives a lagged broad biome succession state while shared hydrology feedback remains future work."
     });
     this.pftDiagnosticCache.set(key, result);
     if (this.pftDiagnosticCache.size > 24) this.pftDiagnosticCache.delete(this.pftDiagnosticCache.keys().next().value);
@@ -322,11 +360,11 @@ export class SpatialVegetation {
       pftParallelVirtualHydrologyIntegrated: true,
       pftLaiNppOptimizationIntegrated: true,
       pftFireDrynessDiagnosticsIntegrated: true,
-      pftCompetitionEnabled: false,
-      categoricalBiomeTransitionsEnabled: false,
+      pftCompetitionEnabled: true,
+      categoricalBiomeTransitionsEnabled: true,
       snowConstraintState: "BIOME4-compatible two-year degree-day snow diagnostic integrated",
       absoluteMinimumTemperatureDriverIntegrated: Boolean(this.pftDrivers),
-      epistemicStatus: "published BIOME4 checkpoint with continuous branch productivity response from evolving hydroclimate, saturating CO2 assimilation and reactive nitrogen, independently implemented BIOME4 climate candidate sieve, daily PFT rooting/phenology diagnostics, parallel conductance/equilibrium-demand water trials, and selected-region source-operational LAI/NPP optimization plus fire/top-layer-dryness diagnostics for productive eligible candidates, with nonproductive eligible candidates explicitly unresolved for fire/dryness rather than fabricated; occupancy competition, shared hydrology feedback, and categorical biome transitions remain disabled"
+      epistemicStatus: "published BIOME4 checkpoint with branch hydroclimate/CO2/reactive-N productivity response plus selected-region PFT competition and lagged broad biome succession; shared PFT-specific hydrology feedback and the historical BIOME4 categorical classifier remain explicitly incomplete"
     });
   }
 }
