@@ -1,30 +1,53 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { TerrainChunkManager } from "./TerrainChunkManager.js";
+import { Sky } from "three/addons/objects/Sky.js";
+import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8fa69c);
-  scene.fog = new THREE.FogExp2(0x8fa69c, 0.027);
-  const camera = new THREE.PerspectiveCamera(58, 1, 0.02, 180);
+  scene.background = new THREE.Color(0xa2b3aa);
+  scene.fog = new THREE.Fog(0xa2b3aa, 1.4, 44);
+
+  const camera = new THREE.PerspectiveCamera(61, 1, 0.0007, 650);
   const controls = new OrbitControls(camera, canvas);
   controls.enabled = false;
   controls.enableDamping = true;
-  controls.dampingFactor = 0.07;
+  controls.dampingFactor = 0.065;
   controls.enablePan = true;
-  controls.minDistance = 0.35;
-  controls.maxDistance = 35;
-  controls.maxPolarAngle = Math.PI * 0.49;
-  scene.add(new THREE.HemisphereLight(0xb7d0c7, 0x40392d, 1.6));
-  const sun = new THREE.DirectionalLight(0xffe0ad, 3.1);
-  sun.position.set(-8, 13, 4);
+  controls.screenSpacePanning = true;
+  controls.minDistance = 0.004;
+  controls.maxDistance = 8;
+  controls.minPolarAngle = 0.05;
+  controls.maxPolarAngle = Math.PI * 0.495;
+  controls.rotateSpeed = 0.42;
+  controls.panSpeed = 0.48;
+  controls.zoomSpeed = 0.62;
+
+  const sky = new Sky();
+  sky.scale.setScalar(420);
+  const uniforms = sky.material.uniforms;
+  uniforms.turbidity.value = 7.2;
+  uniforms.rayleigh.value = 1.55;
+  uniforms.mieCoefficient.value = 0.006;
+  uniforms.mieDirectionalG.value = 0.78;
+  const sunDirection = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(71), THREE.MathUtils.degToRad(238));
+  uniforms.sunPosition.value.copy(sunDirection);
+  scene.add(sky);
+
+  scene.add(new THREE.HemisphereLight(0xb9d0c7, 0x443d30, 1.35));
+  const sun = new THREE.DirectionalLight(0xffe0ad, 3.2);
+  sun.position.copy(sunDirection).multiplyScalar(70);
   scene.add(sun);
-  const terrain = new TerrainChunkManager(scene, { chunkSizeKm: 8, radius: 2, segments: 18, verticalScale: 0.55 });
+
+  const terrain = new SurfaceTerrainSystem(scene, { chunkSizeKm: 2, radius: 2, segments: 18, verticalScale: 0.55 });
+
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(220, 220),
     new THREE.MeshPhongMaterial({ color: 0x315b68, transparent: true, opacity: 0.72, shininess: 70, depthWrite: false })
   );
   water.rotation.x = -Math.PI / 2;
+  water.renderOrder = 1;
   scene.add(water);
-  return { scene, camera, controls, terrain, water };
+
+  return { scene, camera, controls, terrain, water, sky, sun };
 }

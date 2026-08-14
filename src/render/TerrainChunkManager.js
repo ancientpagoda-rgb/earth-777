@@ -3,24 +3,29 @@ import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const mix = (a, b, t) => a + (b - a) * t;
 
-function chunkKey(x, z) {
-  return `${x}:${z}`;
-}
+function chunkKey(x, z) { return `${x}:${z}`; }
 
-function terrainColor(latitude, elevationMeters, reliefMeters) {
+function terrainColor(latitude, elevationMeters, reliefMeters, groundTint = null) {
   const absLat = Math.abs(latitude);
-  if (elevationMeters < 0) return [0.07, 0.16, 0.17];
-  if (absLat > 68 || elevationMeters > 3200) return [0.57, 0.62, 0.57];
-  if (elevationMeters > 1900) return [0.36, 0.34, 0.25];
-  const relief = clamp(Math.abs(reliefMeters) / 900, 0, 1);
-  if (absLat < 25) return [0.24 + relief * 0.08, 0.36 + relief * 0.04, 0.18];
-  if (absLat < 48) return [0.28 + relief * 0.08, 0.38, 0.2];
-  return [0.31 + relief * 0.06, 0.36, 0.24];
+  let base;
+  if (elevationMeters < 0) base = [0.07, 0.16, 0.17];
+  else if (absLat > 68 || elevationMeters > 3200) base = [0.57, 0.62, 0.57];
+  else if (elevationMeters > 1900) base = [0.36, 0.34, 0.25];
+  else {
+    const relief = clamp(Math.abs(reliefMeters) / 900, 0, 1);
+    if (absLat < 25) base = [0.24 + relief * 0.08, 0.36 + relief * 0.04, 0.18];
+    else if (absLat < 48) base = [0.28 + relief * 0.08, 0.38, 0.2];
+    else base = [0.31 + relief * 0.06, 0.36, 0.24];
+  }
+  if (!groundTint || elevationMeters < 0) return base;
+  const blend = 0.38;
+  return [mix(base[0], groundTint[0], blend), mix(base[1], groundTint[1], blend), mix(base[2], groundTint[2], blend)];
 }
 
 export class TerrainChunkManager {
-  constructor(scene, { chunkSizeKm = 8, radius = 2, segments = 18, verticalScale = 0.55 } = {}) {
+  constructor(scene, { chunkSizeKm = 2, radius = 2, segments = 18, verticalScale = 0.55 } = {}) {
     this.scene = scene;
     this.chunkSizeKm = chunkSizeKm;
     this.radius = radius;
@@ -28,16 +33,12 @@ export class TerrainChunkManager {
     this.verticalScale = verticalScale;
     this.origin = null;
     this.baseElevationMeters = 0;
+    this.biomeProfile = null;
     this.chunks = new Map();
     this.queue = [];
     this.queuedKeys = new Set();
     this.lastCenter = { x: Number.NaN, z: Number.NaN };
-    this.material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.96,
-      metalness: 0,
-      side: THREE.FrontSide
-    });
+    this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, side: THREE.FrontSide });
   }
 
   setOrigin(latitude, longitude) {
@@ -47,9 +48,20 @@ export class TerrainChunkManager {
     this.lastCenter = { x: Number.NaN, z: Number.NaN };
   }
 
+  setBiomeProfile(profile) {
+    const next = profile ?? null;
+    const previous = this.biomeProfile?.groundColor?.join(",") ?? "none";
+    const signature = next?.groundColor?.join(",") ?? "none";
+    this.biomeProfile = next;
+    if (previous !== signature && this.origin) {
+      this.clear();
+      this.lastCenter = { x: Number.NaN, z: Number.NaN };
+    }
+  }
+
   configure({ radius = this.radius, segments = this.segments } = {}) {
     const nextRadius = clamp(Math.round(radius), 1, 4);
-    const nextSegments = clamp(Math.round(segments), 8, 28);
+    const nextSegments = clamp(Math.round(segments), 8, 32);
     const topologyChanged = nextSegments !== this.segments;
     this.radius = nextRadius;
     this.segments = nextSegments;
@@ -66,11 +78,22 @@ export class TerrainChunkManager {
     return { latitude, longitude };
   }
 
+  _microreliefKm(xKm, zKm, elevationMeters) {
+    if (elevationMeters < -80) return 0;
+    const reliefMeters = Math.abs(elevationMeters - this.baseElevationMeters);
+    const amplitudeMeters = clamp(4 + reliefMeters * 0.0045, 4, 16);
+    const wave =
+      Math.sin((xKm + this.origin.longitude * 0.013) * 23.7) * 0.52 +
+      Math.cos((zKm + this.origin.latitude * 0.017) * 19.3) * 0.31 +
+      Math.sin((xKm * 0.73 + zKm * 0.91) * 41.7) * 0.17;
+    return wave * amplitudeMeters / 1000 * this.verticalScale;
+  }
+
   heightAt(xKm, zKm) {
     if (!this.origin) return 0;
     const { latitude, longitude } = this._geographicAt(xKm, zKm);
     const elevationMeters = bedrockElevationAt(latitude, longitude);
-    return (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale;
+    return (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + this._microreliefKm(xKm, zKm, elevationMeters);
   }
 
   update(cameraPosition) {
@@ -79,7 +102,6 @@ export class TerrainChunkManager {
     const centerZ = Math.floor(cameraPosition.z / this.chunkSizeKm);
     if (centerX === this.lastCenter.x && centerZ === this.lastCenter.z && this.queue.length) return;
     this.lastCenter = { x: centerX, z: centerZ };
-
     const wanted = new Set();
     const candidates = [];
     for (let dz = -this.radius; dz <= this.radius; dz += 1) {
@@ -96,7 +118,6 @@ export class TerrainChunkManager {
     }
     candidates.sort((a, b) => a.distance - b.distance);
     this.queue.push(...candidates);
-
     const evictionRadius = this.radius + 1;
     for (const [key, mesh] of this.chunks) {
       const [x, z] = key.split(":").map(Number);
@@ -134,25 +155,23 @@ export class TerrainChunkManager {
     const centerX = chunkX * this.chunkSizeKm;
     const centerZ = chunkZ * this.chunkSizeKm;
     let vertexOffset = 0;
-
     for (let z = 0; z <= segments; z += 1) {
       const localZ = centerZ + (z / segments) * this.chunkSizeKm - half;
       for (let x = 0; x <= segments; x += 1) {
         const localX = centerX + (x / segments) * this.chunkSizeKm - half;
         const { latitude, longitude } = this._geographicAt(localX, localZ);
         const elevationMeters = bedrockElevationAt(latitude, longitude);
-        const y = (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale;
+        const y = (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + this._microreliefKm(localX, localZ, elevationMeters);
         positions[vertexOffset * 3] = localX;
         positions[vertexOffset * 3 + 1] = y;
         positions[vertexOffset * 3 + 2] = localZ;
-        const [r, g, b] = terrainColor(latitude, elevationMeters, elevationMeters - this.baseElevationMeters);
+        const [r, g, b] = terrainColor(latitude, elevationMeters, elevationMeters - this.baseElevationMeters, this.biomeProfile?.groundColor);
         colors[vertexOffset * 3] = r;
         colors[vertexOffset * 3 + 1] = g;
         colors[vertexOffset * 3 + 2] = b;
         vertexOffset += 1;
       }
     }
-
     let indexOffset = 0;
     for (let z = 0; z < segments; z += 1) {
       for (let x = 0; x < segments; x += 1) {
@@ -160,15 +179,10 @@ export class TerrainChunkManager {
         const b = a + 1;
         const c = a + vertexSide;
         const d = c + 1;
-        indices[indexOffset++] = a;
-        indices[indexOffset++] = c;
-        indices[indexOffset++] = b;
-        indices[indexOffset++] = b;
-        indices[indexOffset++] = c;
-        indices[indexOffset++] = d;
+        indices[indexOffset++] = a; indices[indexOffset++] = c; indices[indexOffset++] = b;
+        indices[indexOffset++] = b; indices[indexOffset++] = c; indices[indexOffset++] = d;
       }
     }
-
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -182,13 +196,7 @@ export class TerrainChunkManager {
   }
 
   diagnostics() {
-    return Object.freeze({
-      loadedChunks: this.chunks.size,
-      queuedChunks: this.queue.length,
-      radius: this.radius,
-      segments: this.segments,
-      chunkSizeKm: this.chunkSizeKm
-    });
+    return Object.freeze({ loadedChunks: this.chunks.size, queuedChunks: this.queue.length, radius: this.radius, segments: this.segments, chunkSizeKm: this.chunkSizeKm });
   }
 
   clear() {
@@ -201,8 +209,5 @@ export class TerrainChunkManager {
     this.queuedKeys.clear();
   }
 
-  dispose() {
-    this.clear();
-    this.material.dispose();
-  }
+  dispose() { this.clear(); this.material.dispose(); }
 }
