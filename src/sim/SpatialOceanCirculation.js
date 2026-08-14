@@ -10,7 +10,32 @@ export function initializeOceanCirculation(state) {
   state.oceanMeanSalinityPsu ??= 34.7;
   state.oceanOxygenIndex ??= 1;
   state.oceanAcidityIndex ??= 1;
+  state.oceanCirculationCarbonFluxPgCPerYear ??= 0;
   return state;
+}
+
+function exchangeCarbon(state, dtYears) {
+  const surface = Math.max(0, Number(state.oceanSurfaceCarbonPgC) || 0);
+  const deep = Math.max(0, Number(state.oceanDeepCarbonPgC) || 0);
+  if (surface <= 0 || deep <= 0) {
+    state.oceanCirculationCarbonFluxPgCPerYear = 0;
+    return;
+  }
+  const overturning = Math.max(0.02, Number(state.oceanOverturningIndex) || 1);
+  const referencedSurface = 900 * (deep / 37100);
+  const fluxPgCPerYear = (surface - referencedSurface) / (650 / overturning);
+  const requested = fluxPgCPerYear * dtYears;
+  if (requested >= 0) {
+    const moved = Math.min(surface, requested);
+    state.oceanSurfaceCarbonPgC = surface - moved;
+    state.oceanDeepCarbonPgC = deep + moved;
+    state.oceanCirculationCarbonFluxPgCPerYear = moved / Math.max(dtYears, 1e-9);
+  } else {
+    const moved = Math.min(deep, -requested);
+    state.oceanDeepCarbonPgC = deep - moved;
+    state.oceanSurfaceCarbonPgC = surface + moved;
+    state.oceanCirculationCarbonFluxPgCPerYear = -moved / Math.max(dtYears, 1e-9);
+  }
 }
 
 export function advanceOceanCirculation(state, dtYears) {
@@ -36,6 +61,7 @@ export function advanceOceanCirculation(state, dtYears) {
   const co2 = Math.max(1, Number(state.co2) || 245);
   const acidityTarget = Math.max(0.1, Math.log(co2 / 245 + 1));
   state.oceanAcidityIndex = relax(state.oceanAcidityIndex, acidityTarget, dt, 160);
+  exchangeCarbon(state, dt);
   return state;
 }
 
@@ -90,7 +116,8 @@ export function spatialOceanState(state, latitude, longitude, elevationMeters = 
     currentSpeedMps: Math.hypot(eastwardCurrentMps, northwardCurrentMps),
     overturningIndex: overturning,
     ventilationIndex: ventilation,
+    circulationCarbonFluxPgCPerYear: Number(state.oceanCirculationCarbonFluxPgCPerYear) || 0,
     policy: SPATIAL_OCEAN_POLICY,
-    epistemicStatus: "intermediate-complexity spatial ocean materialization coupled to branch heat, salinity, carbon reservoirs and overturning; not a full primitive-equation ocean GCM"
+    epistemicStatus: "intermediate-complexity spatial ocean materialization coupled to branch heat, salinity, carbon reservoirs and overturning; overturning exchanges surface/deep carbon but this is not a full primitive-equation ocean GCM"
   });
 }
