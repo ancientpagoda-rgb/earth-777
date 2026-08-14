@@ -115,7 +115,7 @@ export class SpatialVegetation {
       round(globalState.iceIndex ?? 0, 2),
       round(globalState.co2 ?? CHECKPOINT_777.boundary.co2.value, 0),
       round(globalState.terrestrialReactiveNitrogenTgN ?? BIOGEOCHEMISTRY_BASELINE.nitrogen.terrestrialReactiveTgN, 0),
-      round(globalState.elapsedYears ?? 0, -2),
+      Math.round((Number(globalState.elapsedYears) || 0) / 100) * 100,
       round(spatialDetail, 1)
     ].join("|");
   }
