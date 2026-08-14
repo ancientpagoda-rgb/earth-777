@@ -9,6 +9,10 @@ import {
   initializeBiogeochemistry,
   syncAtmosphereFromReservoirs
 } from "./EarthBiogeochemistry.js";
+import { advanceLithosphere, initializeLithosphere } from "./DynamicLithosphere.js";
+import { advanceOceanCirculation, initializeOceanCirculation } from "./SpatialOceanCirculation.js";
+import { advanceEvolutionaryEcology, initializeEvolutionaryEcology } from "./EvolutionaryEcology.js";
+import { advanceHomininLineages, initializeHomininLineages } from "./HomininLineages.js";
 import { createRandom, gaussian } from "./random.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -53,8 +57,13 @@ export class FreeEarthEngine {
     this.fidelity = new AdaptiveFidelityController({ budget: fidelityBudget, observerRelevance, refreshYears: fidelityRefreshYears });
     this._resetRandomStreams();
     this.state = initializeBiogeochemistry(checkpointState());
+    this.state.seed = this.seed;
     this.state.oceanTemperatureAnomaly = this.state.temperatureAnomaly;
     this.state.geologicActivityIndex = 1;
+    initializeLithosphere(this.state, this.seed);
+    initializeOceanCirculation(this.state);
+    initializeEvolutionaryEcology(this.state, this.seed);
+    initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
     this._eventAccumulator = 0;
@@ -64,6 +73,8 @@ export class FreeEarthEngine {
     this.biogeochemicalRandom = createRandom((this.seed ^ 0x9e3779b9) >>> 0);
     this.geologyRandom = createRandom((this.seed ^ 0x4cf5ad43) >>> 0);
     this.magneticRandom = createRandom((this.seed ^ 0x6a09e667) >>> 0);
+    this.evolutionRandom = createRandom((this.seed ^ 0xbb67ae85) >>> 0);
+    this.homininRandom = createRandom((this.seed ^ 0x3c6ef372) >>> 0);
     this.eventRandom = createRandom((this.seed ^ 0x85ebca6b) >>> 0);
   }
 
@@ -72,8 +83,13 @@ export class FreeEarthEngine {
     this._resetRandomStreams();
     this.fidelity.reset();
     this.state = initializeBiogeochemistry(checkpointState());
+    this.state.seed = this.seed;
     this.state.oceanTemperatureAnomaly = this.state.temperatureAnomaly;
     this.state.geologicActivityIndex = 1;
+    initializeLithosphere(this.state, this.seed);
+    initializeOceanCirculation(this.state);
+    initializeEvolutionaryEcology(this.state, this.seed);
+    initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
     this._eventAccumulator = 0;
@@ -120,6 +136,7 @@ export class FreeEarthEngine {
     this.fidelity.update(state);
     this.fidelity.recordExecution("orbit", 1);
     this.fidelity.recordExecution("geology", 1);
+    this.fidelity.execute("tectonics", dt, (subDt) => advanceLithosphere(state, subDt));
 
     this.fidelity.execute("carbon", dt, (subDt) => advanceCarbonCycle(state, subDt, { perturbation: gaussian(this.biogeochemicalRandom) }));
     this.fidelity.execute("methane", dt, (subDt) => advanceMethaneCycle(state, subDt));
@@ -136,7 +153,7 @@ export class FreeEarthEngine {
       state.temperatureAnomaly = relax(state.temperatureAnomaly, temperatureTarget, subDt, 380);
       state.oceanTemperatureAnomaly = relax(state.oceanTemperatureAnomaly, state.temperatureAnomaly, subDt, 1_250);
     });
-    this.fidelity.recordExecution("ocean", 1);
+    this.fidelity.execute("ocean", dt, (subDt) => advanceOceanCirculation(state, subDt));
 
     this.fidelity.execute("ice", dt, (subDt) => {
       const checkpointTemperature = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
@@ -171,12 +188,9 @@ export class FreeEarthEngine {
       state.carnivoreBiomass = positive(relax(state.carnivoreBiomass, preySupportedCapacity, subDt, 48), 0.001);
     });
 
-    this.fidelity.execute("hominins", dt, (subDt) => {
-      const climateSuitability = Math.exp(-0.055 * (state.temperatureAnomaly - b.temperatureAnomalyK) ** 2);
-      const foodWebSupport = state.productivityIndex ** 0.48 * state.herbivoreBiomass ** 0.24;
-      const homininCapacity = positive(foodWebSupport * climateSuitability, 0.001);
-      state.homininPopulationIndex = positive(relax(state.homininPopulationIndex, homininCapacity, subDt, 85), 0.001);
-    });
+    this.fidelity.execute("evolution", dt, (subDt) => advanceEvolutionaryEcology(state, subDt, this.evolutionRandom));
+    this.fidelity.execute("hominins", dt, (subDt) => advanceHomininLineages(state, subDt, this.homininRandom));
+    this.fidelity.recordExecution("culture", 1);
 
     this.fidelity.execute("magnetism", dt, (subDt) => {
       if (state.yearBP <= 773_000 && state.magneticPolarity < 0) {
@@ -206,22 +220,36 @@ export class FreeEarthEngine {
   }
 
   snapshot() {
+    const speciesLineages = Object.freeze((this.state.speciesLineages ?? []).map((lineage) => Object.freeze({ ...lineage })));
+    const homininLineages = Object.freeze((this.state.homininLineages ?? []).map((lineage) => Object.freeze({ ...lineage })));
     return Object.freeze({
       ...this.state,
+      seed: this.seed,
       eccentricity: round(this.state.eccentricity, 6), obliquity: round(this.state.obliquity, 4), precession: round(this.state.precession, 3),
       co2: round(this.state.co2, 2), methane: round(this.state.methane, 2), nitrousOxide: round(this.state.nitrousOxide, 2),
       greenhouseForcing: round(this.state.greenhouseForcing, 4), temperatureAnomaly: round(this.state.temperatureAnomaly, 3),
       oceanTemperatureAnomaly: round(this.state.oceanTemperatureAnomaly, 3), seaLevel: round(this.state.seaLevel, 2),
+      oceanOverturningIndex: round(this.state.oceanOverturningIndex, 4), oceanVentilationIndex: round(this.state.oceanVentilationIndex, 4),
+      oceanMeanSalinityPsu: round(this.state.oceanMeanSalinityPsu, 4), oceanOxygenIndex: round(this.state.oceanOxygenIndex, 4),
       seaLevelReference: round(this.state.seaLevelReference, 2), seaLevelUncertainty: round(this.state.seaLevelUncertainty, 2),
       seaLevelLower95: round(this.state.seaLevelLower95, 2), seaLevelUpper95: round(this.state.seaLevelUpper95, 2),
       iceIndex: round(this.state.iceIndex, 4), magneticStrength: round(this.state.magneticStrength, 4),
-      geologicActivityIndex: round(this.state.geologicActivityIndex, 4), productivityIndex: round(this.state.productivityIndex, 4),
+      geologicActivityIndex: round(this.state.geologicActivityIndex, 4), tectonicTimeMyr: round(this.state.tectonicTimeMyr, 6),
+      tectonicBoundaryActivity: round(this.state.tectonicBoundaryActivity, 4), mantleHeatIndex: round(this.state.mantleHeatIndex, 4),
+      productivityIndex: round(this.state.productivityIndex, 4),
       herbivoreBiomass: round(this.state.herbivoreBiomass, 4), carnivoreBiomass: round(this.state.carnivoreBiomass, 4),
-      homininPopulationIndex: round(this.state.homininPopulationIndex, 4), atmosphericCarbonPgC: round(this.state.atmosphericCarbonPgC, 3),
+      speciesRichness: this.state.speciesRichness, evolutionaryNoveltyIndex: round(this.state.evolutionaryNoveltyIndex, 4),
+      meanSpeciesCognitionIndex: round(this.state.meanSpeciesCognitionIndex, 4),
+      homininPopulationIndex: round(this.state.homininPopulationIndex, 4), homininSpeciesRichness: this.state.homininSpeciesRichness,
+      cognitionIndex: round(this.state.cognitionIndex, 4), cultureIndex: round(this.state.cultureIndex, 4),
+      technologyIndex: round(this.state.technologyIndex, 4), communicationIndex: round(this.state.communicationIndex, 4),
+      fireUseIndex: round(this.state.fireUseIndex ?? 0, 4), atmosphericCarbonPgC: round(this.state.atmosphericCarbonPgC, 3),
       oceanSurfaceCarbonPgC: round(this.state.oceanSurfaceCarbonPgC, 3), oceanDeepCarbonPgC: round(this.state.oceanDeepCarbonPgC, 3),
       terrestrialCarbonPgC: round(this.state.terrestrialCarbonPgC, 3), sedimentCarbonPgC: round(this.state.sedimentCarbonPgC, 3),
       methaneCarbonPgC: round(this.state.methaneCarbonPgC, 5), terrestrialReactiveNitrogenTgN: round(this.state.terrestrialReactiveNitrogenTgN, 3),
       oceanReactiveNitrogenTgN: round(this.state.oceanReactiveNitrogenTgN, 3), atmosphericN2ONitrogenTgN: round(this.state.atmosphericN2ONitrogenTgN, 3),
+      speciesLineages,
+      homininLineages,
       carbonFluxes: Object.freeze({ ...this.state.carbonFluxes }), methaneFluxes: Object.freeze({ ...this.state.methaneFluxes }),
       nitrogenFluxes: Object.freeze({ ...this.state.nitrogenFluxes }), events: Object.freeze(this.events.map((event) => Object.freeze({ ...event })))
     });
