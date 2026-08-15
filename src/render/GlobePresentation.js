@@ -87,7 +87,9 @@ export function createGlobePresentation(canvas) {
 export function textureFromRaster(message) {
   const texture = new THREE.DataTexture(new Uint8Array(message.buffer), message.width, message.height, THREE.RGBAFormat, THREE.UnsignedByteType);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = true;
+  // The raster worker already writes rows north-to-south for the sphere UV layout,
+  // so flipping at upload time inverts the globe vertically.
+  texture.flipY = false;
   texture.anisotropy = 4;
   texture.needsUpdate = true;
   return texture;
