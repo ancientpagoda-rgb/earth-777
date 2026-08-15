@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite --host 0.0.0.0",
+    "preview": "vite preview --host 0.0.0.0",
     "data:paleo": "node scripts/ingest-paleo-forcing.mjs",
     "data:terrain": "node scripts/ingest-etopo-2022.mjs",
     "data:climate": "python3 scripts/ingest-krapp-777.py",
