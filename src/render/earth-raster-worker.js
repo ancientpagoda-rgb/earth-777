@@ -1,12 +1,17 @@
 import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
-import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 import { loadKrapp777Climate } from "../data/krapp-777-climate.js";
 import { loadKrapp777Vegetation } from "../data/krapp-777-vegetation.js";
+import {
+  annualAtmosphereResponseAt,
+  dynamicSurfaceElevationMeters
+} from "../sim/GeneralAtmosphereCirculation.js";
 
 const WIDTH = 512;
 const HEIGHT = 256;
+const ATMOSPHERE_GRID_DEGREES = 4;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mix = (a, b, t) => a + (b - a) * t;
+const wrapLongitude = (longitude) => ((Number(longitude) + 540) % 360) - 180;
 let climatePromise = null;
 let vegetationPromise = null;
 
@@ -18,26 +23,32 @@ function noise(longitude, latitude) {
   );
 }
 
-function moistureFromCheckpoint(precipitationMmPerYear, cloudCoverPercent) {
-  const precipitation = clamp(Math.log1p(Math.max(0, precipitationMmPerYear)) / Math.log1p(5_000), 0, 1);
-  const cloud = clamp((cloudCoverPercent ?? 50) / 100, 0, 1);
-  return clamp(precipitation * 0.82 + cloud * 0.18, 0.05, 1);
+function waterAvailability(precipitationMmPerYear, temperatureCelsius, cloudCoverPercent) {
+  if (!Number.isFinite(precipitationMmPerYear)) return 0.5;
+  const temperatureDemand = Math.exp(clamp((temperatureCelsius ?? 12) - 12, -35, 40) * 0.03);
+  const cloudRelief = 1 - clamp((cloudCoverPercent ?? 50) / 100, 0, 1) * 0.18;
+  const demand = 720 * temperatureDemand * cloudRelief;
+  return clamp(precipitationMmPerYear / (precipitationMmPerYear + demand), 0.01, 0.99);
 }
 
-function vegetationColor(vegetation, rugged) {
+function vegetationColor(vegetation, rugged, moisture, moistureDeparture) {
   const code = vegetation?.biomeCode;
   const nppStrength = clamp(Math.log1p(Math.max(0, vegetation?.npp ?? 0)) / Math.log1p(2_214), 0, 1);
   const laiStrength = clamp((vegetation?.lai ?? 0) / 7.12, 0, 1);
-  const vigor = clamp(nppStrength * 0.7 + laiStrength * 0.3, 0, 1);
+  const vigor = clamp((nppStrength * 0.7 + laiStrength * 0.3) * Math.sqrt(clamp(moistureDeparture, 0.18, 2.4)), 0, 1.25);
+
   let base;
-  if (code >= 1 && code <= 3) base = [24, 77, 42];
+  if (moisture < 0.13) base = [154, 126, 76];
+  else if (moisture < 0.24) base = [126, 111, 67];
+  else if (code >= 1 && code <= 3) base = [24, 77, 42];
   else if (code >= 4 && code <= 11) base = [42, 79, 48];
   else if (code >= 12 && code <= 20) base = [91, 104, 58];
   else if (code === 21) base = [139, 112, 69];
   else if (code >= 22 && code <= 26) base = [105, 118, 94];
   else if (code === 27) base = [119, 111, 94];
   else base = [78, 92, 59];
-  const vitality = 0.78 + vigor * 0.34;
+
+  const vitality = moisture < 0.24 ? 0.92 + moisture * 0.35 : 0.76 + vigor * 0.36;
   return [
     clamp(base[0] * vitality + rugged * 14, 0, 255),
     clamp(base[1] * vitality + rugged * 18, 0, 255),
@@ -61,8 +72,30 @@ async function getVegetation() {
   return vegetationPromise;
 }
 
-function colorEarthPixel(data, offset, latitude, longitude, state, climate, vegetation) {
-  const elevation = bedrockElevationAt(latitude, longitude);
+function quantizeAtmosphereCoordinate(latitude, longitude) {
+  const latitudeIndex = Math.round((clamp(latitude, -88, 88) + 90) / ATMOSPHERE_GRID_DEGREES);
+  const longitudeIndex = Math.round((wrapLongitude(longitude) + 180) / ATMOSPHERE_GRID_DEGREES);
+  return {
+    latitude: clamp(-90 + latitudeIndex * ATMOSPHERE_GRID_DEGREES, -88, 88),
+    longitude: wrapLongitude(-180 + longitudeIndex * ATMOSPHERE_GRID_DEGREES),
+    key: `${latitudeIndex}:${longitudeIndex}`
+  };
+}
+
+function atmosphereResponseCached(cache, state, latitude, longitude, climate) {
+  if ((state.elapsedYears ?? 0) <= 0) {
+    return { precipitationScale: 1, temperatureDeltaCelsius: 0, cloudDeltaPercent: 0 };
+  }
+  const cell = quantizeAtmosphereCoordinate(latitude, longitude);
+  if (cache.has(cell.key)) return cache.get(cell.key);
+  const checkpoint = climate?.annualAt?.(cell.latitude, cell.longitude) ?? null;
+  const response = annualAtmosphereResponseAt(state, cell.latitude, cell.longitude, checkpoint);
+  cache.set(cell.key, response);
+  return response;
+}
+
+function colorEarthPixel(data, offset, latitude, longitude, state, climate, vegetation, atmosphereCache) {
+  const elevation = dynamicSurfaceElevationMeters(state, latitude, longitude);
   const seaLevel = Number.isFinite(state.seaLevel) ? state.seaLevel : 0;
   const land = elevation > seaLevel;
 
@@ -85,14 +118,25 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate, vege
   const absLat = Math.abs(latitude);
   const checkpointClimate = climate?.annualAt?.(latitude, longitude) ?? null;
   const vegetationState = vegetation?.annualAt?.(latitude, longitude) ?? null;
+  const atmosphere = atmosphereResponseCached(atmosphereCache, state, latitude, longitude, climate);
   const checkpointGlobalAnomaly = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
-  const freeEarthTemperatureDelta = (state.temperatureAnomaly ?? checkpointGlobalAnomaly) - checkpointGlobalAnomaly;
+  const globalTemperatureDelta = (state.temperatureAnomaly ?? checkpointGlobalAnomaly) - checkpointGlobalAnomaly;
   const temperature = Number.isFinite(checkpointClimate?.temperatureCelsius)
-    ? checkpointClimate.temperatureCelsius + freeEarthTemperatureDelta
-    : 28 - absLat * 0.58 + state.temperatureAnomaly * (1 + absLat / 110);
-  const moisture = Number.isFinite(checkpointClimate?.precipitationMmPerYear)
-    ? moistureFromCheckpoint(checkpointClimate.precipitationMmPerYear, checkpointClimate.cloudCoverPercent)
+    ? checkpointClimate.temperatureCelsius + atmosphere.temperatureDeltaCelsius
+    : 28 - absLat * 0.58 + globalTemperatureDelta * (1 + absLat / 110);
+  const precipitation = Number.isFinite(checkpointClimate?.precipitationMmPerYear)
+    ? checkpointClimate.precipitationMmPerYear * atmosphere.precipitationScale
+    : null;
+  const cloudCover = Number.isFinite(checkpointClimate?.cloudCoverPercent)
+    ? clamp(checkpointClimate.cloudCoverPercent + atmosphere.cloudDeltaPercent, 0, 100)
+    : 50;
+  const checkpointMoisture = checkpointClimate
+    ? waterAvailability(checkpointClimate.precipitationMmPerYear, checkpointClimate.temperatureCelsius, checkpointClimate.cloudCoverPercent)
+    : 0.5;
+  const moisture = Number.isFinite(precipitation)
+    ? waterAvailability(precipitation, temperature, cloudCover)
     : clamp(0.58 + Math.cos(latitude * Math.PI / 45) * 0.18 + noise(longitude, latitude) * 0.28, 0, 1);
+  const moistureDeparture = moisture / Math.max(0.03, checkpointMoisture);
   const relief = clamp(elevation / 4500, -1, 1);
   const rugged = relief * 0.72 + noise(longitude * 2.4, latitude * 2.2) * 0.28;
   let red;
@@ -104,23 +148,23 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate, vege
     green = 198 + rugged * 15;
     blue = 190 + rugged * 13;
   } else if (vegetationState) {
-    [red, green, blue] = vegetationColor(vegetationState, rugged);
+    [red, green, blue] = vegetationColor(vegetationState, rugged, moisture, moistureDeparture);
   } else if (temperature < 2) {
     red = 82 + rugged * 12;
     green = 93 + rugged * 13;
     blue = 81 + rugged * 10;
-  } else if (moisture > 0.69) {
+  } else if (moisture > 0.58) {
     red = 30 + rugged * 10;
     green = 69 + rugged * 18;
     blue = 48 + rugged * 10;
-  } else if (moisture > 0.39) {
+  } else if (moisture > 0.27) {
     red = 69 + rugged * 18;
     green = 88 + rugged * 21;
     blue = 52 + rugged * 12;
   } else {
-    red = 111 + rugged * 24;
-    green = 93 + rugged * 20;
-    blue = 52 + rugged * 12;
+    red = 126 + rugged * 24;
+    green = 104 + rugged * 20;
+    blue = 62 + rugged * 12;
   }
 
   data[offset] = clamp(red, 0, 255);
@@ -132,19 +176,26 @@ function colorEarthPixel(data, offset, latitude, longitude, state, climate, vege
 async function buildEarth(id, state) {
   const started = performance.now();
   const [climate, vegetation] = await Promise.all([getClimate(), getVegetation()]);
+  const atmosphereCache = new Map();
   const data = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
   for (let y = 0; y < HEIGHT; y += 1) {
     const latitude = 90 - (y / (HEIGHT - 1)) * 180;
     for (let x = 0; x < WIDTH; x += 1) {
       const offset = (y * WIDTH + x) * 4;
       const longitude = (x / (WIDTH - 1)) * 360 - 180;
-      colorEarthPixel(data, offset, latitude, longitude, state, climate, vegetation);
+      colorEarthPixel(data, offset, latitude, longitude, state, climate, vegetation, atmosphereCache);
     }
-    if (y % 16 === 15) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    if (y % 12 === 11) await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  postMessage({ type: "earth", id, width: WIDTH, height: HEIGHT, milliseconds: performance.now() - started, buffer: data.buffer }, [data.buffer]);
+  postMessage({
+    type: "earth",
+    id,
+    width: WIDTH,
+    height: HEIGHT,
+    milliseconds: performance.now() - started,
+    atmosphereCells: atmosphereCache.size,
+    buffer: data.buffer
+  }, [data.buffer]);
 }
 
 function paintCloud(data, centerX, centerY, radiusX, radiusY, alpha) {
@@ -173,6 +224,7 @@ function paintCloud(data, centerX, centerY, radiusX, radiusY, alpha) {
 async function buildClouds(id, state, cloudScale = 1) {
   const started = performance.now();
   const climate = await getClimate();
+  const atmosphereCache = new Map();
   const data = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
   const count = Math.max(180, Math.round(420 * clamp(cloudScale, 0.45, 1)));
   for (let i = 0; i < count; i += 1) {
@@ -181,17 +233,28 @@ async function buildClouds(id, state, cloudScale = 1) {
     const latitude = 90 - y / HEIGHT * 180;
     if (Math.abs(latitude) > 76) continue;
     const longitude = x / WIDTH * 360 - 180;
-    const checkpointCloud = climate?.annualValueAt?.("cloudCover", latitude, longitude);
-    const cloudFraction = Number.isFinite(checkpointCloud) ? clamp(checkpointCloud / 100, 0, 1) : 0.55;
+    const checkpointClimate = climate?.annualAt?.(latitude, longitude) ?? null;
+    const checkpointCloud = checkpointClimate?.cloudCoverPercent;
+    const atmosphere = atmosphereResponseCached(atmosphereCache, state, latitude, longitude, climate);
+    const cloudFraction = Number.isFinite(checkpointCloud)
+      ? clamp((checkpointCloud + atmosphere.cloudDeltaPercent) / 100, 0, 1)
+      : 0.55;
     if ((Math.sin(i * 191.3) * 0.5 + 0.5) > 0.25 + cloudFraction * 0.75) continue;
     const width = (12 + (Math.sin(i * 71.3) * 0.5 + 0.5) * 44) * cloudScale;
     const height = (3 + (Math.cos(i * 37.4) * 0.5 + 0.5) * 10) * cloudScale;
     paintCloud(data, x, y, width, height, 0.08 + cloudFraction * 0.28);
-    if (i % 48 === 47) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    if (i % 48 === 47) await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  postMessage({ type: "clouds", id, width: WIDTH, height: HEIGHT, milliseconds: performance.now() - started, stateYear: state.yearBP, buffer: data.buffer }, [data.buffer]);
+  postMessage({
+    type: "clouds",
+    id,
+    width: WIDTH,
+    height: HEIGHT,
+    milliseconds: performance.now() - started,
+    stateYear: state.yearBP,
+    atmosphereCells: atmosphereCache.size,
+    buffer: data.buffer
+  }, [data.buffer]);
 }
 
 self.addEventListener("message", (event) => {
