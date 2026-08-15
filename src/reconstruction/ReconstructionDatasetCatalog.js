@@ -19,11 +19,21 @@ export const RECONSTRUCTION_DATASET_CATALOG = Object.freeze([
   }),
   Object.freeze({
     sourceId: "ruddiman-2018-mis19",
-    fields: Object.freeze(["orbitalBoundary", "greenhouseBoundary", "climateComparison"]),
+    fields: Object.freeze(["orbitalBoundary", "greenhouseBoundary", "climateComparison", "persistentSnow", "seaIceExpansion", "glacialInceptionEvidence"]),
     stream: RECONSTRUCTION_STREAMS.PALEO,
-    targetRelation: "direct-777ka-boundary",
+    targetRelation: "target-777ka-climate-model-boundary-and-ice-inception-validation",
     direct777Constraint: true,
-    note: "Canonical MIS 19 experiment boundary conditions constrain the target epoch."
+    doi: "10.1038/s41598-018-28419-5",
+    note: "Canonical MIS19 experiment boundary conditions constrain the target epoch and its snow/glacial-inception pattern can validate an ice reconstruction. The CCSM4 experiment did not evolve a dynamic ice sheet, so it is not a direct ice-thickness or GIA-load field."
+  }),
+  Object.freeze({
+    sourceId: "selen4",
+    fields: Object.freeze(["solidEarthDisplacement", "seaSurfacePerturbation", "relativeSeaLevel", "gravityResponse", "gia"]),
+    stream: RECONSTRUCTION_STREAMS.PROCESS,
+    targetRelation: "physical-gia-sle-framework-requires-explicit-run",
+    direct777Constraint: false,
+    doi: "10.5194/gmd-12-5055-2019",
+    note: "Open-source gravitationally and topographically self-consistent sea-level-equation framework. It becomes a numerical Earth-777 constraint only when an explicit solver run with documented ice history and Earth rheology is ingested."
   }),
   Object.freeze({
     sourceId: "la2004",
