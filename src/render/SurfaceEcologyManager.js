@@ -85,7 +85,6 @@ export class SurfaceEcologyManager {
       crown: new THREE.MeshStandardMaterial({ color: 0x365b32, roughness: 0.95 }),
       shrub: new THREE.MeshStandardMaterial({ color: 0x52663a, roughness: 1 }),
       rock: new THREE.MeshStandardMaterial({ color: 0x77756c, roughness: 1 }),
-      animal: new THREE.MeshStandardMaterial({ color: 0x4b3c2d, roughness: 1 }),
       hominin: new THREE.MeshStandardMaterial({ color: 0x5c4737, roughness: 1 }),
       shelter: new THREE.MeshStandardMaterial({ color: 0x6d5134, roughness: 1 }),
       river: new THREE.MeshPhongMaterial({ color: 0x365f6d, transparent: true, opacity: 0.82, shininess: 95, depthWrite: false })
@@ -97,7 +96,6 @@ export class SurfaceEcologyManager {
       crown: createPool(translated(new THREE.ConeGeometry(0.0036, 0.011, 6), 0.0115), this.materials.crown, 2600),
       shrub: createPool(translated(new THREE.IcosahedronGeometry(0.0015, 0), 0.0015), this.materials.shrub, 3200),
       rock: createPool(translated(new THREE.DodecahedronGeometry(0.0012, 0), 0.0008), this.materials.rock, 2000),
-      animal: createPool(translated(new THREE.SphereGeometry(0.0012, 5, 3), 0.0014), this.materials.animal, 640),
       hominin: createPool(translated(new THREE.CapsuleGeometry(0.00038, 0.00125, 2, 4), 0.00135), this.materials.hominin, 256),
       shelter: createPool(translated(new THREE.ConeGeometry(0.0024, 0.0034, 7), 0.0017), this.materials.shelter, 4096)
     };
@@ -131,9 +129,7 @@ export class SurfaceEcologyManager {
     this.riverSample = riverSample;
     const lakeSurface = Number(riverSample?.lakeSurfaceElevationMeters);
     const lakeCoverage = Number(riverSample?.lakeCoverageFraction) || 0;
-    const waterElevationMeters = Number.isFinite(lakeSurface) && lakeCoverage > 0.005
-      ? lakeSurface
-      : Number(state?.seaLevel);
+    const waterElevationMeters = Number.isFinite(lakeSurface) && lakeCoverage > 0.005 ? lakeSurface : Number(state?.seaLevel);
     this.waterLevelKm = (waterElevationMeters - this.terrain.baseElevationMeters) / 1000 * this.terrain.verticalScale;
     this.terrain.setBiomeProfile?.(this.profile);
     if (this.profile.biomeCode === 21) {
@@ -237,9 +233,7 @@ export class SurfaceEcologyManager {
     this.queue = [];
     this.householdsPerRenderedShelter = null;
     for (let dz = -this.radius; dz <= this.radius; dz += 1) {
-      for (let dx = -this.radius; dx <= this.radius; dx += 1) {
-        this.queue.push({ x: centerX + dx, z: centerZ + dz, distance: dx * dx + dz * dz });
-      }
+      for (let dx = -this.radius; dx <= this.radius; dx += 1) this.queue.push({ x: centerX + dx, z: centerZ + dz, distance: dx * dx + dz * dz });
     }
     this.queue.sort((a, b) => a.distance - b.distance);
     for (const key of Object.keys(this.counts)) {
@@ -257,9 +251,7 @@ export class SurfaceEcologyManager {
       this._populateChunk(chunk.x, chunk.z);
       chunks += 1;
     }
-    if (chunks) {
-      for (const mesh of Object.values(this.pools)) mesh.instanceMatrix.needsUpdate = true;
-    }
+    if (chunks) for (const mesh of Object.values(this.pools)) mesh.instanceMatrix.needsUpdate = true;
     return chunks;
   }
 
@@ -347,19 +339,6 @@ export class SurfaceEcologyManager {
     scatter("shrub", 38, 1.0, 330, p.shrubDensity);
     scatter("rock", 18, 0.8, 440, p.rockDensity);
 
-    const herdChance = 0.16 + p.herbivoreDensity * 0.42;
-    if (random01(seed + 550) < herdChance) {
-      const herdSize = Math.round((4 + random01(seed + 551) * 9) * quality * p.herbivoreDensity);
-      const hx = centerX + (random01(seed + 552) * 1.3 - 0.65);
-      const hz = centerZ + (random01(seed + 553) * 1.3 - 0.65);
-      for (let i = 0; i < herdSize; i += 1) {
-        const x = hx + (random01(seed + 560 + i * 9.7) - 0.5) * 0.09;
-        const z = hz + (random01(seed + 580 + i * 13.1) - 0.5) * 0.09;
-        const sizeScale = 0.78 + random01(seed + 600 + i) * 0.65;
-        this._setInstance("animal", x, z, sizeScale * 1.8, sizeScale, sizeScale * 0.8, random01(seed + 620 + i) * TAU);
-      }
-    }
-
     const socialSiteRendered = this._populateSocialSite(chunkX, chunkZ, seed, centerX, centerZ, half);
     if (!socialSiteRendered && p.homininDensity > 0 && Math.abs(chunkX) <= 1 && Math.abs(chunkZ) <= 1 && random01(seed + 700) < 0.12 + p.homininDensity * 0.26) {
       const groupSize = Math.max(1, Math.round((1 + random01(seed + 701) * 4) * quality));
@@ -378,7 +357,6 @@ export class SurfaceEcologyManager {
       trees: this.counts.crown,
       shrubs: this.counts.shrub,
       rocks: this.counts.rock,
-      animals: this.counts.animal,
       hominins: this.counts.hominin,
       shelters: this.counts.shelter,
       householdsPerRenderedShelter: this.householdsPerRenderedShelter,

@@ -36,9 +36,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceEcology = new SurfaceEcologyManager(scene, this);
     this.surfaceBuiltEnvironment = new SurfaceBuiltEnvironmentManager(scene, this);
     this.surfaceFauna = new SurfaceFaunaManager(scene, this);
-    // Legacy surface ecology animal scatter is retained for compatibility but hidden;
-    // fauna rendering now comes from the hierarchical materializer.
-    if (this.surfaceEcology?.pools?.animal) this.surfaceEcology.pools.animal.visible = false;
     this.hydrology = null;
     this.vegetation = null;
     this.spatialDetail = 0.82;
@@ -64,30 +61,12 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       run: ({ sliceMs }) => this.surfaceEcology?.pump(sliceMs) ?? 0
     });
     this.worldScheduler.registerSystem({
-      id: "fauna-regional-fields",
-      scope: "regional",
-      priority: 72,
-      minIntervalMs: 800,
-      maxSliceMs: 0.30,
-      hasWork: () => this.surfaceFauna?.hasRegionalWork() === true,
-      run: ({ cells }) => this.surfaceFauna?.refreshRegional(cells) ?? 0
-    });
-    this.worldScheduler.registerSystem({
-      id: "fauna-local-herds",
-      scope: "local",
-      priority: 76,
-      minIntervalMs: 450,
-      maxSliceMs: 0.35,
-      hasWork: () => this.surfaceFauna?.hasLocalWork() === true,
-      run: ({ cells }) => this.surfaceFauna?.refreshLocal(cells) ?? 0
-    });
-    this.worldScheduler.registerSystem({
-      id: "fauna-observed-materialization",
-      scope: "observed",
+      id: "surface-fauna",
+      scope: "any",
       priority: 86,
       maxSliceMs: 0.85,
-      hasWork: () => this.surfaceFauna?.hasObservedWork() === true,
-      run: ({ sliceMs }) => this.surfaceFauna?.pumpObserved(sliceMs) ?? 0
+      hasWork: () => this.surfaceFauna?.hasWork() === true,
+      run: ({ sliceMs, cells }) => this.surfaceFauna?.pump(sliceMs, cells) ?? 0
     });
   }
 
@@ -110,11 +89,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const changed = next !== this.surfaceContextActive;
     this.surfaceContextActive = next;
     if (this.origin) {
-      this.worldScheduler.setFocus({
-        latitude: this.origin.latitude,
-        longitude: this.origin.longitude,
-        mode: next ? "surface" : "globe"
-      });
+      this.worldScheduler.setFocus({ latitude: this.origin.latitude, longitude: this.origin.longitude, mode: next ? "surface" : "globe" });
     }
     if (next && refresh && (changed || this.origin)) this._refreshSurfaceContext();
     return changed;
@@ -133,9 +108,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       vegetationSample,
       hydrologySample,
       geomorphologyPatch,
-      riverSample: river || groundwaterLake || geomorphologyPatch
-        ? Object.freeze({ ...(river ?? {}), ...(groundwaterLake ?? {}), ...(geomorphologyPatch ?? {}) })
-        : null,
+      riverSample: river || groundwaterLake || geomorphologyPatch ? Object.freeze({ ...(river ?? {}), ...(groundwaterLake ?? {}), ...(geomorphologyPatch ?? {}) }) : null,
       scienceCoupled: true
     };
   }
@@ -153,9 +126,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     return true;
   }
 
-  currentWaterSystem() {
-    return this.lastSurfaceContext?.riverSample ?? null;
-  }
+  currentWaterSystem() { return this.lastSurfaceContext?.riverSample ?? null; }
 
   setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive) {
     super.setEarthSystemState(state, seed);
@@ -164,11 +135,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
 
   setOrigin(latitude, longitude) {
     super.setOrigin(latitude, longitude);
-    this.worldScheduler.setFocus({
-      latitude: this.origin.latitude,
-      longitude: this.origin.longitude,
-      mode: this.surfaceContextActive ? "surface" : "globe"
-    });
+    this.worldScheduler.setFocus({ latitude: this.origin.latitude, longitude: this.origin.longitude, mode: this.surfaceContextActive ? "surface" : "globe" });
     if (this.surfaceContextActive) this._refreshSurfaceContext();
   }
 
@@ -180,10 +147,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const boundedRadius = Math.min(2, Math.max(1, Math.round(radius)));
     this.surfaceEcology.configure({ quality, radius: boundedRadius });
     this.surfaceBuiltEnvironment.configure({ quality });
-    this.surfaceFauna.configure({
-      windowRadiusKm: this.chunkSizeKm * (boundedRadius + 1.2),
-      individualRadiusKm: 0.42 + quality * 0.34
-    });
+    this.surfaceFauna.configure({ windowRadiusKm: this.chunkSizeKm * (boundedRadius + 1.2), individualRadiusKm: 0.42 + quality * 0.34 });
   }
 
   update(cameraPosition) {
@@ -202,7 +166,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       context: Object.freeze({
         terrainQueuedChunks: this.queue.length,
         ecologyQueuedChunks: this.surfaceEcology?.queue?.length ?? 0,
-        faunaQueuedInstances: this.surfaceFauna?.diagnostics?.().renderQueueRemaining ?? 0,
+        faunaQueuedInstances: this.surfaceFauna?.diagnostics?.().queueRemaining ?? 0,
         spatialDetail: this.spatialDetail
       })
     });
@@ -210,11 +174,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   }
 
   hasPendingWork() {
-    return this.queue.length > 0
-      || (this.surfaceEcology?.queue?.length ?? 0) > 0
-      || this.surfaceFauna?.hasRegionalWork() === true
-      || this.surfaceFauna?.hasLocalWork() === true
-      || this.surfaceFauna?.hasObservedWork() === true;
+    return this.queue.length > 0 || (this.surfaceEcology?.queue?.length ?? 0) > 0 || this.surfaceFauna?.hasWork() === true;
   }
 
   diagnostics() {
