@@ -439,13 +439,16 @@ export function initializeHomininSocialOrganization(state, seed = 777001) {
   state.homininExchangeEdges ??= [];
   state.homininSocialAccumulatorYears ??= 0;
   state.homininDecayedSiteCount ??= 0;
-  if ((state.homininDemes ?? []).length) socialUpdate(state, 0, seed);
+  const livingDemes = (state.homininDemes ?? []).filter((deme) => deme.headcount > 0);
+  const initialized = state.homininSocialPolicy === HOMININ_SOCIAL_POLICY;
+  const missingSite = livingDemes.some((deme) => !activeSiteForDeme(state, deme.id));
+  if (livingDemes.length && (!initialized || missingSite)) socialUpdate(state, 0, seed);
   else summarize(state);
   return state;
 }
 
 export function advanceHomininSocialOrganization(state, dtYears) {
-  initializeHomininSocialOrganization(state, state.seed ?? 777001);
+  if (state.homininSocialPolicy !== HOMININ_SOCIAL_POLICY) initializeHomininSocialOrganization(state, state.seed ?? 777001);
   const dt = Math.max(0, Number(dtYears) || 0);
   if (dt <= 0) return state;
   state.homininSocialAccumulatorYears += dt;
