@@ -7,79 +7,33 @@
   -webkit-backdrop-filter: none !important;
 }
 
-.panel {
-  background: rgba(11, 20, 17, 0.96);
-}
-
-.epoch {
-  background: rgba(7, 16, 13, 0.94);
-}
+.panel { background: rgba(11, 20, 17, 0.96); }
+.epoch { background: rgba(7, 16, 13, 0.94); }
 
 .perf-hud {
-  right: 18px;
-  bottom: 104px;
-  width: 250px;
-  padding: 12px 13px;
-  pointer-events: none;
+  right: 14px;
+  bottom: 86px;
+  width: 232px;
   font-family: "JetBrains Mono", monospace;
 }
 
-.perf-hud__heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(120, 168, 143, 0.14);
-}
-
-.perf-hud__heading strong {
-  color: var(--jade-bright);
-  font-size: 10px;
-  font-weight: 500;
-}
+.perf-hud > summary { pointer-events: auto; }
+.perf-hud .drawer-title strong { color: var(--jade-bright); font-size: 9px; font-weight: 500; }
 
 .perf-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px 12px;
-  margin: 9px 0 0;
+  margin: 0;
 }
+.perf-grid div { min-width: 0; }
+.perf-grid dt { color: var(--muted); font-size: 7px; text-transform: uppercase; letter-spacing: 0.08em; }
+.perf-grid dd { margin: 2px 0 0; overflow: hidden; color: var(--strong); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.perf-grid__wide { grid-column: 1 / -1; }
 
-.perf-grid div {
-  min-width: 0;
-}
-
-.perf-grid dt {
-  color: var(--muted);
-  font-size: 7px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.perf-grid dd {
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--strong);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.perf-grid__wide {
-  grid-column: 1 / -1;
-}
-
-.perf-hud[data-pressure="medium"] .perf-hud__heading strong {
-  color: var(--amber);
-}
-
-.perf-hud[data-pressure="high"] .perf-hud__heading strong {
-  color: var(--red);
-}
+.perf-hud[data-pressure="medium"] .drawer-title strong { color: var(--amber); }
+.perf-hud[data-pressure="high"] .drawer-title strong { color: var(--red); }
 
 @media (max-width: 920px) {
-  .perf-hud {
-    display: none;
-  }
+  .perf-hud { display: none; }
 }

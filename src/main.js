@@ -13,10 +13,11 @@ import { renderRegionPanel } from "./render/RegionPanel.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
-  year: $("#year-readout"), stage: $("#stage-readout"), co2: $("#co2-readout"), temperature: $("#temperature-readout"),
+  year: $("#year-readout"), timelineDate: $("#timeline-date-label"), stage: $("#stage-readout"), co2: $("#co2-readout"), temperature: $("#temperature-readout"),
   ice: $("#ice-readout"), sea: $("#sea-readout"), orbit: $("#orbit-readout"), npp: $("#npp-readout"), hominin: $("#hominin-readout"),
+  statePanel: $(".state-panel"), locationPanel: $(".location-panel"), journalPanel: $(".journal"),
   locationTitle: $("#location-title"), locationDetail: $("#location-detail"), locationCoordinates: $("#location-coordinates"), surface: $("#surface-button"),
-  play: $("#play-button"), range: $("#timeline-range"), elapsed: $("#elapsed-readout"), seed: $("#run-seed"), branch: $("#branch-button"), journal: $("#journal-list"),
+  play: $("#play-button"), range: $("#timeline-range"), elapsed: $("#elapsed-readout"), speedSelect: $("#speed-select"), seed: $("#run-seed"), branch: $("#branch-button"), journal: $("#journal-list"),
   sourcesButton: $("#sources-button"), sourcesModal: $("#sources-modal"), sourcesClose: $("#sources-close"), sourceList: $("#source-list"), hint: $("#interaction-hint"),
   perfHud: $("#perf-hud"), perfFps: $("#perf-fps"), perfFrame: $("#perf-frame"), perfRender: $("#perf-render"), perfSim: $("#perf-sim"),
   perfCalls: $("#perf-calls"), perfTriangles: $("#perf-triangles"), perfWorker: $("#perf-worker"), perfLod: $("#perf-lod"), perfChunks: $("#perf-chunks"), perfDpr: $("#perf-dpr"), perfMode: $("#perf-mode")
@@ -76,10 +77,12 @@ function ecosystemDescription(value) {
 }
 
 function updateInterface(state, forceTexture = false, forceRegion = false) {
-  ui.year.textContent = formatYear(state.yearBP);
+  const yearLabel = formatYear(state.yearBP);
+  ui.year.textContent = yearLabel;
+  ui.timelineDate.textContent = yearLabel;
   ui.stage.textContent = state.yearBP > 773_900 ? "Late MIS 19c" : state.yearBP > 756_900 ? "MIS 19 transition" : "Free Earth trajectory";
-  ui.co2.textContent = `${Math.round(state.co2)} ppm`;
-  ui.temperature.textContent = `${signed(state.temperatureAnomaly)} K`;
+  ui.co2.textContent = `${Math.round(state.co2)}`;
+  ui.temperature.textContent = signed(state.temperatureAnomaly);
   ui.ice.textContent = iceDescription(state.iceIndex);
   ui.sea.textContent = `${signed(state.seaLevel, 0)} m`;
   ui.sea.title = `Spratt–Lisiecki reference ${signed(state.seaLevelReference, 1)} ± ${state.seaLevelUncertainty.toFixed(1)} m (1σ)`;
@@ -87,7 +90,9 @@ function updateInterface(state, forceTexture = false, forceRegion = false) {
   ui.orbit.title = `e ${state.eccentricity.toFixed(4)} · perihelion longitude ${state.precession.toFixed(1)}°`;
   ui.npp.textContent = ecosystemDescription(state.productivityIndex);
   ui.npp.title = "Global aggregate productivity emulator; select a region for published BIOME4 NPP/LAI and branch vegetation response.";
-  ui.hominin.textContent = ecosystemDescription(state.homininPopulationIndex);
+  ui.hominin.textContent = Number.isFinite(state.homininPopulationPersons)
+    ? Math.max(0, Math.round(state.homininPopulationPersons)).toLocaleString()
+    : ecosystemDescription(state.homininPopulationIndex);
   ui.range.value = Math.round(state.elapsedYears);
   ui.range.style.setProperty("--progress", `${state.elapsedYears / 777_000 * 100}%`);
   ui.elapsed.textContent = state.elapsedYears < 1 ? "checkpoint" : `+${Math.round(state.elapsedYears).toLocaleString()} years`;
@@ -121,6 +126,7 @@ function handleRegionSelect(region) {
   selected = region;
   engine.setObserverRelevance({ climate: 1, hydrology: 1, vegetation: 0.8 });
   ui.surface.disabled = false;
+  if (ui.locationPanel) ui.locationPanel.open = true;
   renderRegion(engine.snapshot(), region.latitude, region.longitude);
   lastRegionUpdate = performance.now();
 }
@@ -129,15 +135,19 @@ function handleModeChange(mode) {
   if (mode === "descent") {
     ui.surface.textContent = "DESCENDING…";
     ui.surface.disabled = true;
-    ui.hint.textContent = "DESCENDING FROM GLOBAL SCALE · LOCAL TERRAIN STREAMING IN";
+    ui.hint.textContent = "DESCENDING · TERRAIN STREAMING";
   } else if (mode === "surface") {
     ui.surface.textContent = "RETURN TO GLOBE";
     ui.surface.disabled = false;
-    ui.hint.textContent = "DRAG TO LOOK · RIGHT-DRAG TO MOVE · SCROLL TO ZOOM";
+    if (ui.statePanel) ui.statePanel.open = false;
+    if (ui.journalPanel) ui.journalPanel.open = false;
+    if (ui.perfHud) ui.perfHud.open = false;
+    if (ui.locationPanel) ui.locationPanel.open = true;
+    ui.hint.textContent = "DRAG · MOVE · ZOOM";
   } else {
     ui.surface.textContent = "DESCEND TO REGION";
     ui.surface.disabled = !selected;
-    ui.hint.textContent = "DRAG TO ORBIT · SCROLL TO ZOOM · SELECT A REGION";
+    ui.hint.textContent = "DRAG · ZOOM · SELECT";
   }
   requestFrame();
 }
@@ -169,6 +179,7 @@ function setSeed(nextSeed) {
   ui.locationTitle.textContent = "Global view";
   ui.locationDetail.textContent = "Select the globe to inspect a regional climate and ecosystem state.";
   ui.locationCoordinates.textContent = "—";
+  if (ui.locationPanel) ui.locationPanel.open = false;
   ui.seed.textContent = `SEED ${seed}`;
   setPlaying(false);
   updateInterface(engine.snapshot(), true, true);
@@ -198,7 +209,7 @@ function populateSources() {
 }
 
 function updatePerformanceHud(now, force = false) {
-  if (!ui.perfHud || (!force && now - lastPerfHudUpdate < PERF_HUD_INTERVAL_MS)) return;
+  if (!ui.perfHud || (!force && !ui.perfHud.open) || (!force && now - lastPerfHudUpdate < PERF_HUD_INTERVAL_MS)) return;
   lastPerfHudUpdate = now;
   const view = earthView.diagnostics();
   const frame = profiler.snapshot();
@@ -221,7 +232,8 @@ ui.surface.addEventListener("click", () => earthView.toggleSurface());
 ui.branch.addEventListener("click", () => setSeed(crypto.getRandomValues(new Uint32Array(1))[0]));
 ui.range.addEventListener("input", () => {
   const previewYear = 777_000 - Number(ui.range.value);
-  ui.elapsed.textContent = `${formatYear(previewYear)} on release`;
+  ui.timelineDate.textContent = formatYear(previewYear);
+  ui.elapsed.textContent = "release to seek";
   ui.range.style.setProperty("--progress", `${Number(ui.range.value) / 777_000 * 100}%`);
 });
 ui.range.addEventListener("change", () => {
@@ -229,12 +241,8 @@ ui.range.addEventListener("change", () => {
   profiler.measure("uiMs", () => updateInterface(state, true, true));
   requestFrame();
 });
-for (const button of document.querySelectorAll("[data-speed]")) {
-  button.addEventListener("click", () => {
-    speed = Number(button.dataset.speed);
-    for (const candidate of document.querySelectorAll("[data-speed]")) candidate.classList.toggle("is-active", candidate === button);
-  });
-}
+ui.speedSelect.addEventListener("change", () => { speed = Number(ui.speedSelect.value) || 100; });
+ui.perfHud?.addEventListener("toggle", () => { if (ui.perfHud.open) updatePerformanceHud(performance.now(), true); });
 ui.sourcesButton.addEventListener("click", () => ui.sourcesModal.classList.add("is-open"));
 ui.sourcesClose.addEventListener("click", () => ui.sourcesModal.classList.remove("is-open"));
 ui.sourcesModal.addEventListener("click", (event) => { if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open"); });
