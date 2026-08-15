@@ -7,7 +7,7 @@ const finite = (value) => value !== null && value !== undefined && value !== "" 
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 
-export const MODERN_TERRAIN_ANCHOR_POLICY = "measured-resolution-source-aware-anchor-v1";
+export const MODERN_TERRAIN_ANCHOR_POLICY = "measured-resolution-source-aware-anchor-v2";
 
 const DIRECT_GEBCO_TID = new Set([10, 11, 12, 13, 14, 15, 16, 17]);
 const INDIRECT_GEBCO_TID = new Set([40, 41, 42, 43, 44, 45, 46, 47, 48]);
@@ -39,7 +39,9 @@ function fieldEligible(field) {
 
 function measurementQuality(candidate) {
   if (finite(candidate?.tidCode)) return gebcoTidMeasurementQuality(candidate.tidCode);
-  if (candidate?.maskedHighResolution || candidate?.directMeasurement || candidate?.measurementClass === "direct") return 1.0;
+  if (candidate?.directMeasurement || candidate?.measurementClass === "direct") return 1.0;
+  // GMRT topo-mask certifies high-resolution coverage, not necessarily direct multibeam.
+  if (candidate?.maskedHighResolution || candidate?.measurementClass === "high-resolution-mixed") return 0.90;
   if (candidate?.measurementClass === "predicted" || candidate?.measurementClass === "interpolated") return 0.70;
   if (candidate?.measurementClass === "mixed") return 0.78;
   if (candidate?.sourceId === "etopo-2022") return 0.74;
@@ -107,9 +109,9 @@ function etopoFallback(latitude, longitude, sigmaMeters = null) {
  * Select the best modern solid-surface anchor at one location.
  *
  * This is not a 777 ka estimate. It only chooses the best present-day spatial
- * observation to be transformed by the reconstruction hindcast. Direct measured
- * bathymetry is favored over interpolated/predicted cells, and finer local data
- * can replace the ETOPO fallback without changing the paleo assimilation rules.
+ * observation to be transformed by the reconstruction hindcast. Explicit direct
+ * measurements are favored over masked high-resolution mixed coverage, which in
+ * turn outranks predicted/interpolated cells when resolution and support permit.
  */
 export function selectModernTerrainAnchor(latitude, longitude, candidates = [], {
   etopoSigmaMeters = null
