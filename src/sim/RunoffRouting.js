@@ -6,8 +6,8 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 const mod = (value, divisor) => ((value % divisor) + divisor) % divisor;
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 
-export const RUNOFF_ROUTING_POLICY = "etopo-d8-parcel-routing-v1";
-export const RIVER_NETWORK_POLICY = "etopo-d8-upstream-network-v1";
+export const RUNOFF_ROUTING_POLICY = "state-elevation-d8-parcel-routing-v2";
+export const RIVER_NETWORK_POLICY = "state-elevation-d8-upstream-network-v2";
 
 function wrapLongitude(longitude) {
   return mod(Number(longitude) + 180, 360) - 180;
@@ -75,14 +75,14 @@ export function gridCellAreaKm2(latitude, spacingDegrees) {
   return EARTH_RADIUS_KM ** 2 * dLon * Math.abs(Math.sin(latNorth) - Math.sin(latSouth));
 }
 
-function bestDownhillNeighbor(cell, elevationMeters) {
+function bestDownhillNeighbor(cell, elevationMeters, elevationAt = bedrockElevationAt) {
   let best = null;
   for (let dRow = -1; dRow <= 1; dRow += 1) {
     for (let dCol = -1; dCol <= 1; dCol += 1) {
       if (dRow === 0 && dCol === 0) continue;
       const neighbor = neighborCell(cell, dRow, dCol);
       if (!neighbor) continue;
-      const neighborElevation = bedrockElevationAt(neighbor.latitude, neighbor.longitude);
+      const neighborElevation = elevationAt(neighbor.latitude, neighbor.longitude);
       if (!Number.isFinite(neighborElevation) || neighborElevation >= elevationMeters - 0.01) continue;
       const distanceKm = Math.max(1e-6, greatCircleDistanceKm(cell, neighbor));
       const slope = (elevationMeters - neighborElevation) / (distanceKm * 1000);
@@ -101,11 +101,12 @@ export function routeRunoffParcel(
   {
     spacingDegrees = 1,
     seaLevelMeters = 0,
-    maxSteps = 512
+    maxSteps = 512,
+    elevationAt = bedrockElevationAt
   } = {}
 ) {
   const origin = cellCenter(latitude, longitude, spacingDegrees);
-  const originElevation = bedrockElevationAt(origin.latitude, origin.longitude);
+  const originElevation = elevationAt(origin.latitude, origin.longitude);
   const areaKm2 = gridCellAreaKm2(origin.latitude, origin.spacing);
   const runoffDepth = Math.max(0, Number(runoffMmPerYear) || 0);
   const annualVolumeM3 = runoffDepth * areaKm2 * 1000;
@@ -134,7 +135,7 @@ export function routeRunoffParcel(
       break;
     }
 
-    const downhill = bestDownhillNeighbor(current, elevationMeters);
+    const downhill = bestDownhillNeighbor(current, elevationMeters, elevationAt);
     if (!downhill) {
       outlet = "closed-basin sink";
       break;
@@ -156,7 +157,7 @@ export function routeRunoffParcel(
     outlet,
     path: Object.freeze(path),
     massConserved: path.every((point) => Math.abs(point.annualVolumeM3 - round(annualVolumeM3, 2)) < 0.01),
-    epistemicStatus: "model-derived D8-style parcel routing over compact modern ETOPO bedrock with simulated sea level; no groundwater, lake storage, channel hydraulics, or upstream accumulation"
+    epistemicStatus: "model-derived D8-style parcel routing over the supplied elevation field and simulated sea level; no groundwater, lake storage, channel hydraulics, or upstream accumulation"
   });
 }
 
@@ -166,11 +167,17 @@ export function networkSpacingForSpatialDetail(spatialDetail = 0.35) {
   return clamp(Number(spatialDetail) || 0, 0, 1) >= 0.82 ? 2 : 4;
 }
 
-export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters = 0 } = {}) {
+export function buildRunoffNetworkTopology({
+  spacingDegrees = 4,
+  seaLevelMeters = 0,
+  elevationAt = bedrockElevationAt,
+  elevationPolicy = "compact modern ETOPO bedrock"
+} = {}) {
   const spacing = Number(spacingDegrees);
   if (![2, 4].includes(spacing)) {
     throw new RangeError(`River-network topology supports 2° or 4° routing, received ${spacingDegrees}`);
   }
+  if (typeof elevationAt !== "function") throw new TypeError("River-network topology requires an elevationAt(latitude, longitude) function.");
   const rows = Math.round(180 / spacing);
   const cols = Math.round(360 / spacing);
   const count = rows * cols;
@@ -187,7 +194,7 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
 
   for (let index = 0; index < count; index += 1) {
     const cell = cellFromIndex(index, rows, cols, spacing);
-    const elevation = bedrockElevationAt(cell.latitude, cell.longitude);
+    const elevation = elevationAt(cell.latitude, cell.longitude);
     elevationMeters[index] = elevation;
     cellAreaKm2[index] = gridCellAreaKm2(cell.latitude, spacing);
     if (!(elevation > seaLevelMeters)) continue;
@@ -196,9 +203,14 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
     landAreaKm2 += cellAreaKm2[index];
   }
 
+  const cachedElevationAt = (latitude, longitude) => {
+    const cell = cellCenter(latitude, longitude, spacing);
+    return elevationMeters[cell.row * cols + cell.col];
+  };
+
   for (const index of landIndices) {
     const cell = cellFromIndex(index, rows, cols, spacing);
-    const downhill = bestDownhillNeighbor(cell, elevationMeters[index]);
+    const downhill = bestDownhillNeighbor(cell, elevationMeters[index], cachedElevationAt);
     if (!downhill) {
       downstream[index] = -2;
       closedBasinSinkCells += 1;
@@ -215,6 +227,7 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
   landIndices.sort((a, b) => elevationMeters[b] - elevationMeters[a] || a - b);
   return Object.freeze({
     policy: RIVER_NETWORK_POLICY,
+    elevationPolicy,
     spacingDegrees: spacing,
     seaLevelMeters: Number(seaLevelMeters) || 0,
     rows,
@@ -229,7 +242,7 @@ export function buildRunoffNetworkTopology({ spacingDegrees = 4, seaLevelMeters 
     landAreaKm2,
     oceanOutletCells,
     closedBasinSinkCells,
-    epistemicStatus: "model-derived D8-style topology over compact modern ETOPO bedrock and simulated sea level"
+    epistemicStatus: `model-derived D8-style topology over ${elevationPolicy} and simulated sea level`
   });
 }
 
@@ -328,4 +341,38 @@ export function networkCellAt(topology, latitude, longitude) {
   const cell = cellCenter(latitude, longitude, topology.spacingDegrees);
   const index = cell.row * topology.cols + cell.col;
   return Object.freeze({ ...cell, index });
+}
+
+export function traceRunoffNetwork(topology, startIndex, maxSteps = 4096) {
+  if (!topology?.downstream || !topology?.elevationMeters) throw new TypeError("traceRunoffNetwork requires a runoff-network topology");
+  const origin = Math.max(0, Math.min(topology.count - 1, Math.floor(Number(startIndex) || 0)));
+  const visited = new Set();
+  const indices = [];
+  let current = origin;
+  let outlet = "closed-basin sink";
+  for (let step = 0; step < Math.max(1, Math.min(16384, Math.floor(maxSteps) || 1)); step += 1) {
+    if (visited.has(current)) {
+      outlet = "loop-guard";
+      break;
+    }
+    visited.add(current);
+    indices.push(current);
+    const next = topology.downstream[current];
+    if (next >= 0) {
+      current = next;
+      continue;
+    }
+    if (next === -1) outlet = "ocean";
+    else if (next === -2) outlet = "closed-basin sink";
+    else outlet = "non-land";
+    break;
+  }
+  return Object.freeze({
+    policy: RIVER_NETWORK_POLICY,
+    startIndex: origin,
+    outlet,
+    indices: Int32Array.from(indices),
+    routeCellsToOutlet: indices.length,
+    acyclic: outlet !== "loop-guard"
+  });
 }
