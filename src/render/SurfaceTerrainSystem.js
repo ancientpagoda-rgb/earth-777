@@ -1,6 +1,5 @@
 import { TerrainChunkManager } from "./TerrainChunkManager.js";
 import { SurfaceEcologyManager } from "./SurfaceEcologyManager.js";
-import { SurfaceBuiltEnvironmentManager } from "./SurfaceBuiltEnvironmentManager.js";
 import { SurfaceFaunaManager } from "./SurfaceFaunaManager.js";
 import { WorldStreamScheduler } from "../sim/WorldStreamScheduler.js";
 
@@ -34,7 +33,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   constructor(scene, options = {}) {
     super(scene, options);
     this.surfaceEcology = new SurfaceEcologyManager(scene, this);
-    this.surfaceBuiltEnvironment = new SurfaceBuiltEnvironmentManager(scene, this);
     this.surfaceFauna = new SurfaceFaunaManager(scene, this);
     this.hydrology = null;
     this.vegetation = null;
@@ -121,7 +119,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.setGeomorphologyPatch(context.geomorphologyPatch);
     const localContext = { latitude: this.origin.latitude, longitude: this.origin.longitude, ...context };
     this.surfaceEcology.setContext(localContext);
-    this.surfaceBuiltEnvironment.setContext(localContext);
     this.surfaceFauna.setContext(localContext);
     return true;
   }
@@ -146,7 +143,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const quality = clamp(segments / 22, 0.45, 1);
     const boundedRadius = Math.min(2, Math.max(1, Math.round(radius)));
     this.surfaceEcology.configure({ quality, radius: boundedRadius });
-    this.surfaceBuiltEnvironment.configure({ quality });
     this.surfaceFauna.configure({ windowRadiusKm: this.chunkSizeKm * (boundedRadius + 1.2), individualRadiusKm: 0.42 + quality * 0.34 });
   }
 
@@ -180,7 +176,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   diagnostics() {
     const terrain = super.diagnostics();
     const ecology = this.surfaceEcology.diagnostics();
-    const builtEnvironment = this.surfaceBuiltEnvironment.diagnostics();
     const fauna = this.surfaceFauna.diagnostics();
     return Object.freeze({
       ...terrain,
@@ -188,7 +183,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       terrainQueuedChunks: terrain.queuedChunks,
       ecology,
       fauna,
-      builtEnvironment,
       worldStreaming: this.worldScheduler.diagnostics(),
       surfaceScienceStatus: this.surfaceScienceStatus,
       surfaceContextActive: this.surfaceContextActive,
@@ -203,7 +197,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     super.clear();
     this.surfaceEcology?.clear();
     this.surfaceFauna?.clear();
-    this.surfaceBuiltEnvironment?.clear();
   }
 
   dispose() {
@@ -211,8 +204,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceEcology = null;
     this.surfaceFauna?.dispose();
     this.surfaceFauna = null;
-    this.surfaceBuiltEnvironment?.dispose();
-    this.surfaceBuiltEnvironment = null;
     this.lastSurfaceContext = null;
     this.worldScheduler = null;
     super.dispose();
