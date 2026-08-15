@@ -148,14 +148,5 @@ export function advanceEvolutionaryEcology(state, dtYears, random = Math.random)
   state.meanSpeciesCognitionIndex = totalPopulation > 0
     ? living.reduce((sum, lineage) => sum + lineage.cognition * lineage.populationIndex, 0) / totalPopulation
     : 0;
-
-  const herbivoreEnergy = living
-    .filter((lineage) => lineage.trophicLevel < 0.48)
-    .reduce((sum, lineage) => sum + lineage.populationIndex * (1.1 - lineage.trophicLevel), 0);
-  const carnivoreEnergy = living
-    .filter((lineage) => lineage.trophicLevel >= 0.48)
-    .reduce((sum, lineage) => sum + lineage.populationIndex * lineage.trophicLevel, 0);
-  if (herbivoreEnergy > 0) state.herbivoreBiomass = relax(state.herbivoreBiomass, herbivoreEnergy, dt, 90);
-  if (carnivoreEnergy > 0) state.carnivoreBiomass = relax(state.carnivoreBiomass, carnivoreEnergy, dt, 120);
   return state;
 }
