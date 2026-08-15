@@ -3,7 +3,7 @@ import { topographyEvidenceSourceById } from "./TopographyEvidenceSources.js";
 
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 
-export const TOPOGRAPHY_EVIDENCE_HARVEST_POLICY = "source-catalog-normalized-topography-harvest-v1";
+export const TOPOGRAPHY_EVIDENCE_HARVEST_POLICY = "source-catalog-normalized-topography-harvest-v2";
 
 function inferredRelation(record, source) {
   if (record?.relation) return record.relation;
@@ -19,12 +19,14 @@ function inferredField(record, source) {
 }
 
 export function normalizeTopographyEvidenceRecord(record = {}) {
-  const source = topographyEvidenceSourceById(record.sourceId);
+  const catalogSourceId = record.archiveSourceId ?? record.sourceId;
+  const source = topographyEvidenceSourceById(catalogSourceId);
   const relation = inferredRelation(record, source);
   return Object.freeze({
     ...record,
     field: inferredField(record, source),
     relation,
+    catalogSourceId,
     sourceQuality: finite(record.sourceQuality) ? Number(record.sourceQuality) : source?.sourceQuality ?? 0.72,
     sourceFamily: record.sourceFamily ?? source?.family ?? null,
     sourceResolution: record.sourceResolution ?? source?.spatialResolution ?? null,

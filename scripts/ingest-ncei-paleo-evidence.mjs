@@ -1,0 +1,154 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  buildNceiPaleoSearchUrl,
+  NCEI_DEFAULT_WINDOW_YEARS,
+  NCEI_PAGE_LIMIT,
+  NCEI_PALEO_API_BASE,
+  NCEI_TARGET_YEAR_BP,
+  NCEI_TOPOGRAPHY_DATA_TYPES,
+  nextNceiPageUrl,
+  normalizeNceiSearchResponse
+} from "./ncei-paleo-evidence-utils.mjs";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const RAW_DIR = resolve(ROOT, "data/raw");
+const GENERATED_DIR = resolve(ROOT, "src/data/generated");
+const RAW_PATH = resolve(RAW_DIR, "ncei-paleo-evidence-777.json");
+const OUTPUT_PATH = resolve(GENERATED_DIR, "ncei-paleo-evidence.generated.js");
+const MANIFEST_PATH = resolve(ROOT, "data/evidence-manifest.json");
+const REFRESH = process.argv.includes("--refresh");
+const MAX_PAGES_ARG = process.argv.find((arg) => arg.startsWith("--max-pages="));
+const MAX_PAGES = MAX_PAGES_ARG ? Math.max(1, Number(MAX_PAGES_ARG.split("=")[1]) || 1) : Number.POSITIVE_INFINITY;
+
+const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const sha256Path = async (path) => sha256Bytes(await readFile(path));
+
+async function fetchJson(url) {
+  const response = await fetch(url, {
+    headers: { "User-Agent": "earth-777-evidence-ingestion/1.0 (scientific reconstruction metadata cache)" }
+  });
+  if (!response.ok) throw new Error(`NCEI request failed (${response.status}) ${url}`);
+  return response.json();
+}
+
+async function retrieveAllPages() {
+  const firstUrl = buildNceiPaleoSearchUrl({
+    targetYearBP: NCEI_TARGET_YEAR_BP,
+    windowYears: NCEI_DEFAULT_WINDOW_YEARS,
+    dataTypeIds: Object.keys(NCEI_TOPOGRAPHY_DATA_TYPES).map(Number),
+    limit: NCEI_PAGE_LIMIT
+  });
+  let url = firstUrl;
+  let pageCount = 0;
+  const studies = [];
+  const seenUrls = new Set();
+  while (url && pageCount < MAX_PAGES) {
+    if (seenUrls.has(url)) throw new Error(`NCEI pagination loop detected at ${url}`);
+    seenUrls.add(url);
+    const payload = await fetchJson(url);
+    const pageStudies = Array.isArray(payload?.study) ? payload.study : [];
+    studies.push(...pageStudies);
+    pageCount += 1;
+    const next = nextNceiPageUrl(payload);
+    url = next ? new URL(next, url || NCEI_PALEO_API_BASE).href : null;
+  }
+  return {
+    schemaVersion: 1,
+    retrievedAt: new Date().toISOString(),
+    query: {
+      source: "ncei-paleo-search",
+      dataPublisher: "NOAA",
+      targetYearBP: NCEI_TARGET_YEAR_BP,
+      windowYears: NCEI_DEFAULT_WINDOW_YEARS,
+      earliestYearBP: NCEI_TARGET_YEAR_BP + NCEI_DEFAULT_WINDOW_YEARS,
+      latestYearBP: NCEI_TARGET_YEAR_BP - NCEI_DEFAULT_WINDOW_YEARS,
+      timeMethod: "overAny",
+      dataTypeIds: Object.keys(NCEI_TOPOGRAPHY_DATA_TYPES).map(Number),
+      pageLimit: NCEI_PAGE_LIMIT,
+      firstUrl,
+      truncatedByMaxPages: Number.isFinite(MAX_PAGES) && Boolean(url)
+    },
+    pageCount,
+    studies
+  };
+}
+
+async function loadOrRetrieveRaw() {
+  if (!REFRESH) {
+    try {
+      return JSON.parse(await readFile(RAW_PATH, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const payload = await retrieveAllPages();
+  await mkdir(RAW_DIR, { recursive: true });
+  await writeFile(RAW_PATH, `${JSON.stringify(payload, null, 2)}\n`);
+  return payload;
+}
+
+function normalizeAll(raw) {
+  const studies = Array.isArray(raw?.studies) ? raw.studies : [];
+  const records = studies.flatMap((study) => normalizeNceiSearchResponse({ study: [study] }));
+  const deduped = new Map();
+  for (const record of records) {
+    const key = record.sourceId;
+    if (!deduped.has(key)) deduped.set(key, record);
+  }
+  return [...deduped.values()].sort((a, b) => String(a.sourceId).localeCompare(String(b.sourceId)));
+}
+
+await mkdir(GENERATED_DIR, { recursive: true });
+const raw = await loadOrRetrieveRaw();
+const records = normalizeAll(raw);
+const studies = Array.isArray(raw?.studies) ? raw.studies : [];
+const dataTypeCounts = Object.fromEntries(Object.entries(NCEI_TOPOGRAPHY_DATA_TYPES).map(([id, type]) => [type.name, records.filter((record) => Number(record.dataTypeId) === Number(id)).length]));
+const geolocatedCount = records.filter((record) => Number.isFinite(record.latitude) && Number.isFinite(record.longitude)).length;
+const ageBoundedCount = records.filter((record) => Array.isArray(record.ageRangeBP)).length;
+const meta = {
+  schemaVersion: 1,
+  generatedBy: "scripts/ingest-ncei-paleo-evidence.mjs",
+  sourceId: "ncei-paleo-search",
+  sourceUrl: "https://www.ncei.noaa.gov/access/paleo-search/api",
+  targetYearBP: NCEI_TARGET_YEAR_BP,
+  windowYears: NCEI_DEFAULT_WINDOW_YEARS,
+  relation: "nearby-age-paleo-evidence",
+  scientificRole: "discovery metadata only; proxy-specific transformation required before target-epoch terrain assimilation",
+  pageCount: Number(raw?.pageCount) || 0,
+  studyCount: studies.length,
+  siteRecordCount: records.length,
+  geolocatedSiteCount: geolocatedCount,
+  ageBoundedSiteCount: ageBoundedCount,
+  dataTypeCounts,
+  retrievedAt: raw?.retrievedAt ?? null,
+  truncated: Boolean(raw?.query?.truncatedByMaxPages)
+};
+
+const moduleText = `// Generated by scripts/ingest-ncei-paleo-evidence.mjs. Do not edit by hand.\nexport const NCEI_PALEO_EVIDENCE_META = Object.freeze(${JSON.stringify(meta, null, 2)});\n\nexport const NCEI_PALEO_EVIDENCE_RECORDS = Object.freeze(${JSON.stringify(records)}.map((record) => Object.freeze(record)));\n`;
+await writeFile(OUTPUT_PATH, moduleText);
+
+const manifest = {
+  schemaVersion: 1,
+  generatedBy: "scripts/ingest-ncei-paleo-evidence.mjs",
+  source: {
+    id: "ncei-paleo-search",
+    apiDocumentation: "https://www.ncei.noaa.gov/access/paleo-search/api",
+    query: raw?.query ?? null,
+    retrievedAt: raw?.retrievedAt ?? null,
+    rawSha256: await sha256Path(RAW_PATH)
+  },
+  output: {
+    file: "src/data/generated/ncei-paleo-evidence.generated.js",
+    sha256: await sha256Path(OUTPUT_PATH),
+    records: records.length
+  },
+  epistemicRule: "Cached studies are discovery evidence. No NCEI study metadata becomes a 777 ka elevation value until a separate proxy-specific transformation emits a field-matched target estimate."
+};
+await writeFile(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+
+console.log(`Wrote ${records.length} NCEI paleo evidence site records from ${studies.length} studies across ${meta.pageCount} pages.`);
+console.log(`Geolocated: ${geolocatedCount}; age-bounded: ${ageBoundedCount}; target window: ${NCEI_TARGET_YEAR_BP - NCEI_DEFAULT_WINDOW_YEARS}–${NCEI_TARGET_YEAR_BP + NCEI_DEFAULT_WINDOW_YEARS} BP.`);
+if (meta.truncated) console.warn("Warning: ingestion was truncated by --max-pages and should not be used as a complete evidence cache.");

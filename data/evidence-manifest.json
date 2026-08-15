@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/ingest-ncei-paleo-evidence.mjs",
+  "source": {
+    "id": "ncei-paleo-search",
+    "apiDocumentation": "https://www.ncei.noaa.gov/access/paleo-search/api",
+    "query": null,
+    "retrievedAt": null,
+    "rawSha256": null
+  },
+  "output": {
+    "file": "src/data/generated/ncei-paleo-evidence.generated.js",
+    "sha256": null,
+    "records": 0
+  },
+  "status": "cache-not-yet-populated",
+  "epistemicRule": "Cached studies are discovery evidence. No NCEI study metadata becomes a 777 ka elevation value until a separate proxy-specific transformation emits a field-matched target estimate."
+}
