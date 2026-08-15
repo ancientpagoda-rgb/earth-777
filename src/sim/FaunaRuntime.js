@@ -29,11 +29,10 @@ function biomeFactor(code) {
 
 function lineagesForRole(state, role) {
   const living = (state?.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null && Number(lineage.populationIndex) > 0);
-  if (!living.length) return Object.freeze([]);
   const matching = living.filter((lineage) => role === "carnivore"
     ? Number(lineage.trophicLevel) >= 0.55
     : Number(lineage.trophicLevel) < 0.55);
-  return Object.freeze(matching.length ? matching : living);
+  return Object.freeze(matching);
 }
 
 function chooseLineage(lineages, seed) {
@@ -49,7 +48,8 @@ function chooseLineage(lineages, seed) {
 }
 
 function lineageVisualScale(lineage) {
-  const bodyMassLog10Kg = clamp(lineage?.bodyMassLog10Kg ?? 0.4, -0.5, 3.5);
+  if (!lineage) return 1;
+  const bodyMassLog10Kg = clamp(lineage.bodyMassLog10Kg ?? 0.4, -0.5, 3.5);
   return clamp(0.62 + (bodyMassLog10Kg + 0.5) * 0.25, 0.62, 1.62);
 }
 
@@ -198,7 +198,6 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       representation: materialized ? "individuals" : role === "carnivore" ? "pack" : "herd",
       behavior: behavior.behavior,
       heading: behavior.heading,
-      visualScale,
       bodyMassLog10Kg: lineage?.bodyMassLog10Kg ?? null,
       trophicLevel: lineage?.trophicLevel ?? null
     }));
