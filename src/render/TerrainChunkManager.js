@@ -5,6 +5,7 @@ import { tectonicElevationOffsetMeters } from "../sim/DynamicLithosphere.js";
 const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mix = (a, b, t) => a + (b - a) * t;
+const wrapLongitudeDelta = (value) => ((Number(value) + 540) % 360) - 180;
 
 function chunkKey(x, z) { return `${x}:${z}`; }
 
@@ -38,6 +39,8 @@ export class TerrainChunkManager {
     this.earthState = null;
     this.branchSeed = 777001;
     this.topographySignature = "none";
+    this.geomorphologyPatch = null;
+    this.geomorphologySignature = "none";
     this.contourIntervalMeters = 50;
     this.contourOpacity = 0.32;
     this.contourUniforms = null;
@@ -105,6 +108,29 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
     this.lastCenter = { x: Number.NaN, z: Number.NaN };
   }
 
+  setGeomorphologyPatch(patch) {
+    const next = patch ?? null;
+    const signature = next ? [
+      next.policy ?? "geomorphology",
+      Number(next.networkCellIndex ?? -1),
+      Number(next.geomorphicElevationOffsetMeters ?? 0).toFixed(2),
+      Number(next.geomorphicGradientEastMetersPerKm ?? 0).toFixed(4),
+      Number(next.geomorphicGradientNorthMetersPerKm ?? 0).toFixed(4),
+      Number(next.channelBearingRadians ?? 0).toFixed(4),
+      Number(next.channelDistanceFromSelectionKm ?? -1).toFixed(2),
+      Number(next.meanDischargeM3s ?? 0).toFixed(2)
+    ].join("|") : "none";
+    if (signature === this.geomorphologySignature) return false;
+    this.geomorphologyPatch = next;
+    this.geomorphologySignature = signature;
+    if (this.origin) {
+      this.baseElevationMeters = this._elevationAt(this.origin.latitude, this.origin.longitude);
+      this.clear();
+      this.lastCenter = { x: Number.NaN, z: Number.NaN };
+    }
+    return true;
+  }
+
   setBiomeProfile(profile) {
     const next = profile ?? null;
     const previous = this.biomeProfile?.groundColor?.join(",") ?? "none";
@@ -140,10 +166,24 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
     }
   }
 
+  _geomorphicOffsetAt(latitude, longitude) {
+    const patch = this.geomorphologyPatch;
+    if (!patch) return 0;
+    const northKm = (Number(latitude) - Number(patch.networkLatitude)) * KM_PER_DEGREE_LATITUDE;
+    const eastKm = wrapLongitudeDelta(Number(longitude) - Number(patch.networkLongitude))
+      * KM_PER_DEGREE_LATITUDE
+      * Math.max(0.12, Math.cos(Number(patch.networkLatitude) * Math.PI / 180));
+    return (Number(patch.geomorphicElevationOffsetMeters) || 0)
+      + eastKm * (Number(patch.geomorphicGradientEastMetersPerKm) || 0)
+      + northKm * (Number(patch.geomorphicGradientNorthMetersPerKm) || 0);
+  }
+
   _elevationAt(latitude, longitude) {
     const bedrock = bedrockElevationAt(latitude, longitude);
-    if (!this.earthState) return bedrock;
-    return bedrock + tectonicElevationOffsetMeters(this.earthState, latitude, longitude, this.branchSeed);
+    if (!this.earthState) return bedrock + this._geomorphicOffsetAt(latitude, longitude);
+    return bedrock
+      + tectonicElevationOffsetMeters(this.earthState, latitude, longitude, this.branchSeed)
+      + this._geomorphicOffsetAt(latitude, longitude);
   }
 
   _geographicAt(xKm, zKm) {
@@ -151,6 +191,35 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
     const longitudeScale = Math.max(12, KM_PER_DEGREE_LATITUDE * Math.cos(this.origin.latitude * Math.PI / 180));
     const longitude = this.origin.longitude + xKm / longitudeScale;
     return { latitude, longitude };
+  }
+
+  _channelIncisionMeters(xKm, zKm) {
+    const patch = this.geomorphologyPatch;
+    const angle = Number(patch?.channelBearingRadians);
+    const discharge = Math.max(0, Number(patch?.meanDischargeM3s) || 0);
+    const closestX = Number(patch?.channelClosestXKm);
+    const closestZ = Number(patch?.channelClosestZKm);
+    const channelDistance = Number(patch?.channelDistanceFromSelectionKm);
+    if (!Number.isFinite(angle) || !Number.isFinite(closestX) || !Number.isFinite(closestZ) || !(discharge > 0.08)) return 0;
+    const visibleReachKm = this.chunkSizeKm * (this.radius + 1.7);
+    if (Number.isFinite(channelDistance) && channelDistance > visibleReachKm) return 0;
+
+    const dirX = Math.cos(angle);
+    const dirZ = Math.sin(angle);
+    const relX = xKm - closestX;
+    const relZ = zKm - closestZ;
+    const alongKm = relX * dirX + relZ * dirZ;
+    const perpendicularKm = -relX * dirZ + relZ * dirX;
+    const bankfullWidthMeters = clamp(4 + Math.sqrt(discharge) * 2.6, 4, 90);
+    const valleyHalfWidthKm = clamp(bankfullWidthMeters / 1000 * 2.4, 0.012, 0.22);
+    const phase = (this.branchSeed % 997) * 0.017;
+    const meanderAmplitudeKm = clamp(valleyHalfWidthKm * 0.7, 0.004, 0.055);
+    const meanderKm = Math.sin(alongKm * 0.85 + phase) * meanderAmplitudeKm;
+    const distanceKm = Math.abs(perpendicularKm - meanderKm);
+    const erosionRate = Math.max(0, Number(patch.erosionRateMmPerYear) || 0);
+    const incisionDepthMeters = clamp(1.2 + Math.log1p(discharge) * 1.35 + erosionRate * 160, 1.2, 28);
+    const profile = Math.exp(-((distanceKm / valleyHalfWidthKm) ** 2));
+    return incisionDepthMeters * profile;
   }
 
   _microreliefKm(xKm, zKm, elevationMeters) {
@@ -168,7 +237,9 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
     if (!this.origin) return 0;
     const { latitude, longitude } = this._geographicAt(xKm, zKm);
     const elevationMeters = this._elevationAt(latitude, longitude);
-    return (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + this._microreliefKm(xKm, zKm, elevationMeters);
+    const channelIncisionMeters = this._channelIncisionMeters(xKm, zKm);
+    return (elevationMeters - this.baseElevationMeters - channelIncisionMeters) / 1000 * this.verticalScale
+      + this._microreliefKm(xKm, zKm, elevationMeters);
   }
 
   update(cameraPosition) {
@@ -237,12 +308,15 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
         const localX = centerX + (x / segments) * this.chunkSizeKm - half;
         const { latitude, longitude } = this._geographicAt(localX, localZ);
         const elevationMeters = this._elevationAt(latitude, longitude);
-        const y = (elevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + this._microreliefKm(localX, localZ, elevationMeters);
+        const channelIncisionMeters = this._channelIncisionMeters(localX, localZ);
+        const visualElevationMeters = elevationMeters - channelIncisionMeters;
+        const y = (visualElevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale
+          + this._microreliefKm(localX, localZ, elevationMeters);
         positions[vertexOffset * 3] = localX;
         positions[vertexOffset * 3 + 1] = y;
         positions[vertexOffset * 3 + 2] = localZ;
-        elevations[vertexOffset] = elevationMeters;
-        const [r, g, b] = terrainColor(latitude, elevationMeters, elevationMeters - this.baseElevationMeters, this.biomeProfile?.groundColor);
+        elevations[vertexOffset] = visualElevationMeters;
+        const [r, g, b] = terrainColor(latitude, visualElevationMeters, visualElevationMeters - this.baseElevationMeters, this.biomeProfile?.groundColor);
         colors[vertexOffset * 3] = r;
         colors[vertexOffset * 3 + 1] = g;
         colors[vertexOffset * 3 + 2] = b;
@@ -274,6 +348,7 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
   }
 
   diagnostics() {
+    const patch = this.geomorphologyPatch;
     return Object.freeze({
       loadedChunks: this.chunks.size,
       queuedChunks: this.queue.length,
@@ -282,7 +357,14 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
       chunkSizeKm: this.chunkSizeKm,
       contourIntervalMeters: this.contourIntervalMeters,
       contourOpacity: this.contourOpacity,
-      dynamicTopography: Boolean(this.earthState)
+      dynamicTopography: Boolean(this.earthState),
+      geomorphologyProjected: Boolean(patch),
+      geomorphicElevationOffsetMeters: patch?.geomorphicElevationOffsetMeters ?? null,
+      geomorphicGradientEastMetersPerKm: patch?.geomorphicGradientEastMetersPerKm ?? null,
+      geomorphicGradientNorthMetersPerKm: patch?.geomorphicGradientNorthMetersPerKm ?? null,
+      routedChannelDistanceKm: patch?.channelDistanceFromSelectionKm ?? null,
+      routedChannelDischargeM3s: patch?.meanDischargeM3s ?? null,
+      subgridChannelPresentation: Boolean(patch && Number.isFinite(patch.channelBearingRadians) && Number(patch.meanDischargeM3s) > 0.08)
     });
   }
 
