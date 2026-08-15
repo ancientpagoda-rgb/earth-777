@@ -1,14 +1,23 @@
 import { MassConservingHydrology } from "./MassConservingHydrology.js";
 import { closeAnnualWaterBalance } from "./WaterBalance.js";
 import { dynamicSurfaceElevationMeters } from "./GeneralAtmosphereCirculation.js";
+import { evolveRunoffNetworkTopography, DYNAMIC_GEOMORPHOLOGY_POLICY } from "./DynamicGeomorphology.js";
 import { gridSpacingForSpatialDetail } from "./SpatialHydroClimate.js";
 import { networkSpacingForSpatialDetail } from "./RunoffRouting.js";
 
 const round = (value, digits = 4) => Number((Number(value) || 0).toFixed(digits));
 const quantize = (value, step) => Math.round((Number(value) || 0) / step) * step;
-const COUPLED_METHODS = Object.freeze(["_stateSignature", "_networkForcingState", "_networkSignature", "_balanceFor"]);
+const COUPLED_METHODS = Object.freeze([
+  "_stateSignature",
+  "_networkForcingState",
+  "_networkSignature",
+  "_routingElevationAt",
+  "_routingTopologySignature",
+  "_refineNetworkTopology",
+  "_balanceFor"
+]);
 
-export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-general-atmosphere-hydrology-v1";
+export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-atmosphere-geomorphology-hydrology-v2";
 
 export class EarthSystemHydrology extends MassConservingHydrology {
   _stateSignature(globalState, spatialDetail) {
@@ -29,8 +38,11 @@ export class EarthSystemHydrology extends MassConservingHydrology {
   }
 
   _networkForcingState(globalState) {
+    const elapsedYears = quantize(globalState.elapsedYears ?? 0, 2500);
     return Object.freeze({
       ...globalState,
+      elapsedYears,
+      yearBP: Math.max(0, 777_000 - elapsedYears),
       temperatureAnomaly: quantize(globalState.temperatureAnomaly, 0.1),
       oceanTemperatureAnomaly: quantize(globalState.oceanTemperatureAnomaly ?? globalState.temperatureAnomaly, 0.1),
       iceIndex: quantize(globalState.iceIndex, 0.01),
@@ -38,7 +50,7 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       obliquity: quantize(globalState.obliquity, 0.05),
       precession: quantize(globalState.precession, 2),
       seaLevel: quantize(globalState.seaLevel, 2),
-      tectonicTimeMyr: quantize(globalState.tectonicTimeMyr, 0.0025),
+      tectonicTimeMyr: elapsedYears / 1_000_000,
       tectonicBoundaryActivity: quantize(globalState.tectonicBoundaryActivity ?? 1, 0.05),
       productivityIndex: quantize(globalState.productivityIndex ?? 1, 0.05)
     });
@@ -55,11 +67,30 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       round(forcing.obliquity, 2),
       round(forcing.precession, 0),
       round(forcing.seaLevel, 0),
+      round(forcing.elapsedYears / 1000, 0),
       round(forcing.tectonicTimeMyr, 3),
       round(forcing.tectonicBoundaryActivity, 2),
       round(forcing.productivityIndex, 2),
       this.soil?.meta?.assetSha256 ?? "fallback-soil"
     ].join("|");
+  }
+
+  _routingElevationAt(globalState, latitude, longitude) {
+    return dynamicSurfaceElevationMeters(globalState, latitude, longitude);
+  }
+
+  _routingTopologySignature(globalState) {
+    return [
+      "dynamic-tectonic-surface",
+      round(globalState.tectonicTimeMyr ?? 0, 4),
+      round(globalState.tectonicBoundaryActivity ?? 1, 2),
+      Number(globalState.tectonicSeed ?? globalState.seed ?? 777001) >>> 0
+    ].join(":");
+  }
+
+  _refineNetworkTopology(globalState, topology, localRunoffMmPerYear, climateForcedMask) {
+    if ((Number(globalState.elapsedYears) || 0) <= 0) return null;
+    return evolveRunoffNetworkTopography(globalState, topology, localRunoffMmPerYear, climateForcedMask);
   }
 
   _balanceFor(globalState, climate, spatialDetail, includeDailyTrace = false) {
@@ -86,8 +117,10 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       parentPolicy: base.policy,
       dynamicTopographyInLocalWaterBalance: true,
       generalAtmosphereForcing: true,
-      routingTopographyState: "ETOPO routing topology retained as an explicit coarse reference; local water balance already uses evolving tectonic elevation",
-      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to the general atmosphere, orbit and evolving tectonics`
+      routingTopographyState: "preliminary routing uses evolving tectonic elevation; conserved runoff then drives stream-power erosion and sediment redistribution before one deterministic drainage-topology rebuild",
+      geomorphologyPolicy: DYNAMIC_GEOMORPHOLOGY_POLICY,
+      waterAndSedimentClosureTrackedSeparately: true,
+      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to the general atmosphere, orbit and evolving tectonics; coarse routing additionally resolves one-pass runoff-driven erosion/sediment redistribution and drainage-divide migration`
     });
   }
 }
