@@ -34,7 +34,7 @@ function contains(patch, latitude, longitude) {
     && lon <= Number(patch.east);
 }
 
-function sampleNearest(patch, latitude, longitude) {
+export function terrainPatchValueAt(patch, latitude, longitude) {
   if (!contains(patch, latitude, longitude)) return null;
   const ncols = Number(patch.ncols);
   const nrows = Number(patch.nrows);
@@ -53,7 +53,7 @@ function sampleNearest(patch, latitude, longitude) {
 export function cachedTerrainPatchCandidatesAt(latitude, longitude) {
   const candidates = [];
   for (const patch of GMRT_TERRAIN_PATCHES) {
-    const value = sampleNearest(patch, latitude, longitude);
+    const value = terrainPatchValueAt(patch, latitude, longitude);
     if (value == null) continue;
     candidates.push(Object.freeze({
       sourceId: patch.sourceId ?? "gmrt-4.5.0",
@@ -63,15 +63,15 @@ export function cachedTerrainPatchCandidatesAt(latitude, longitude) {
       latitude: Number(latitude),
       longitude: wrapLongitude(longitude),
       resolutionMeters: patch.resolutionMeters ?? GMRT_TERRAIN_PATCH_META.resolutionMeters ?? 200,
-      directMeasurement: true,
+      directMeasurement: false,
       maskedHighResolution: true,
-      measurementClass: "direct",
-      sourceQuality: patch.sourceQuality ?? 0.97,
+      measurementClass: "high-resolution-mixed",
+      sourceQuality: patch.sourceQuality ?? 0.95,
       spatialSupportKm: Math.max(0.25, Number(patch.resolutionMeters ?? 200) / 500),
       patchId: patch.id,
       coverageFraction: patch.coverageFraction ?? null,
       method: "GMRT masked high-resolution terrain patch",
-      note: "Present-day masked high-resolution GMRT cell. It improves spatial detail only and still requires explicit 777 ka hindcast."
+      note: "Present-day GMRT topo-mask high-resolution cell. The mask certifies high-resolution coverage, not necessarily direct multibeam attribution; explicit 777 ka hindcast remains required."
     }));
   }
   return Object.freeze(candidates);
