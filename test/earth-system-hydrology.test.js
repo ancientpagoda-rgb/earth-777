@@ -10,10 +10,9 @@ import { dynamicSurfaceElevationMeters } from "../src/sim/GeneralAtmosphereCircu
 import { DYNAMIC_GEOMORPHOLOGY_POLICY } from "../src/sim/DynamicGeomorphology.js";
 import { DYNAMIC_SOIL_POLICY } from "../src/sim/DynamicSoilEvolution.js";
 import { GROUNDWATER_POLICY, CLOSED_BASIN_LAKE_POLICY } from "../src/sim/GroundwaterLakes.js";
-import { MassConservingHydrology } from "../src/sim/MassConservingHydrology.js";
 import { SpatialHydroClimate } from "../src/sim/SpatialHydroClimate.js";
 import {
-  installEarthSystemHydrologyCoupling,
+  EarthSystemHydrology,
   SURFACE_GEOMORPHOLOGY_PATCH_POLICY
 } from "../src/sim/EarthSystemHydrology.js";
 
@@ -22,10 +21,8 @@ const climate = new Krapp777ClimateLayer(gunzipSync(compressed));
 const soilCompressed = readFileSync(new URL("../public/data/biome4-soil.bin.gz", import.meta.url));
 const soil = new Biome4SoilLayer(gunzipSync(soilCompressed));
 
-installEarthSystemHydrologyCoupling();
-
 function hydrology() {
-  return new MassConservingHydrology(new SpatialHydroClimate(climate), soil);
+  return new EarthSystemHydrology(new SpatialHydroClimate(climate), soil);
 }
 
 test("runtime hydrology cache signature includes orbital and tectonic atmosphere drivers", () => {
@@ -170,10 +167,12 @@ test("runtime river network closes soil-evolved groundwater, lakes, routed water
   assert.ok(patch.meanDischargeM3s > 0.08);
 });
 
-test("browser entrypoint installs Earth-system hydrology coupling before main", () => {
+test("browser runtime constructs EarthSystemHydrology directly", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const bootstrap = readFileSync(new URL("../src/bootstrap.js", import.meta.url), "utf8");
+  const main = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
   assert.match(html, /src\/bootstrap\.js/);
-  assert.match(bootstrap, /installEarthSystemHydrologyCoupling\(\)/);
+  assert.doesNotMatch(bootstrap, /installEarthSystemHydrologyCoupling\(\)/);
   assert.match(bootstrap, /import\("\.\/main\.js"\)/);
+  assert.match(main, /new EarthSystemHydrology\(/);
 });
