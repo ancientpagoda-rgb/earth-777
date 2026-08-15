@@ -7,6 +7,7 @@ import {
 
 const clampLatitude = (value) => Math.max(-90, Math.min(90, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
+const positiveSigma = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
 
 export const TERRAIN_777_RECONSTRUCTION_POLICY = "modern-relief-explicit-hindcast-paleo-assimilation-v1";
 
@@ -30,6 +31,7 @@ function unresolvedHindcastCorrection() {
 }
 
 export function terrain777BedrockSample(latitude, longitude, {
+  modernAnchorSigmaMeters = null,
   hindcastCorrection = null,
   paleoConstraints = [],
   historicalCalibration = [],
@@ -45,7 +47,7 @@ export function terrain777BedrockSample(latitude, longitude, {
     targetYearBP: 777_000,
     modernAnchor: {
       value: modernElevationMeters,
-      sigma: null,
+      sigma: positiveSigma(modernAnchorSigmaMeters),
       stream: RECONSTRUCTION_STREAMS.MODERN,
       sourceId: "etopo-2022",
       method: "modern ETOPO 2022 bedrock/bathymetry spatial anchor",
