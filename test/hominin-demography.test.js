@@ -61,7 +61,8 @@ test("local population density follows actual demographic demes", () => {
   const deme = state.homininDemes.find((candidate) => candidate.headcount > 0);
   assert.ok(deme);
   const local = homininPopulationAt(state, deme.latitude, deme.longitude, 100);
-  const opposite = homininPopulationAt(state, -deme.latitude, ((deme.longitude + 540) % 360) - 180, 100);
+  const antipodeLongitude = ((deme.longitude + 360) % 360) - 180;
+  const opposite = homininPopulationAt(state, -deme.latitude, antipodeLongitude, 100);
   assert.ok(local.densityPersonsPerKm2 > 0);
   assert.ok(local.estimatedPersonsWithinRadius > 0);
   assert.ok(local.nearestDemeDistanceKm < 1e-6);
