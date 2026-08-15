@@ -35,11 +35,40 @@ export const RECONSTRUCTION_DATASET_CATALOG = Object.freeze([
   }),
   Object.freeze({
     sourceId: "spratt-lisiecki-2016",
-    fields: Object.freeze(["globalSeaLevel"]),
+    fields: Object.freeze(["globalSeaLevel", "shorelineConfidence"]),
     stream: RECONSTRUCTION_STREAMS.PALEO,
-    targetRelation: "target-epoch-reference-with-uncertainty",
+    targetRelation: "direct-777ka-reference-with-uncertainty",
     direct777Constraint: true,
-    note: "Sea-level reconstruction constrains the global shoreline datum with explicit uncertainty."
+    datasetId: "PANGAEA.979830-v2",
+    doi: "10.1594/PANGAEA.979830",
+    note: "At exactly 777 ka the five-record stack gives -12.76 m versus modern, 1-sigma uncertainty 9.52 m, and a published 95% interval of -33.06 to +4.17 m. The canonical shoreline uses the median while uncertainty is retained as a coastal confidence band."
+  }),
+  Object.freeze({
+    sourceId: "delong-2017-northern-california",
+    fields: Object.freeze(["rockUpliftRate", "denudationRate", "channelSteepness"]),
+    stream: RECONSTRUCTION_STREAMS.HISTORICAL,
+    targetRelation: "process-calibration-postdates-target-change",
+    direct777Constraint: false,
+    doi: "10.1130/B31551.1",
+    note: "Measured late-Pleistocene uplift and denudation calibrate landscape response, but the inferred uplift-rate increase at roughly 450-350 ka post-dates 777 ka, so those rates are not back-projected to the target epoch."
+  }),
+  Object.freeze({
+    sourceId: "cyr-granger-italy-uplift",
+    fields: Object.freeze(["rockUpliftRate", "erosionRate", "channelSteepness"]),
+    stream: RECONSTRUCTION_STREAMS.HISTORICAL,
+    targetRelation: "process-calibration-spans-target",
+    direct777Constraint: false,
+    doi: "10.1130/L96.1",
+    note: "Romagna Apennines uplift reported steady since about 0.9 Ma can calibrate long-duration landscape behavior across 777 ka, but uplift alone is not treated as surface-elevation change without an erosion/denudation budget."
+  }),
+  Object.freeze({
+    sourceId: "lease-2018-western-alaska-range",
+    fields: Object.freeze(["erosionRate", "glacialErosionFeedback"]),
+    stream: RECONSTRUCTION_STREAMS.HISTORICAL,
+    targetRelation: "process-calibration-geologic-timescale",
+    direct777Constraint: false,
+    doi: "10.1016/j.epsl.2018.06.009",
+    note: "Pliocene-Pleistocene erosion-rate history constrains glacial erosion feedbacks and non-stationarity; it is not a direct 777 ka elevation observation."
   }),
   Object.freeze({
     sourceId: "lr04",
