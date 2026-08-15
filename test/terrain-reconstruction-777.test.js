@@ -11,7 +11,7 @@ function close(actual, expected, tolerance = 1e-9) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
 }
 
-test("default terrain reconstruction preserves ETOPO numerically but labels it as an unresolved hindcast", () => {
+test("default terrain reconstruction uses ETOPO as the unresolved global fallback", () => {
   const latitude = 38.9;
   const longitude = -95.2;
   const modern = bedrockElevationAt(latitude, longitude);
@@ -19,11 +19,14 @@ test("default terrain reconstruction preserves ETOPO numerically but labels it a
   assert.equal(sample.policy, TERRAIN_777_RECONSTRUCTION_POLICY);
   close(sample.modernElevationMeters, modern);
   close(sample.reconstructedElevationMeters, modern);
+  assert.equal(sample.modernAnchorSourceId, "etopo-2022");
+  assert.equal(sample.modernAnchorReplacementUsed, false);
   assert.equal(sample.reconstructionStatus, "provisional-modern-anchor-awaiting-local-hindcast");
   assert.equal(sample.provenance.modernAnchor.sourceId, "etopo-2022");
   assert.equal(sample.provenance.hindcastCorrection.sourceId, "terrain-hindcast-unresolved-v1");
   assert.equal(sample.sigma, null);
-  assert.match(sample.epistemicStatus, /Modern ETOPO supplies spatial detail only after an explicit hindcast transform/);
+  assert.match(sample.epistemicStatus, /best available modern solid-surface anchor/i);
+  assert.match(sample.epistemicStatus, /explicit hindcast transform/i);
 });
 
 test("an explicit hindcast correction changes the target-epoch terrain estimate without inventing complete uncertainty", () => {
