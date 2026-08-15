@@ -87,7 +87,8 @@ export function createGlobePresentation(canvas) {
 export function textureFromRaster(message) {
   const texture = new THREE.DataTexture(new Uint8Array(message.buffer), message.width, message.height, THREE.RGBAFormat, THREE.UnsignedByteType);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = true;
+  // Worker rows already run north-to-south, matching the sphere UV layout.
+  texture.flipY = false;
   texture.anisotropy = 4;
   texture.needsUpdate = true;
   return texture;
