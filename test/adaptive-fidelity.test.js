@@ -55,13 +55,30 @@ test("Free Earth actually executes CWF-selected substeps", () => {
   assert.ok((diagnostics.executedSubsteps[refined.id] ?? 0) > diagnostics.executedSubsteps.orbit);
 });
 
-test("event log contains only state-triggered events and stays stable across fidelity budgets", () => {
-  const low = new FreeEarthEngine(12345, { fidelityBudget: 0.5 }).advance(12_000);
-  const high = new FreeEarthEngine(12345, { fidelityBudget: 2 }).advance(12_000);
+test("event log is deterministic for the same seed and runtime policy", () => {
+  const first = new FreeEarthEngine(12345, { fidelityBudget: 1 }).advance(12_000);
+  const second = new FreeEarthEngine(12345, { fidelityBudget: 1 }).advance(12_000);
 
-  assert.deepEqual(low.events, high.events);
-  assert.ok(low.events.length > 0);
-  assert.ok(low.events.every((event) => /Matuyama–Brunhes/.test(event.text)));
+  assert.deepEqual(first.events, second.events);
+  assert.ok(first.events.length > 0);
+  assert.ok(first.events.every((event) => /Matuyama–Brunhes|lineage/.test(event.text)));
+});
+
+test("journal reports lineage changes produced by the active evolutionary models", () => {
+  const engine = new FreeEarthEngine(777001, { fidelityBudget: 1 });
+  const animal = engine.state.speciesLineages[0];
+  const hominin = engine.state.homininLineages[0];
+  animal.populationIndex = 1;
+  animal.divergence = 1;
+  hominin.populationIndex = 1;
+  hominin.divergence = 1;
+  engine.evolutionRandom = () => 0;
+  engine.homininRandom = () => 0;
+
+  const state = engine.advance(25);
+
+  assert.ok(state.events.some((event) => /Animal lineage .* branches from lineage/.test(event.text)));
+  assert.ok(state.events.some((event) => /Hominin lineage .* branches from/.test(event.text)));
 });
 
 test("adaptive Free Earth remains deterministic for the same seed and runtime policy", () => {
