@@ -34,8 +34,8 @@ test("collapsed performance panel does not keep doing HUD work", () => {
   assert.match(main, /addEventListener\("toggle"/);
 });
 
-test("compact world summary exposes absolute hominin headcount", () => {
+test("compact world summary exposes aggregate hominin state", () => {
   assert.match(html, /id="hominin-readout"/);
-  assert.match(main, /state\.homininPopulationPersons/);
-  assert.match(html, /<i>people<\/i>/);
+  assert.match(main, /state\.homininPopulationIndex/);
+  assert.match(html, /<i>hominins<\/i>/);
 });

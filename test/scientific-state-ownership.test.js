@@ -10,6 +10,7 @@ import {
   initializeOceanCirculation
 } from "../src/sim/SpatialOceanCirculation.js";
 import { advanceEvolutionaryEcology } from "../src/sim/EvolutionaryEcology.js";
+import { FreeEarthEngine } from "../src/sim/free-earth.js";
 
 function carbonState() {
   const state = initializeBiogeochemistry({
@@ -72,4 +73,13 @@ test("evolutionary lineages read aggregate animal biomass without rewriting it",
   assert.equal(state.carnivoreBiomass, carnivoreBefore);
   assert.ok(Array.isArray(state.speciesLineages));
   assert.ok(Number.isInteger(state.speciesRichness));
+});
+
+test("Free Earth keeps advanced hominin spatial systems parked", () => {
+  const state = new FreeEarthEngine(777001).advance(1_000);
+  assert.ok(Array.isArray(state.homininLineages));
+  assert.ok(Number.isFinite(state.homininPopulationIndex));
+  for (const key of ["homininDemes", "homininSites", "homininWaterRoutes", "homininConflictEdges"]) {
+    assert.equal(state[key], undefined);
+  }
 });
