@@ -2,8 +2,14 @@ import { MassConservingHydrology } from "./MassConservingHydrology.js";
 import { closeAnnualWaterBalance } from "./WaterBalance.js";
 import { dynamicSurfaceElevationMeters } from "./GeneralAtmosphereCirculation.js";
 import { evolveRunoffNetworkTopography, DYNAMIC_GEOMORPHOLOGY_POLICY } from "./DynamicGeomorphology.js";
+import {
+  resolveGroundwaterBaseflow,
+  resolveClosedBasinLakes,
+  GROUNDWATER_POLICY,
+  CLOSED_BASIN_LAKE_POLICY
+} from "./GroundwaterLakes.js";
 import { gridSpacingForSpatialDetail } from "./SpatialHydroClimate.js";
-import { networkSpacingForSpatialDetail } from "./RunoffRouting.js";
+import { networkCellAt, networkSpacingForSpatialDetail } from "./RunoffRouting.js";
 
 const round = (value, digits = 4) => Number((Number(value) || 0).toFixed(digits));
 const quantize = (value, step) => Math.round((Number(value) || 0) / step) * step;
@@ -14,10 +20,11 @@ const COUPLED_METHODS = Object.freeze([
   "_routingElevationAt",
   "_routingTopologySignature",
   "_refineNetworkTopology",
-  "_balanceFor"
+  "_balanceFor",
+  "groundwaterLakeSample"
 ]);
 
-export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-atmosphere-geomorphology-hydrology-v2";
+export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-atmosphere-groundwater-lakes-geomorphology-hydrology-v3";
 
 export class EarthSystemHydrology extends MassConservingHydrology {
   _stateSignature(globalState, spatialDetail) {
@@ -89,8 +96,121 @@ export class EarthSystemHydrology extends MassConservingHydrology {
   }
 
   _refineNetworkTopology(globalState, topology, localRunoffMmPerYear, climateForcedMask) {
-    if ((Number(globalState.elapsedYears) || 0) <= 0) return null;
-    return evolveRunoffNetworkTopography(globalState, topology, localRunoffMmPerYear, climateForcedMask);
+    const count = topology.count;
+    const surfaceRunoffMmPerYear = new Float32Array(count);
+    const deepDrainageMmPerYear = new Float32Array(count);
+    const precipitationMmPerYear = new Float32Array(count);
+    const potentialEvapotranspirationMmPerYear = new Float32Array(count);
+    const precipitationScale = new Float32Array(count);
+    const soilWaterCapacityMm = new Float32Array(count);
+    const networkClimateDetail = topology.spacingDegrees === 2 ? 0.35 : 0.1;
+
+    // These samples are already materialized by MassConservingHydrology.network()
+    // for the same forcing state, so this pass normally hits the deterministic
+    // water-balance cache rather than recomputing climate.
+    for (const index of topology.routingOrder) {
+      const row = Math.floor(index / topology.cols);
+      const col = index % topology.cols;
+      const latitude = 90 - (row + 0.5) * topology.spacingDegrees;
+      const longitude = -180 + (col + 0.5) * topology.spacingDegrees;
+      const local = this.sample(globalState, latitude, longitude, networkClimateDetail);
+      if (!local) continue;
+      surfaceRunoffMmPerYear[index] = Math.max(0, Number(local.surfaceRunoffMmPerYear) || 0);
+      deepDrainageMmPerYear[index] = Math.max(0, Number(local.deepDrainageMmPerYear) || 0);
+      precipitationMmPerYear[index] = Math.max(0, Number(local.precipitationMmPerYear) || 0);
+      potentialEvapotranspirationMmPerYear[index] = Math.max(0, Number(local.potentialEvapotranspirationMmPerYear) || 0);
+      precipitationScale[index] = Math.max(0.12, Number(local.precipitationScale) || 1);
+      soilWaterCapacityMm[index] = Math.max(40, Number(local.soilWaterCapacityMm) || 260);
+    }
+
+    const groundwater = resolveGroundwaterBaseflow(globalState, topology, {
+      totalRunoffMmPerYear: localRunoffMmPerYear,
+      surfaceRunoffMmPerYear,
+      deepDrainageMmPerYear,
+      precipitationScale,
+      soilWaterCapacityMm
+    });
+    localRunoffMmPerYear.set(groundwater.effectiveRunoffMmPerYear);
+
+    // Groundwater-adjusted discharge drives the same erosion/sediment model,
+    // so slower subsurface routing can causally change landscape evolution.
+    const geomorphology = evolveRunoffNetworkTopography(
+      globalState,
+      topology,
+      localRunoffMmPerYear,
+      climateForcedMask
+    );
+
+    const lakes = resolveClosedBasinLakes(globalState, geomorphology.topology, localRunoffMmPerYear, {
+      precipitationMmPerYear,
+      potentialEvapotranspirationMmPerYear
+    });
+    localRunoffMmPerYear.set(lakes.adjustedRunoffMmPerYear);
+
+    const waterSystemClosureErrorM3PerYear = groundwater.landWaterInputM3PerYear
+      - groundwater.groundwaterStorageChangeM3PerYear
+      - lakes.lakeEvaporationM3PerYear
+      - lakes.adjustedLocalRunoffM3PerYear;
+    const waterSystemRelativeClosureError = groundwater.landWaterInputM3PerYear > 0
+      ? waterSystemClosureErrorM3PerYear / groundwater.landWaterInputM3PerYear
+      : 0;
+
+    return Object.freeze({
+      ...geomorphology,
+      topology: lakes.topology,
+      geomorphicTopology: geomorphology.topology,
+      groundwater,
+      lakes,
+      waterSystemClosureErrorM3PerYear,
+      waterSystemRelativeClosureError,
+      waterSystemMassConserved: Math.abs(waterSystemClosureErrorM3PerYear) <= Math.max(1e-5, groundwater.landWaterInputM3PerYear * 1e-10),
+      epistemicStatus: `${geomorphology.epistemicStatus}; deep drainage is delayed through a coarse groundwater reservoir before contributing baseflow, and closed geomorphic basins resolve lake area/storage/evaporation plus spill-saddle capture without geographic special cases`
+    });
+  }
+
+  groundwaterLakeSample(globalState, latitude, longitude, spatialDetail = 0.35) {
+    const network = this.network(globalState, spatialDetail);
+    const refinement = network.geomorphology;
+    if (!refinement?.groundwater || !refinement?.lakes) return null;
+    const cell = networkCellAt(network.topology, latitude, longitude);
+    if (!network.topology.landMask[cell.index] && refinement.lakes.lakeIdByCell[cell.index] < 0) return null;
+    const groundwater = refinement.groundwater;
+    const lakes = refinement.lakes;
+    const lakeId = lakes.lakeIdByCell[cell.index];
+    const lake = lakeId >= 0 ? lakes.lakes.find((candidate) => candidate.sinkIndex === lakeId) ?? null : null;
+    return Object.freeze({
+      policy: EARTH_SYSTEM_HYDROLOGY_POLICY,
+      groundwaterPolicy: groundwater.policy,
+      lakePolicy: lakes.policy,
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      spacingDegrees: network.spacingDegrees,
+      baseflowMmPerYear: groundwater.baseflowMmPerYear[cell.index],
+      baseflowFraction: groundwater.baseflowFraction[cell.index],
+      groundwaterStorageChangeMmPerYear: groundwater.groundwaterStorageChangeMmPerYear[cell.index],
+      groundwaterResidenceTimeYears: groundwater.residenceTimeYears[cell.index],
+      groundwaterMassConserved: groundwater.massConserved,
+      groundwaterRelativeClosureError: groundwater.relativeClosureError,
+      lakeId,
+      lakeCoverageFraction: lakes.lakeCoverageFractionByCell[cell.index],
+      lakeSurfaceElevationMeters: Number.isFinite(lakes.lakeSurfaceElevationMetersByCell[cell.index])
+        ? lakes.lakeSurfaceElevationMetersByCell[cell.index]
+        : null,
+      lakeDepthMeters: lakes.lakeDepthMetersByCell[cell.index],
+      lakeAreaKm2: lake?.lakeAreaKm2 ?? null,
+      lakeStorageM3: lake?.storageM3 ?? null,
+      lakeInflowM3PerYear: lake?.inflowM3PerYear ?? null,
+      lakeEvaporationM3PerYear: lake?.evaporationM3PerYear ?? null,
+      lakeOverflowM3PerYear: lake?.overflowM3PerYear ?? null,
+      lakeFillFraction: lake?.fillFraction ?? null,
+      lakeSpilling: lake?.spilling ?? false,
+      spillingLakeCount: lakes.spillingLakeCount,
+      closedLakeCount: lakes.closedLakeCount,
+      totalLakeAreaKm2: lakes.totalLakeAreaKm2,
+      waterSystemMassConserved: refinement.waterSystemMassConserved,
+      waterSystemRelativeClosureError: refinement.waterSystemRelativeClosureError,
+      epistemicStatus: "coarse Earth-system groundwater/lake sample from the same deterministic network that drives river discharge and geomorphic response"
+    });
   }
 
   _balanceFor(globalState, climate, spatialDetail, includeDailyTrace = false) {
@@ -117,10 +237,12 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       parentPolicy: base.policy,
       dynamicTopographyInLocalWaterBalance: true,
       generalAtmosphereForcing: true,
-      routingTopographyState: "preliminary routing uses evolving tectonic elevation; conserved runoff then drives stream-power erosion and sediment redistribution before one deterministic drainage-topology rebuild",
+      routingTopographyState: "preliminary routing uses evolving tectonic elevation; recharge is delayed through groundwater/baseflow; conserved discharge then drives geomorphology; closed basins resolve lake water balance and spill capture",
       geomorphologyPolicy: DYNAMIC_GEOMORPHOLOGY_POLICY,
+      groundwaterPolicy: GROUNDWATER_POLICY,
+      lakePolicy: CLOSED_BASIN_LAKE_POLICY,
       waterAndSedimentClosureTrackedSeparately: true,
-      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to the general atmosphere, orbit and evolving tectonics; coarse routing additionally resolves one-pass runoff-driven erosion/sediment redistribution and drainage-divide migration`
+      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to atmosphere/orbit/tectonics, while coarse network hydrology now distinguishes surface runoff, aquifer storage/baseflow, lake retention/evaporation/spill, and runoff-driven geomorphology`
     });
   }
 }
