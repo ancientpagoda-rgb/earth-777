@@ -29,7 +29,7 @@ export const TOPOGRAPHY_EVIDENCE_SOURCES = Object.freeze([
     spatialResolution: "15 arc-second global; selected regions multi-resolution",
     access: "download-opendap",
     doi: "10.5285/4f68d5c7-45eb-f999-e063-7086abc036fa",
-    note: "Independent modern global terrain/bathymetry anchor. The TID grid identifies measured versus interpolated source types and can improve spatial uncertainty."
+    note: "Current global terrain/bathymetry anchor. GEBCO 2026 reports 28.7% of the global seafloor mapped to modern standards; its companion TID grid distinguishes direct measurements (for example multibeam/singlebeam/lidar) from gravity-predicted or interpolated cells so anchor confidence can follow the actual source type."
   }),
   source({
     sourceId: "copernicus-dem-glo30",
@@ -55,12 +55,12 @@ export const TOPOGRAPHY_EVIDENCE_SOURCES = Object.freeze([
   source({
     sourceId: "gmrt-4.5.0",
     family: "multi-resolution-modern-topography",
-    fields: ["bathymetryMeters", "terrainMeters", "multibeamCoverage"],
+    fields: ["bathymetryMeters", "terrainMeters", "bedrockElevationMeters", "multibeamCoverage"],
     relation: EVIDENCE_RELATIONS.MODERN_ANCHOR,
     sourceQuality: 0.93,
-    spatialResolution: "multi-resolution",
+    spatialResolution: "curated multibeam approximately 120 m; contributed grids variable; services can return highest available resolution",
     access: "point-grid-web-services",
-    note: "Curated multi-resolution multibeam synthesis, especially valuable where ocean-floor measurements are much finer than global base grids."
+    note: "GMRT v4.5.0 (June 2026) includes curated multibeam from 1,644 surveys covering about 44.9 million km². Earth 777 treats explicit direct-attribution multibeam more strongly than mixed/background values and never assumes every GMRT point is direct measurement."
   }),
   source({
     sourceId: "bedmachine-greenland-v6",
