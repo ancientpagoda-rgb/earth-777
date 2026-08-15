@@ -1,7 +1,8 @@
 import { dynamicSurfaceElevationMeters } from "./GeneralAtmosphereCirculation.js";
 
 const EARTH_RADIUS_KM = 6371.0088;
-const TRANSPORT_INTERVAL_YEARS = 250;
+const CAPABILITY_INTERVAL_YEARS = 250;
+const ROUTE_INTERVAL_YEARS = 1000;
 const ROUTE_BIN_DEGREES = 18;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-Math.max(0, dtYears) / Math.max(1e-6, tauYears)));
@@ -84,8 +85,7 @@ function updateCapabilities(state, elapsedYears) {
       0,
       1
     );
-    const currentTransport = clamp(site.waterTransportIndex ?? 0, 0, 1);
-    site.waterTransportIndex = clamp(relax(currentTransport, targetTransport, elapsedYears, 1800), 0, 1);
+    site.waterTransportIndex = clamp(relax(site.waterTransportIndex ?? 0, targetTransport, elapsedYears, 1800), 0, 1);
     const targetNavigation = clamp(
       waterAccess * (site.waterTransportIndex * 0.45 + communication * 0.28 + culture * 0.27),
       0,
@@ -199,18 +199,16 @@ function summarize(state) {
   state.homininWaterTransportPolicy = HOMININ_WATER_TRANSPORT_POLICY;
 }
 
-function transportUpdate(state, elapsedYears) {
-  updateCapabilities(state, elapsedYears);
-  buildRoutes(state);
-  summarize(state);
-}
-
 export function initializeHomininWaterTransport(state) {
   state.homininWaterRoutes ??= [];
   state.homininWaterTransportAccumulatorYears ??= 0;
+  state.homininWaterRouteAccumulatorYears ??= 0;
   const initialized = state.homininWaterTransportPolicy === HOMININ_WATER_TRANSPORT_POLICY;
-  if (!initialized && (state.homininSites ?? []).length) transportUpdate(state, 0);
-  else summarize(state);
+  if (!initialized && (state.homininSites ?? []).length) {
+    updateCapabilities(state, 0);
+    buildRoutes(state);
+  }
+  summarize(state);
   return state;
 }
 
@@ -218,14 +216,20 @@ export function advanceHomininWaterTransport(state, dtYears) {
   if (state.homininWaterTransportPolicy !== HOMININ_WATER_TRANSPORT_POLICY) initializeHomininWaterTransport(state);
   const dt = Math.max(0, Number(dtYears) || 0);
   if (dt <= 0) return state;
+
   state.homininWaterTransportAccumulatorYears += dt;
-  if (state.homininWaterTransportAccumulatorYears >= TRANSPORT_INTERVAL_YEARS) {
-    const elapsed = Math.floor(state.homininWaterTransportAccumulatorYears / TRANSPORT_INTERVAL_YEARS) * TRANSPORT_INTERVAL_YEARS;
+  state.homininWaterRouteAccumulatorYears += dt;
+
+  if (state.homininWaterTransportAccumulatorYears >= CAPABILITY_INTERVAL_YEARS) {
+    const elapsed = Math.floor(state.homininWaterTransportAccumulatorYears / CAPABILITY_INTERVAL_YEARS) * CAPABILITY_INTERVAL_YEARS;
     state.homininWaterTransportAccumulatorYears -= elapsed;
-    transportUpdate(state, elapsed);
-  } else {
-    summarize(state);
+    updateCapabilities(state, elapsed);
   }
+  if (state.homininWaterRouteAccumulatorYears >= ROUTE_INTERVAL_YEARS) {
+    state.homininWaterRouteAccumulatorYears %= ROUTE_INTERVAL_YEARS;
+    buildRoutes(state);
+  }
+  summarize(state);
   return state;
 }
 
