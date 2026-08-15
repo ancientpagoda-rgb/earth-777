@@ -1,8 +1,43 @@
 import * as THREE from "three";
-import { surfaceBiomeProfile } from "./SurfaceBiomeProfile.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const TAU = Math.PI * 2;
+
+const BIOMES = Object.freeze({
+  tropicalForest: Object.freeze({ groundColor: [0.20, 0.31, 0.16], tree: 1.0, grass: 0.38, shrub: 0.45, rock: 0.18 }),
+  woodland: Object.freeze({ groundColor: [0.27, 0.36, 0.19], tree: 0.70, grass: 0.62, shrub: 0.52, rock: 0.26 }),
+  grassland: Object.freeze({ groundColor: [0.36, 0.39, 0.19], tree: 0.12, grass: 1.0, shrub: 0.34, rock: 0.22 }),
+  desert: Object.freeze({ groundColor: [0.48, 0.39, 0.22], tree: 0.02, grass: 0.10, shrub: 0.12, rock: 0.52 }),
+  tundra: Object.freeze({ groundColor: [0.35, 0.38, 0.29], tree: 0.05, grass: 0.46, shrub: 0.18, rock: 0.48 }),
+  ice: Object.freeze({ groundColor: [0.65, 0.69, 0.66], tree: 0, grass: 0.02, shrub: 0, rock: 0.30 })
+});
+
+function biomeFamily(code) {
+  if (code >= 1 && code <= 3) return BIOMES.tropicalForest;
+  if (code >= 4 && code <= 11) return BIOMES.woodland;
+  if (code >= 12 && code <= 20) return BIOMES.grassland;
+  if (code === 21) return BIOMES.desert;
+  if (code >= 22 && code <= 27) return BIOMES.tundra;
+  if (code === 28) return BIOMES.ice;
+  return BIOMES.grassland;
+}
+
+function visualProfile(vegetationSample = null, state = {}) {
+  const family = biomeFamily(vegetationSample?.biomeCode);
+  const npp = clamp(Math.log1p(Math.max(0, vegetationSample?.npp ?? 0)) / Math.log1p(2214), 0, 1);
+  const lai = clamp((vegetationSample?.lai ?? 0) / 7.12, 0, 1);
+  const productivity = clamp((state.productivityIndex ?? 1) / 1.45, 0.25, 1);
+  const vigor = clamp(npp * 0.62 + lai * 0.28 + productivity * 0.10, 0.08, 1);
+  return Object.freeze({
+    groundColor: family.groundColor,
+    grassDensity: clamp(family.grass * (0.48 + vigor * 0.72), 0, 1.15),
+    treeDensity: clamp(family.tree * (0.38 + vigor * 0.82), 0, 1.15),
+    shrubDensity: clamp(family.shrub * (0.45 + vigor * 0.72), 0, 1.15),
+    rockDensity: family.rock,
+    biomeCode: vegetationSample?.biomeCode ?? null,
+    biomeLabel: vegetationSample?.biomeLabel ?? null
+  });
+}
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -65,7 +100,7 @@ export class SurfaceEcologyManager {
     this.scene = scene;
     this.terrain = terrain;
     this.origin = null;
-    this.profile = surfaceBiomeProfile();
+    this.profile = visualProfile();
     this.quality = 1;
     this.radius = 2;
     this.queue = [];
@@ -77,7 +112,6 @@ export class SurfaceEcologyManager {
     this.hydrologySample = null;
     this.waterLevelKm = -Infinity;
     this.riverRoutingMode = "none";
-    this.householdsPerRenderedShelter = null;
 
     this.materials = {
       grass: new THREE.MeshStandardMaterial({ color: 0x6b7a3a, roughness: 1 }),
@@ -85,8 +119,6 @@ export class SurfaceEcologyManager {
       crown: new THREE.MeshStandardMaterial({ color: 0x365b32, roughness: 0.95 }),
       shrub: new THREE.MeshStandardMaterial({ color: 0x52663a, roughness: 1 }),
       rock: new THREE.MeshStandardMaterial({ color: 0x77756c, roughness: 1 }),
-      hominin: new THREE.MeshStandardMaterial({ color: 0x5c4737, roughness: 1 }),
-      shelter: new THREE.MeshStandardMaterial({ color: 0x6d5134, roughness: 1 }),
       river: new THREE.MeshPhongMaterial({ color: 0x365f6d, transparent: true, opacity: 0.82, shininess: 95, depthWrite: false })
     };
 
@@ -95,9 +127,7 @@ export class SurfaceEcologyManager {
       trunk: createPool(translated(new THREE.CylinderGeometry(0.00055, 0.00085, 0.0065, 5), 0.00325), this.materials.trunk, 2600),
       crown: createPool(translated(new THREE.ConeGeometry(0.0036, 0.011, 6), 0.0115), this.materials.crown, 2600),
       shrub: createPool(translated(new THREE.IcosahedronGeometry(0.0015, 0), 0.0015), this.materials.shrub, 3200),
-      rock: createPool(translated(new THREE.DodecahedronGeometry(0.0012, 0), 0.0008), this.materials.rock, 2000),
-      hominin: createPool(translated(new THREE.CapsuleGeometry(0.00038, 0.00125, 2, 4), 0.00135), this.materials.hominin, 256),
-      shelter: createPool(translated(new THREE.ConeGeometry(0.0024, 0.0034, 7), 0.0017), this.materials.shelter, 4096)
+      rock: createPool(translated(new THREE.DodecahedronGeometry(0.0012, 0), 0.0008), this.materials.rock, 2000)
     };
     for (const mesh of Object.values(this.pools)) scene.add(mesh);
     this.tempMatrix = new THREE.Matrix4();
@@ -108,18 +138,17 @@ export class SurfaceEcologyManager {
   }
 
   setContext({ latitude, longitude, state, vegetationSample = null, hydrologySample = null, riverSample = null }) {
-    const nextProfile = surfaceBiomeProfile(vegetationSample, state, latitude, longitude);
+    const nextProfile = visualProfile(vegetationSample, state);
+    const runoff = Number(hydrologySample?.surfaceRunoffMmPerYear ?? hydrologySample?.runoffPotentialMmPerYear);
     const signature = [
       latitude.toFixed(3),
       longitude.toFixed(3),
       Math.round((state?.yearBP ?? 0) / 2500),
       vegetationSample?.biomeCode ?? "x",
+      Math.round(Number(vegetationSample?.npp) || 0),
+      Math.round(runoff || 0),
       Number(riverSample?.networkCellIndex ?? -1),
-      Number(riverSample?.channelDistanceFromSelectionKm ?? -1).toFixed(1),
-      nextProfile.homininSocialSiteId ?? "none",
-      Number(nextProfile.homininSocialSiteDistanceKm ?? -1).toFixed(1),
-      Math.round(nextProfile.homininSocialSitePopulationPersons ?? 0),
-      Number(nextProfile.homininSettlementPersistence ?? 0).toFixed(2)
+      Number(riverSample?.channelDistanceFromSelectionKm ?? -1).toFixed(1)
     ].join("|");
     if (signature === this.contextSignature) return false;
     this.contextSignature = signature;
@@ -207,10 +236,12 @@ export class SurfaceEcologyManager {
         const nh = this.terrain.heightAt(nx, nz);
         const directionPenalty = Math.abs(candidate) * (hasGeomorphicRoute ? 0.00075 : 0.00028);
         const score = nh + directionPenalty;
-        if (!best || score < best.score) best = { x: nx, z: nz, height: nh, angle: candidateAngle, score };
+        if (!best || score < best.score) best = { x: nx, z: nz, angle: candidateAngle, score };
       }
       if (!best) break;
-      x = best.x; z = best.z; angle = best.angle;
+      x = best.x;
+      z = best.z;
+      angle = best.angle;
     }
     const widthMeters = hasGeomorphicRoute
       ? clamp(3 + Math.sqrt(Math.max(0, discharge)) * 2.6, 3, 90)
@@ -231,7 +262,6 @@ export class SurfaceEcologyManager {
     this.lastCenter = { x: centerX, z: centerZ };
     this.dirty = false;
     this.queue = [];
-    this.householdsPerRenderedShelter = null;
     for (let dz = -this.radius; dz <= this.radius; dz += 1) {
       for (let dx = -this.radius; dx <= this.radius; dx += 1) this.queue.push({ x: centerX + dx, z: centerZ + dz, distance: dx * dx + dz * dz });
     }
@@ -271,43 +301,6 @@ export class SurfaceEcologyManager {
     return true;
   }
 
-  _populateSocialSite(chunkX, chunkZ, seed, centerX, centerZ, half) {
-    const p = this.profile;
-    const siteX = Number(p.homininSocialSiteOffsetEastKm);
-    const siteZ = -Number(p.homininSocialSiteOffsetNorthKm);
-    const siteDistance = Number(p.homininSocialSiteDistanceKm);
-    if (!Number.isFinite(siteX) || !Number.isFinite(siteZ) || !Number.isFinite(siteDistance)) return false;
-    const visibleReachKm = this.terrain.chunkSizeKm * (this.radius + 1.5);
-    if (siteDistance > visibleReachKm) return false;
-    if (siteX < centerX - half || siteX >= centerX + half || siteZ < centerZ - half || siteZ >= centerZ + half) return false;
-
-    const households = Math.max(0, Math.round(Number(p.homininSocialSiteHouseholds) || 0));
-    const population = Math.max(0, Math.round(Number(p.homininSocialSitePopulationPersons) || 0));
-    const built = clamp(p.homininBuiltEnvironmentIndex, 0, 1);
-    const persistence = clamp(p.homininSettlementPersistence, 0, 1);
-    if (!(population > 0) || !(households > 0)) return false;
-
-    const renderedShelters = Math.max(1, Math.round(Math.sqrt(households) * (1.15 + built * 2.9) * this.quality));
-    this.householdsPerRenderedShelter = households / renderedShelters;
-    const clusterRadiusKm = 0.018 + Math.sqrt(population) * (0.00032 + persistence * 0.00023);
-    for (let i = 0; i < renderedShelters; i += 1) {
-      const angle = random01(seed + 810 + i * 19.7) * TAU;
-      const radius = clusterRadiusKm * Math.sqrt(random01(seed + 820 + i * 23.3));
-      const x = siteX + Math.cos(angle) * radius;
-      const z = siteZ + Math.sin(angle) * radius;
-      const scale = 0.72 + built * 0.65 + random01(seed + 830 + i * 7.1) * 0.32;
-      this._setInstance("shelter", x, z, scale, scale * (0.76 + persistence * 0.36), scale, random01(seed + 840 + i * 13.7) * TAU);
-    }
-
-    const representedPeople = Math.max(1, Math.round(Math.sqrt(population) * (0.8 + persistence * 1.3) * this.quality));
-    for (let i = 0; i < representedPeople; i += 1) {
-      const angle = random01(seed + 850 + i * 11.9) * TAU;
-      const radius = clusterRadiusKm * 0.75 * Math.sqrt(random01(seed + 860 + i * 17.3));
-      this._setInstance("hominin", siteX + Math.cos(angle) * radius, siteZ + Math.sin(angle) * radius, 1, 1, 1, random01(seed + 870 + i * 5.7) * TAU);
-    }
-    return true;
-  }
-
   _populateChunk(chunkX, chunkZ) {
     const size = this.terrain.chunkSizeKm;
     const half = size / 2;
@@ -338,16 +331,6 @@ export class SurfaceEcologyManager {
     }
     scatter("shrub", 38, 1.0, 330, p.shrubDensity);
     scatter("rock", 18, 0.8, 440, p.rockDensity);
-
-    const socialSiteRendered = this._populateSocialSite(chunkX, chunkZ, seed, centerX, centerZ, half);
-    if (!socialSiteRendered && p.homininDensity > 0 && Math.abs(chunkX) <= 1 && Math.abs(chunkZ) <= 1 && random01(seed + 700) < 0.12 + p.homininDensity * 0.26) {
-      const groupSize = Math.max(1, Math.round((1 + random01(seed + 701) * 4) * quality));
-      const gx = centerX + (random01(seed + 702) - 0.5) * 0.8;
-      const gz = centerZ + (random01(seed + 703) - 0.5) * 0.8;
-      for (let i = 0; i < groupSize; i += 1) {
-        this._setInstance("hominin", gx + (random01(seed + 710 + i) - 0.5) * 0.025, gz + (random01(seed + 720 + i) - 0.5) * 0.025, 1, 1, 1, random01(seed + 730 + i) * TAU);
-      }
-    }
   }
 
   diagnostics() {
@@ -357,13 +340,6 @@ export class SurfaceEcologyManager {
       trees: this.counts.crown,
       shrubs: this.counts.shrub,
       rocks: this.counts.rock,
-      hominins: this.counts.hominin,
-      shelters: this.counts.shelter,
-      householdsPerRenderedShelter: this.householdsPerRenderedShelter,
-      socialSiteId: this.profile.homininSocialSiteId ?? null,
-      socialSiteDistanceKm: this.profile.homininSocialSiteDistanceKm ?? null,
-      settlementLabel: this.profile.homininSettlementLabel ?? null,
-      settlementPersistence: this.profile.homininSettlementPersistence ?? null,
       river: Boolean(this.river),
       riverRoutingMode: this.riverRoutingMode,
       routedChannelDistanceKm: this.riverSample?.channelDistanceFromSelectionKm ?? null,
