@@ -109,7 +109,7 @@ test("Free Earth exposes evolving species, hominin cognition, culture and techno
 test("timeline includes the requested ten-thousand-times speed and terrain uses shader contours", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const terrain = readFileSync(new URL("../src/render/TerrainChunkManager.js", import.meta.url), "utf8");
-  assert.match(html, /data-speed="10000"[^>]*>10K×<\/button>/);
+  assert.match(html, /(?:data-speed|value)="10000"[^>]*>10K×<\/(?:button|option)>/);
   assert.match(terrain, /uContourIntervalMeters/);
   assert.match(terrain, /elevationMeters/);
   assert.match(terrain, /tectonicElevationOffsetMeters/);
