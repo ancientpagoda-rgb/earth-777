@@ -8,7 +8,7 @@ import {
   faunaPopulationFieldAt
 } from "../src/sim/FaunaPopulationHierarchy.js";
 
-const state = Object.freeze({ herbivoreBiomass: 1.1, carnivoreBiomass: 0.7, productivityIndex: 1.0 });
+const state = Object.freeze({ herbivoreBiomass: 1.1, carnivoreBiomass: 0.7, productivityIndex: 1.0, elapsedYears: 0, seed: 777001 });
 const vegetation = Object.freeze({ biomeCode: 17, npp: 950, lai: 2.8 });
 const hydrology = Object.freeze({ surfaceRunoffMmPerYear: 430 });
 
@@ -49,6 +49,7 @@ test("regional and local hierarchy keeps one bounded summary object per active c
   assert.equal(summaries.length, cells.length);
   assert.ok(fields.reduce((sum, field) => sum + field.herbivorePopulation, 0) > 1000);
   assert.ok(summaries.every((summary) => Number.isFinite(summary.estimatedHerds)));
+  assert.ok(summaries.every((summary) => Number.isFinite(summary.migrationBearingRadians)));
 });
 
 test("observed fauna materialization is deterministic", () => {
@@ -67,31 +68,24 @@ test("observed fauna materialization is deterministic", () => {
   const first = buildObservedFaunaPlan(options);
   const second = buildObservedFaunaPlan(options);
   assert.deepEqual(first.herds, second.herds);
+  assert.deepEqual(first.packs, second.packs);
   assert.deepEqual(first.individuals, second.individuals);
   assert.equal(first.visiblePopulation, first.aggregateOnlyPopulation + first.materializedPopulation);
+  assert.equal(first.visibleCarnivorePopulation, first.aggregateOnlyCarnivorePopulation + first.materializedCarnivores);
 });
 
 test("individuals are gated by observed distance, not by an entity-count cap", () => {
-  const near = buildObservedFaunaPlan({
+  const options = {
     state: { ...state, herbivoreBiomass: 4 },
     vegetationSample: { ...vegetation, npp: 1800 },
     hydrologySample: hydrology,
     latitude: 39,
     longitude: -95,
     seed: 7,
-    windowRadiusKm: 2.5,
-    individualRadiusKm: 2.5
-  });
-  const narrow = buildObservedFaunaPlan({
-    state: { ...state, herbivoreBiomass: 4 },
-    vegetationSample: { ...vegetation, npp: 1800 },
-    hydrologySample: hydrology,
-    latitude: 39,
-    longitude: -95,
-    seed: 7,
-    windowRadiusKm: 2.5,
-    individualRadiusKm: 0.2
-  });
+    windowRadiusKm: 2.5
+  };
+  const near = buildObservedFaunaPlan({ ...options, individualRadiusKm: 2.5 });
+  const narrow = buildObservedFaunaPlan({ ...options, individualRadiusKm: 0.2 });
   assert.equal(near.materializedPopulation, near.visiblePopulation);
   assert.ok(narrow.materializedPopulation < narrow.visiblePopulation);
   assert.ok(near.materializedPopulation > 100);

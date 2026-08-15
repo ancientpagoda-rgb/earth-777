@@ -1,8 +1,15 @@
+import {
+  FAUNA_BEHAVIOR_EPISTEMIC_STATUS,
+  FAUNA_BEHAVIOR_POLICY,
+  herdMotionAt,
+  individualMotionAt
+} from "./FaunaBehaviorDynamics.js";
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const TAU = Math.PI * 2;
 const KM_PER_DEGREE_LATITUDE = 111.32;
 
-export const FAUNA_HIERARCHY_POLICY = "earth777-fauna-hierarchy-v1";
+export const FAUNA_HIERARCHY_POLICY = "earth777-fauna-hierarchy-v2";
 export const FAUNA_EPISTEMIC_STATUS = "model-derived provisional functional fauna; not yet calibrated to fossil occurrence envelopes";
 
 function fract(value) { return value - Math.floor(value); }
@@ -61,15 +68,20 @@ export function faunaPopulationFieldAt({
   );
   const predatorPressure = clamp(carnivoreBiomass / Math.max(0.05, biomass), 0, 3);
   const carnivoreDensityAnimalsPerKm2 = clamp(herbivoreDensityAnimalsPerKm2 * (0.012 + predatorPressure * 0.018), 0, 1.6);
+  const preyPressure = clamp(herbivoreDensityAnimalsPerKm2 / 8, 0, 1);
   const boundedArea = Math.max(0, Number(areaKm2) || 0);
   const herbivorePopulation = Math.max(0, Math.round(herbivoreDensityAnimalsPerKm2 * boundedArea));
   const carnivorePopulation = Math.max(0, Math.round(carnivoreDensityAnimalsPerKm2 * boundedArea));
   const meanHerdSize = clamp(5 + productivity * 13 + biomass * 2.5, 4, 36);
+  const meanPackSize = clamp(1.5 + preyPressure * 3.5, 1.5, 6);
   const estimatedHerds = herbivorePopulation > 0 ? Math.max(1, Math.ceil(herbivorePopulation / meanHerdSize)) : 0;
+  const estimatedPacks = carnivorePopulation > 0 ? Math.max(1, Math.ceil(carnivorePopulation / meanPackSize)) : 0;
 
   return Object.freeze({
     policy: FAUNA_HIERARCHY_POLICY,
     epistemicStatus: FAUNA_EPISTEMIC_STATUS,
+    behaviorPolicy: FAUNA_BEHAVIOR_POLICY,
+    behaviorEpistemicStatus: FAUNA_BEHAVIOR_EPISTEMIC_STATUS,
     key,
     latitude: Number(latitude) || 0,
     longitude: Number(longitude) || 0,
@@ -79,9 +91,13 @@ export function faunaPopulationFieldAt({
     herbivorePopulation,
     carnivorePopulation,
     estimatedHerds,
+    estimatedPacks,
     meanHerdSize,
+    meanPackSize,
     productivity,
     waterAccess,
+    predatorPressure,
+    preyPressure,
     biomeCode: vegetationSample?.biomeCode ?? null
   });
 }
@@ -99,21 +115,103 @@ export function faunaFieldsForCells(cells = [], context = {}) {
 }
 
 export function faunaLocalSummariesForCells(cells = [], context = {}) {
-  return Object.freeze(faunaFieldsForCells(cells, context).map((field) => Object.freeze({
-    policy: FAUNA_HIERARCHY_POLICY,
-    key: field.key,
-    latitude: field.latitude,
-    longitude: field.longitude,
-    areaKm2: field.areaKm2,
-    herbivorePopulation: field.herbivorePopulation,
-    estimatedHerds: field.estimatedHerds,
-    meanHerdSize: field.meanHerdSize,
-    densityAnimalsPerKm2: field.herbivoreDensityAnimalsPerKm2
-  })));
+  const elapsedYears = Number(context.state?.elapsedYears) || 0;
+  return Object.freeze(faunaFieldsForCells(cells, context).map((field) => {
+    const representative = herdMotionAt({
+      id: `${field.key}:representative-herd`,
+      baseX: 0,
+      baseZ: 0,
+      elapsedYears,
+      role: "herbivore",
+      productivity: field.productivity,
+      waterAccess: field.waterAccess,
+      predatorPressure: field.predatorPressure,
+      preyPressure: field.preyPressure
+    });
+    return Object.freeze({
+      policy: FAUNA_HIERARCHY_POLICY,
+      behaviorPolicy: FAUNA_BEHAVIOR_POLICY,
+      key: field.key,
+      latitude: field.latitude,
+      longitude: field.longitude,
+      areaKm2: field.areaKm2,
+      herbivorePopulation: field.herbivorePopulation,
+      carnivorePopulation: field.carnivorePopulation,
+      estimatedHerds: field.estimatedHerds,
+      estimatedPacks: field.estimatedPacks,
+      meanHerdSize: field.meanHerdSize,
+      densityAnimalsPerKm2: field.herbivoreDensityAnimalsPerKm2,
+      dominantBehavior: representative.behavior,
+      migrationBearingRadians: representative.heading,
+      migrationVectorKm: representative.migrationVectorKm
+    });
+  }));
 }
 
 function visiblePopulationFromDensity(densityAnimalsPerKm2, radiusKm) {
   return Math.max(0, Math.round(Math.max(0, densityAnimalsPerKm2) * Math.PI * radiusKm * radiusKm));
+}
+
+function buildGroups({ role, population, meanGroupSize, radiusKm, nearRadiusKm, focusXKm, focusZKm, baseSeed, field, elapsedYears, aggregatePrior, prefix }) {
+  const groupCount = population > 0 ? Math.max(1, Math.ceil(population / meanGroupSize)) : 0;
+  const groups = [];
+  const individuals = [];
+  let remainingPopulation = population;
+  for (let index = 0; index < groupCount; index += 1) {
+    const remainingGroups = groupCount - index;
+    const target = remainingGroups === 1
+      ? remainingPopulation
+      : Math.max(1, Math.round(meanGroupSize * (0.58 + random01(baseSeed + index * 31.7) * 0.84)));
+    const groupPopulation = Math.max(0, Math.min(remainingPopulation - Math.max(0, remainingGroups - 1), target));
+    remainingPopulation -= groupPopulation;
+    const angle = random01(baseSeed + index * 47.3 + 11) * TAU;
+    const distanceKm = radiusKm * Math.sqrt(random01(baseSeed + index * 59.9 + 17));
+    const baseX = focusXKm + Math.cos(angle) * distanceKm;
+    const baseZ = focusZKm + Math.sin(angle) * distanceKm;
+    const groupRadiusKm = role === "carnivore"
+      ? clamp(0.012 + Math.sqrt(Math.max(1, groupPopulation)) * 0.0045, 0.012, 0.08)
+      : clamp(0.018 + Math.sqrt(Math.max(1, groupPopulation)) * 0.0065, 0.018, 0.16);
+    const id = `${prefix}-${index}-${hashText(`${baseSeed}:${index}`)}`;
+    const behaviorState = herdMotionAt({ id, baseX, baseZ, elapsedYears, role, productivity: field.productivity, waterAccess: field.waterAccess, predatorPressure: field.predatorPressure, preyPressure: field.preyPressure, aggregatePrior });
+    const materializeIndividuals = distanceKm <= nearRadiusKm + groupRadiusKm;
+    const group = Object.freeze({
+      id,
+      role,
+      population: groupPopulation,
+      baseX,
+      baseZ,
+      x: behaviorState.x,
+      z: behaviorState.z,
+      distanceKm,
+      radiusKm: groupRadiusKm,
+      representation: materializeIndividuals ? "individuals" : role === "carnivore" ? "pack" : "herd",
+      behavior: behaviorState.behavior,
+      behaviorState
+    });
+    groups.push(group);
+
+    if (materializeIndividuals) {
+      for (let animalIndex = 0; animalIndex < groupPopulation; animalIndex += 1) {
+        const animalAngle = random01(baseSeed + index * 101.3 + animalIndex * 13.1 + 71) * TAU;
+        const animalDistance = groupRadiusKm * Math.sqrt(random01(baseSeed + index * 107.9 + animalIndex * 17.7 + 89));
+        const baseIndividual = {
+          id: `${id}:animal-${animalIndex}`,
+          groupId: id,
+          herdId: role === "herbivore" ? id : null,
+          packId: role === "carnivore" ? id : null,
+          role,
+          offsetX: Math.cos(animalAngle) * animalDistance,
+          offsetZ: Math.sin(animalAngle) * animalDistance,
+          scale: role === "carnivore"
+            ? 0.62 + random01(baseSeed + index * 113.3 + animalIndex * 23.9) * 0.48
+            : 0.72 + random01(baseSeed + index * 113.3 + animalIndex * 23.9) * 0.72
+        };
+        const motion = individualMotionAt({ individual: baseIndividual, herdState: behaviorState, elapsedYears, aggregatePrior, productivity: field.productivity, waterAccess: field.waterAccess, predatorPressure: field.predatorPressure, preyPressure: field.preyPressure });
+        individuals.push(Object.freeze({ ...baseIndividual, x: motion.x, z: motion.z, yaw: motion.yaw, behavior: motion.behavior, behaviorState: motion }));
+      }
+    }
+  }
+  return { groups: Object.freeze(groups), individuals: Object.freeze(individuals) };
 }
 
 export function buildObservedFaunaPlan({
@@ -126,78 +224,47 @@ export function buildObservedFaunaPlan({
   focusXKm = 0,
   focusZKm = 0,
   windowRadiusKm = 3.5,
-  individualRadiusKm = 0.55
+  individualRadiusKm = 0.55,
+  aggregatePrior = null
 } = {}) {
   const radiusKm = Math.max(0.05, Number(windowRadiusKm) || 3.5);
   const nearRadiusKm = clamp(individualRadiusKm, 0.05, radiusKm);
-  const field = faunaPopulationFieldAt({
-    state,
-    vegetationSample,
-    hydrologySample,
-    latitude,
-    longitude,
-    areaKm2: Math.PI * radiusKm * radiusKm,
-    key: "observed-window"
-  });
+  const elapsedYears = Number(state.elapsedYears) || 0;
+  const field = faunaPopulationFieldAt({ state, vegetationSample, hydrologySample, latitude, longitude, areaKm2: Math.PI * radiusKm * radiusKm, key: "observed-window" });
   const visiblePopulation = visiblePopulationFromDensity(field.herbivoreDensityAnimalsPerKm2, radiusKm);
-  const herdCount = visiblePopulation > 0 ? Math.max(1, Math.ceil(visiblePopulation / field.meanHerdSize)) : 0;
-  const herds = [];
-  const individuals = [];
-  let remainingPopulation = visiblePopulation;
+  const visibleCarnivorePopulation = visiblePopulationFromDensity(field.carnivoreDensityAnimalsPerKm2, radiusKm);
   const baseSeed = (Number(seed) >>> 0) ^ hashText(`${latitude.toFixed(4)}:${longitude.toFixed(4)}`);
-
-  for (let index = 0; index < herdCount; index += 1) {
-    const remainingHerds = herdCount - index;
-    const target = remainingHerds === 1
-      ? remainingPopulation
-      : Math.max(1, Math.round(field.meanHerdSize * (0.58 + random01(baseSeed + index * 31.7) * 0.84)));
-    const population = Math.max(0, Math.min(remainingPopulation - Math.max(0, remainingHerds - 1), target));
-    remainingPopulation -= population;
-    const angle = random01(baseSeed + index * 47.3 + 11) * TAU;
-    const distanceKm = radiusKm * Math.sqrt(random01(baseSeed + index * 59.9 + 17));
-    const x = focusXKm + Math.cos(angle) * distanceKm;
-    const z = focusZKm + Math.sin(angle) * distanceKm;
-    const herdRadiusKm = clamp(0.018 + Math.sqrt(Math.max(1, population)) * 0.0065, 0.018, 0.16);
-    const materializeIndividuals = distanceKm <= nearRadiusKm + herdRadiusKm;
-    const herd = Object.freeze({
-      id: `herd-${index}-${hashText(`${baseSeed}:${index}`)}`,
-      population,
-      x,
-      z,
-      distanceKm,
-      radiusKm: herdRadiusKm,
-      representation: materializeIndividuals ? "individuals" : "herd"
-    });
-    herds.push(herd);
-
-    if (materializeIndividuals) {
-      for (let animalIndex = 0; animalIndex < population; animalIndex += 1) {
-        const animalAngle = random01(baseSeed + index * 101.3 + animalIndex * 13.1 + 71) * TAU;
-        const animalDistance = herdRadiusKm * Math.sqrt(random01(baseSeed + index * 107.9 + animalIndex * 17.7 + 89));
-        individuals.push(Object.freeze({
-          id: `${herd.id}:animal-${animalIndex}`,
-          herdId: herd.id,
-          x: x + Math.cos(animalAngle) * animalDistance,
-          z: z + Math.sin(animalAngle) * animalDistance,
-          scale: 0.72 + random01(baseSeed + index * 113.3 + animalIndex * 23.9) * 0.72,
-          yaw: random01(baseSeed + index * 127.1 + animalIndex * 29.3) * TAU
-        }));
-      }
-    }
+  const herbivores = buildGroups({ role: "herbivore", population: visiblePopulation, meanGroupSize: field.meanHerdSize, radiusKm, nearRadiusKm, focusXKm, focusZKm, baseSeed, field, elapsedYears, aggregatePrior, prefix: "herd" });
+  const carnivores = buildGroups({ role: "carnivore", population: visibleCarnivorePopulation, meanGroupSize: field.meanPackSize, radiusKm, nearRadiusKm, focusXKm, focusZKm, baseSeed: baseSeed ^ 0x9e3779b9, field, elapsedYears, aggregatePrior, prefix: "pack" });
+  const individuals = Object.freeze([...herbivores.individuals, ...carnivores.individuals]);
+  const allGroups = [...herbivores.groups, ...carnivores.groups];
+  const behaviorCounts = {};
+  for (const actor of [...allGroups, ...individuals]) {
+    const behavior = actor.behavior ?? "aggregate";
+    const weight = Math.max(1, Number(actor.population) || 1);
+    behaviorCounts[behavior] = (behaviorCounts[behavior] || 0) + weight;
   }
-
   return Object.freeze({
     policy: FAUNA_HIERARCHY_POLICY,
     epistemicStatus: FAUNA_EPISTEMIC_STATUS,
+    behaviorPolicy: FAUNA_BEHAVIOR_POLICY,
+    behaviorEpistemicStatus: FAUNA_BEHAVIOR_EPISTEMIC_STATUS,
+    elapsedYears,
     field,
+    focusKey: `observed:${Number(seed) >>> 0}:${Math.round(latitude * 10)}:${Math.round(longitude * 10)}`,
+    aggregatePrior,
     windowRadiusKm: radiusKm,
     individualRadiusKm: nearRadiusKm,
     visiblePopulation,
-    herds: Object.freeze(herds),
-    individuals: Object.freeze(individuals),
-    aggregateOnlyPopulation: herds
-      .filter((herd) => herd.representation === "herd")
-      .reduce((sum, herd) => sum + herd.population, 0),
-    materializedPopulation: individuals.length
+    visibleCarnivorePopulation,
+    herds: herbivores.groups,
+    packs: carnivores.groups,
+    individuals,
+    behaviorCounts: Object.freeze(behaviorCounts),
+    aggregateOnlyPopulation: herbivores.groups.filter((group) => group.representation === "herd").reduce((sum, group) => sum + group.population, 0),
+    aggregateOnlyCarnivorePopulation: carnivores.groups.filter((group) => group.representation === "pack").reduce((sum, group) => sum + group.population, 0),
+    materializedPopulation: herbivores.individuals.length,
+    materializedCarnivores: carnivores.individuals.length,
+    totalMaterializedPopulation: individuals.length
   });
 }
