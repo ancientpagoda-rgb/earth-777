@@ -1,5 +1,6 @@
-import { regionalState as legacyRegionalState } from "./free-earth.js";
+import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const round = (value, digits = 2) => Number(value.toFixed(digits));
 
 function biomeFromHydroClimate(globalState, latitude, temperatureCelsius, soilMoistureIndex) {
@@ -13,6 +14,67 @@ function biomeFromHydroClimate(globalState, latitude, temperatureCelsius, soilMo
   return "dry grassland";
 }
 
+function branchHydrologyResponse(globalState, latitude, longitude) {
+  const checkpointTemperature = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
+  const lat = latitude * Math.PI / 180;
+  const lon = longitude * Math.PI / 180;
+  const polarWeight = Math.sin(lat) ** 2;
+  const temperatureDelta = (globalState.temperatureAnomaly - checkpointTemperature) * (0.85 + polarWeight * 0.65);
+  const iceDelta = globalState.iceIndex - CHECKPOINT_777.boundary.iceVolumeIndex.value;
+  const precessionPhase = globalState.precession * Math.PI / 180;
+  const orbitalMoisture = globalState.eccentricity * 7.5 * Math.cos(precessionPhase - lon) * Math.cos(lat);
+  const precipitationScale = Math.exp(temperatureDelta * (0.018 + (1 - polarWeight) * 0.010) - iceDelta * polarWeight * 0.55 + orbitalMoisture * 0.10);
+  return { temperatureDelta, precipitationScale };
+}
+
+function fallbackRegionalState(globalState, latitude, longitude, climateLayer = null) {
+  const checkpointClimate = climateLayer?.annualAt?.(latitude, longitude) ?? null;
+  let annualTemperature;
+  let moisture;
+  let annualPrecipitation = null;
+  let cloudCover = null;
+  let confidence = "model-derived regional estimate";
+  let climateSource = "regional-emulator";
+
+  const branch = branchHydrologyResponse(globalState, latitude, longitude);
+  if (checkpointClimate && Number.isFinite(checkpointClimate.temperatureCelsius)) {
+    annualTemperature = checkpointClimate.temperatureCelsius + branch.temperatureDelta;
+    annualPrecipitation = Number.isFinite(checkpointClimate.precipitationMmPerYear)
+      ? checkpointClimate.precipitationMmPerYear * branch.precipitationScale
+      : null;
+    cloudCover = Number.isFinite(checkpointClimate.cloudCoverPercent)
+      ? clamp(checkpointClimate.cloudCoverPercent + Math.log(branch.precipitationScale) * 18 - branch.temperatureDelta * 0.65, 0, 100)
+      : null;
+    moisture = Number.isFinite(annualPrecipitation)
+      ? clamp(annualPrecipitation / (annualPrecipitation + 700), 0.02, 0.995)
+      : 0.5;
+    climateSource = globalState.elapsedYears > 0 ? "krapp-2021-777ka + branch-response" : "krapp-2021-777ka";
+    confidence = globalState.elapsedYears > 0
+      ? "Krapp 777 ka 0.5° checkpoint pattern + model-derived temperature, orbital, ice and hydrological response"
+      : "Krapp 777 ka 0.5° published reconstruction";
+  } else {
+    const lat = latitude * Math.PI / 180;
+    const lon = longitude * Math.PI / 180;
+    const seasonality = Math.abs(Math.sin(lat));
+    const continentality = 0.55 + 0.45 * Math.sin(lon * 2.7 + lat) ** 2;
+    annualTemperature = 27 - seasonality * 43 + globalState.temperatureAnomaly * (1 + seasonality * 0.8) - continentality * seasonality * 5;
+    moisture = clamp(0.64 + Math.cos(lat * 2.7) * 0.22 + Math.sin(lon * 1.7 - lat) * 0.16 - globalState.iceIndex * seasonality * 0.2, 0.02, 0.995);
+  }
+
+  return Object.freeze({
+    latitude,
+    longitude,
+    annualTemperature: round(annualTemperature, 1),
+    annualPrecipitation: Number.isFinite(annualPrecipitation) ? round(annualPrecipitation, 0) : null,
+    cloudCover: Number.isFinite(cloudCover) ? round(cloudCover, 1) : null,
+    moisture: round(moisture, 2),
+    biome: biomeFromHydroClimate(globalState, latitude, annualTemperature, moisture),
+    climateSource,
+    checkpointClimate: climateSource === "krapp-2021-777ka",
+    confidence
+  });
+}
+
 export function regionalState(
   globalState,
   latitude,
@@ -21,7 +83,7 @@ export function regionalState(
 ) {
   const hydro = hydroClimate?.sample?.(globalState, latitude, longitude, spatialDetail) ?? null;
   if (!hydro || !Number.isFinite(hydro.temperatureCelsius)) {
-    return legacyRegionalState(globalState, latitude, longitude, climateLayer);
+    return fallbackRegionalState(globalState, latitude, longitude, climateLayer);
   }
 
   const moisture = Number.isFinite(hydro.soilMoistureIndex) ? hydro.soilMoistureIndex : 0.5;
