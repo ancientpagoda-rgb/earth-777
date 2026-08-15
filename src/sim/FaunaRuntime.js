@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v7";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v8";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -382,6 +382,61 @@ function targetPredatorPacks(packs, herds) {
   }));
 }
 
+function respondTargetedHerds(herds, packs) {
+  if (!herds?.length || !packs?.length) return Object.freeze(herds ?? []);
+  const threatsByHerd = new Map();
+  for (const pack of packs) {
+    if (pack.targetGroupId == null) continue;
+    const threats = threatsByHerd.get(pack.targetGroupId) ?? [];
+    threats.push(pack);
+    threatsByHerd.set(pack.targetGroupId, threats);
+  }
+  if (!threatsByHerd.size) return Object.freeze(herds);
+
+  return Object.freeze(herds.map((herd) => {
+    const threats = threatsByHerd.get(herd.id);
+    if (!threats?.length) return herd;
+    let nearest = threats[0];
+    let threatDistanceKm = Math.hypot(herd.x - nearest.x, herd.z - nearest.z);
+    for (let index = 1; index < threats.length; index += 1) {
+      const candidate = threats[index];
+      const distanceKm = Math.hypot(herd.x - candidate.x, herd.z - candidate.z);
+      if (distanceKm < threatDistanceKm) {
+        nearest = candidate;
+        threatDistanceKm = distanceKm;
+      }
+    }
+    const dx = herd.x - nearest.x;
+    const dz = herd.z - nearest.z;
+    const heading = threatDistanceKm > 1e-12 ? Math.atan2(dz, dx) : herd.heading + Math.PI;
+    return Object.freeze({
+      ...herd,
+      behavior: "flee",
+      heading,
+      threatGroupId: nearest.id,
+      threatLineageId: nearest.lineageId ?? null,
+      threatDistanceKm,
+      threatenedByCount: threats.length
+    });
+  }));
+}
+
+function alignHerbivoreIndividuals(individuals, herds) {
+  if (!individuals?.length) return Object.freeze([]);
+  const herdById = new Map((herds ?? []).map((herd) => [herd.id, herd]));
+  return Object.freeze(individuals.map((animal) => {
+    const herd = herdById.get(animal.groupId);
+    if (!herd?.threatGroupId) return animal;
+    return Object.freeze({
+      ...animal,
+      behavior: "flee",
+      yaw: herd.heading,
+      threatGroupId: herd.threatGroupId,
+      threatLineageId: herd.threatLineageId ?? null
+    });
+  }));
+}
+
 function alignCarnivoreIndividuals(individuals, packs) {
   if (!individuals?.length) return Object.freeze([]);
   const packById = new Map((packs ?? []).map((pack) => [pack.id, pack]));
@@ -429,13 +484,16 @@ export function buildObservedFauna({
   const herbivores = buildGroups({ role: "herbivore", population: herbivorePopulation, meanSize: field.meanHerdSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed, field, elapsedYears, lineages: lineagesForRole(state, "herbivore"), state });
   const carnivores = buildGroups({ role: "carnivore", population: carnivorePopulation, meanSize: field.meanPackSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed ^ 0x9e3779b9, field, elapsedYears, lineages: lineagesForRole(state, "carnivore"), state });
   const packs = targetPredatorPacks(carnivores.groups, herbivores.groups);
+  const herds = respondTargetedHerds(herbivores.groups, packs);
+  const herbivoreIndividuals = alignHerbivoreIndividuals(herbivores.individuals, herds);
   const carnivoreIndividuals = alignCarnivoreIndividuals(carnivores.individuals, packs);
-  const individuals = Object.freeze([...herbivores.individuals, ...carnivoreIndividuals]);
-  const groups = [...herbivores.groups, ...packs];
+  const individuals = Object.freeze([...herbivoreIndividuals, ...carnivoreIndividuals]);
+  const groups = [...herds, ...packs];
   const behaviorCounts = {};
   for (const group of groups) behaviorCounts[group.behavior] = (behaviorCounts[group.behavior] || 0) + group.population;
   const lineageIds = Object.freeze([...new Set(groups.map((group) => group.lineageId).filter((id) => id != null))]);
   const predatorTargetCount = packs.filter((pack) => pack.targetGroupId != null).length;
+  const threatenedHerdCount = herds.filter((herd) => herd.threatGroupId != null).length;
 
   return Object.freeze({
     policy: FAUNA_POLICY,
@@ -446,16 +504,17 @@ export function buildObservedFauna({
     individualRadiusKm: nearRadiusKm,
     visiblePopulation: herbivorePopulation,
     visibleCarnivorePopulation: carnivorePopulation,
-    herds: herbivores.groups,
+    herds,
     packs,
     individuals,
     lineageIds,
     predatorTargetCount,
+    threatenedHerdCount,
     behaviorCounts: Object.freeze(behaviorCounts),
-    materializedHerbivores: herbivores.individuals.length,
+    materializedHerbivores: herbivoreIndividuals.length,
     materializedCarnivores: carnivoreIndividuals.length,
     totalMaterializedPopulation: individuals.length,
-    aggregateOnlyPopulation: herbivores.groups.filter((group) => group.representation === "herd").reduce((sum, group) => sum + group.population, 0),
+    aggregateOnlyPopulation: herds.filter((group) => group.representation === "herd").reduce((sum, group) => sum + group.population, 0),
     aggregateOnlyCarnivorePopulation: packs.filter((group) => group.representation === "pack").reduce((sum, group) => sum + group.population, 0)
   });
 }
