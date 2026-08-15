@@ -38,6 +38,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.spatialDetail = 0.82;
     this.surfaceScienceStatus = "provisional";
     this.surfaceContextActive = false;
+    this.lastSurfaceContext = null;
   }
 
   setScienceProviders({ hydrology = this.hydrology, vegetation = this.vegetation, spatialDetail = this.spatialDetail } = {}) {
@@ -85,12 +86,17 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   _refreshSurfaceContext() {
     if (!this.surfaceContextActive || !this.origin) return false;
     const context = this._surfaceContext(this.origin.latitude, this.origin.longitude, this.earthState);
+    this.lastSurfaceContext = context;
     this.surfaceScienceStatus = context.scienceCoupled ? "science-coupled" : "provisional";
     this.setGeomorphologyPatch(context.geomorphologyPatch);
     const localContext = { latitude: this.origin.latitude, longitude: this.origin.longitude, ...context };
     this.surfaceEcology.setContext(localContext);
     this.surfaceBuiltEnvironment.setContext(localContext);
     return true;
+  }
+
+  currentWaterSystem() {
+    return this.lastSurfaceContext?.riverSample ?? null;
   }
 
   setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive) {
@@ -157,6 +163,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceEcology = null;
     this.surfaceBuiltEnvironment?.dispose();
     this.surfaceBuiltEnvironment = null;
+    this.lastSurfaceContext = null;
     super.dispose();
   }
 }
