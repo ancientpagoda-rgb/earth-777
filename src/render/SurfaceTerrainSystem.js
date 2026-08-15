@@ -1,9 +1,9 @@
 import { TerrainChunkManager } from "./TerrainChunkManager.js";
 import { SurfaceEcologyManager } from "./SurfaceEcologyManager.js";
 import { SurfaceFaunaManager } from "./SurfaceFaunaManager.js";
-import { WorldStreamScheduler } from "../sim/WorldStreamScheduler.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
+const wrapLongitude = (value) => ((Number(value) + 180) % 360 + 360) % 360 - 180;
 
 function provisionalSurfaceContext(latitude, longitude, state = null) {
   const absLat = Math.abs(Number(latitude) || 0);
@@ -29,6 +29,44 @@ function provisionalSurfaceContext(latitude, longitude, state = null) {
   };
 }
 
+function gridCells(scope, cellDegrees, latitude, longitude) {
+  const latitudeCount = Math.max(1, Math.ceil(180 / cellDegrees));
+  const longitudeCount = Math.max(1, Math.ceil(360 / cellDegrees));
+  const centerLatitude = clamp(Math.floor((clamp(latitude, -89.999999, 89.999999) + 90) / cellDegrees), 0, latitudeCount - 1);
+  const wrappedLongitude = wrapLongitude(longitude);
+  const centerLongitude = ((Math.floor((wrappedLongitude + 180) / cellDegrees) % longitudeCount) + longitudeCount) % longitudeCount;
+  const cells = new Map();
+
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const latIndex = clamp(centerLatitude + dy, 0, latitudeCount - 1);
+      const lonIndex = ((centerLongitude + dx) % longitudeCount + longitudeCount) % longitudeCount;
+      const south = -90 + latIndex * cellDegrees;
+      const north = Math.min(90, south + cellDegrees);
+      const west = -180 + lonIndex * cellDegrees;
+      const east = Math.min(180, west + cellDegrees);
+      const key = `${scope}:${latIndex}:${lonIndex}`;
+      cells.set(key, Object.freeze({
+        key,
+        scope,
+        latitude: (south + north) * 0.5,
+        longitude: wrapLongitude((west + east) * 0.5),
+        cellDegrees,
+        bounds: Object.freeze({ south, north, west, east })
+      }));
+    }
+  }
+
+  return [...cells.values()];
+}
+
+function faunaCellsAround(latitude, longitude) {
+  return Object.freeze([
+    ...gridCells("regional", 10, latitude, longitude),
+    ...gridCells("local", 1, latitude, longitude)
+  ]);
+}
+
 export class SurfaceTerrainSystem extends TerrainChunkManager {
   constructor(scene, options = {}) {
     super(scene, options);
@@ -40,31 +78,14 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceScienceStatus = "provisional";
     this.surfaceContextActive = false;
     this.lastSurfaceContext = null;
-
-    this.worldScheduler = new WorldStreamScheduler({ budgetMs: 2.5 });
-    this.worldScheduler.registerSystem({
-      id: "surface-terrain",
-      scope: "observed",
-      priority: 100,
-      maxSliceMs: 1.45,
-      hasWork: () => this.queue.length > 0,
-      run: ({ sliceMs }) => TerrainChunkManager.prototype.pump.call(this, sliceMs)
-    });
-    this.worldScheduler.registerSystem({
-      id: "surface-ecology",
-      scope: "observed",
-      priority: 90,
-      maxSliceMs: 1.15,
-      hasWork: () => (this.surfaceEcology?.queue?.length ?? 0) > 0,
-      run: ({ sliceMs }) => this.surfaceEcology?.pump(sliceMs) ?? 0
-    });
-    this.worldScheduler.registerSystem({
-      id: "surface-fauna",
-      scope: "any",
-      priority: 86,
-      maxSliceMs: 0.85,
-      hasWork: () => this.surfaceFauna?.hasWork() === true,
-      run: ({ sliceMs, cells }) => this.surfaceFauna?.pump(sliceMs, cells) ?? 0
+    this.activeFaunaCells = Object.freeze([]);
+    this.workCursor = 0;
+    this.lastSurfacePump = Object.freeze({
+      policy: "surface-direct-work-v1",
+      budgetMs: 2.5,
+      elapsedMs: 0,
+      workUnits: 0,
+      producersRun: Object.freeze([])
     });
   }
 
@@ -86,9 +107,6 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const next = Boolean(active);
     const changed = next !== this.surfaceContextActive;
     this.surfaceContextActive = next;
-    if (this.origin) {
-      this.worldScheduler.setFocus({ latitude: this.origin.latitude, longitude: this.origin.longitude, mode: next ? "surface" : "globe" });
-    }
     if (next && refresh && (changed || this.origin)) this._refreshSurfaceContext();
     return changed;
   }
@@ -132,7 +150,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
 
   setOrigin(latitude, longitude) {
     super.setOrigin(latitude, longitude);
-    this.worldScheduler.setFocus({ latitude: this.origin.latitude, longitude: this.origin.longitude, mode: this.surfaceContextActive ? "surface" : "globe" });
+    this.activeFaunaCells = faunaCellsAround(this.origin.latitude, this.origin.longitude);
     if (this.surfaceContextActive) this._refreshSurfaceContext();
   }
 
@@ -152,21 +170,55 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceFauna.updateCamera(cameraPosition);
     if (this.origin) {
       const focus = this._geographicAt(cameraPosition.x, cameraPosition.z);
-      this.worldScheduler.setFocus({ latitude: focus.latitude, longitude: focus.longitude, mode: "surface" });
+      this.activeFaunaCells = faunaCellsAround(focus.latitude, focus.longitude);
     }
   }
 
   pump(budgetMs = 2.5) {
-    const result = this.worldScheduler.pump({
-      budgetMs: Math.max(0.1, budgetMs),
-      context: Object.freeze({
-        terrainQueuedChunks: this.queue.length,
-        ecologyQueuedChunks: this.surfaceEcology?.queue?.length ?? 0,
-        faunaQueuedInstances: this.surfaceFauna?.diagnostics?.().queueRemaining ?? 0,
-        spatialDetail: this.spatialDetail
-      })
+    const budget = Math.max(0.1, Number(budgetMs) || 2.5);
+    const started = performance.now();
+    const producers = [
+      {
+        id: "terrain",
+        maxSliceMs: 1.15,
+        hasWork: () => this.queue.length > 0,
+        run: (sliceMs) => TerrainChunkManager.prototype.pump.call(this, sliceMs)
+      },
+      {
+        id: "ecology",
+        maxSliceMs: 0.9,
+        hasWork: () => (this.surfaceEcology?.queue?.length ?? 0) > 0,
+        run: (sliceMs) => this.surfaceEcology?.pump(sliceMs) ?? 0
+      },
+      {
+        id: "fauna",
+        maxSliceMs: 0.75,
+        hasWork: () => this.surfaceFauna?.hasWork() === true,
+        run: (sliceMs) => this.surfaceFauna?.pump(sliceMs, this.activeFaunaCells) ?? 0
+      }
+    ];
+
+    let workUnits = 0;
+    const producersRun = [];
+    for (let offset = 0; offset < producers.length; offset += 1) {
+      const producer = producers[(this.workCursor + offset) % producers.length];
+      if (!producer.hasWork()) continue;
+      const remaining = budget - (performance.now() - started);
+      if (remaining <= 0.05) break;
+      const units = producer.run(Math.min(remaining, producer.maxSliceMs));
+      workUnits += Number.isFinite(units) ? Math.max(0, Number(units)) : 0;
+      producersRun.push(producer.id);
+    }
+    this.workCursor = (this.workCursor + 1) % producers.length;
+
+    this.lastSurfacePump = Object.freeze({
+      policy: "surface-direct-work-v1",
+      budgetMs: budget,
+      elapsedMs: Math.max(0, performance.now() - started),
+      workUnits,
+      producersRun: Object.freeze(producersRun)
     });
-    return result.workUnits;
+    return workUnits;
   }
 
   hasPendingWork() {
@@ -183,7 +235,15 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       terrainQueuedChunks: terrain.queuedChunks,
       ecology,
       fauna,
-      worldStreaming: this.worldScheduler.diagnostics(),
+      worldStreaming: Object.freeze({
+        policy: "surface-direct-work-v1",
+        activeCellCount: this.activeFaunaCells.length,
+        activeByScope: Object.freeze({
+          regional: this.activeFaunaCells.filter((cell) => cell.scope === "regional").length,
+          local: this.activeFaunaCells.filter((cell) => cell.scope === "local").length
+        }),
+        lastPump: this.lastSurfacePump
+      }),
       surfaceScienceStatus: this.surfaceScienceStatus,
       surfaceContextActive: this.surfaceContextActive,
       hydrologyProvider: Boolean(this.hydrology),
@@ -204,8 +264,8 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceEcology = null;
     this.surfaceFauna?.dispose();
     this.surfaceFauna = null;
+    this.activeFaunaCells = Object.freeze([]);
     this.lastSurfaceContext = null;
-    this.worldScheduler = null;
     super.dispose();
   }
 }
