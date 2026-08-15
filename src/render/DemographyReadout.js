@@ -1,4 +1,5 @@
 import { HOMININ_DEMOGRAPHY_TELEMETRY_KEY } from "../sim/DemographyTelemetry.js";
+import { classifyEmergentCulture } from "./EmergentCultureClassifier.js";
 
 function signedPercent(value) {
   const percent = (Number(value) || 0) * 100;
@@ -20,7 +21,9 @@ function update() {
   const conflict = Number.isFinite(state.conflictEdgeCount)
     ? ` · ${state.conflictEdgeCount.toLocaleString()} conflict contacts · ${state.defensiveSiteCount.toLocaleString()} defensive sites (${state.highDefenseSiteCount.toLocaleString()} high investment)`
     : "";
-  const title = `${state.speciesRichness.toLocaleString()} lineage${state.speciesRichness === 1 ? "" : "s"} · ${state.demeCount.toLocaleString()} demes${social}${transport}${conflict} · births ${Math.round(state.birthsPerYear).toLocaleString()}/yr · deaths ${Math.round(state.deathsPerYear).toLocaleString()}/yr · net ${signedPercent(state.growthPerYear)}`;
+  const observed = classifyEmergentCulture(state).observations;
+  const observerLabels = observed.length ? ` · observer: ${observed.map((entry) => entry.label).join("; ")}` : "";
+  const title = `${state.speciesRichness.toLocaleString()} lineage${state.speciesRichness === 1 ? "" : "s"} · ${state.demeCount.toLocaleString()} demes${social}${transport}${conflict}${observerLabels} · births ${Math.round(state.birthsPerYear).toLocaleString()}/yr · deaths ${Math.round(state.deathsPerYear).toLocaleString()}/yr · net ${signedPercent(state.growthPerYear)}`;
   if (readout.textContent !== text) readout.textContent = text;
   if (readout.title !== title) readout.title = title;
 }
