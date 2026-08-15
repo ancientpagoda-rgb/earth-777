@@ -6,6 +6,7 @@ export const GMRT_TERRAIN_PATCH_META = Object.freeze({
   patchCount: 0,
   finiteCellCount: 0,
   resolutionMeters: 200,
+  tileDegrees: 0.25,
   scientificRole: "masked high-resolution present-day terrain patches; explicit 777 ka hindcast still required"
 });
 
