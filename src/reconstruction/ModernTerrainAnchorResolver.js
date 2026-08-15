@@ -49,6 +49,10 @@ const SOURCE_ROLE_PRIOR = Object.freeze({
   "polar-modern-surface-dem": 0.55
 });
 
+function catalogSourceId(candidate) {
+  return candidate?.catalogSourceId ?? candidate?.archiveSourceId ?? candidate?.sourceId ?? null;
+}
+
 function resolutionMeters(candidate, source) {
   if (finite(candidate?.resolutionMeters) && Number(candidate.resolutionMeters) > 0) return Number(candidate.resolutionMeters);
   const text = String(source?.spatialResolution ?? "");
@@ -79,7 +83,7 @@ function coverageFactor(candidate) {
 }
 
 function preferredSolidBed(candidate, latitude) {
-  const sourceId = candidate?.sourceId;
+  const sourceId = catalogSourceId(candidate);
   if (sourceId === "bedmachine-greenland-v6" && Number(latitude) >= 58) return 1.12;
   if (sourceId === "bedmachine-antarctica-v4" && Number(latitude) <= -60) return 1.12;
   return 1;
@@ -113,7 +117,8 @@ function sourceClass(candidate) {
 
 export function scoreModernTerrainAnchor(candidate, { latitude = 0, longitude = 0 } = {}) {
   if (!candidate || !finite(candidate.value)) return null;
-  const source = topographyEvidenceSourceById(candidate.sourceId);
+  const archiveId = catalogSourceId(candidate);
+  const source = topographyEvidenceSourceById(archiveId);
   const cls = sourceClass(candidate);
   const meters = resolutionMeters(candidate, source);
   const sourceQuality = clamp01(candidate.sourceQuality ?? source?.sourceQuality ?? 0.7);
@@ -126,6 +131,7 @@ export function scoreModernTerrainAnchor(candidate, { latitude = 0, longitude = 
   const score = clamp01(sourceQuality * classPrior * rolePrior * resolution * uncertainty * coverage * solidBedPreference);
   return Object.freeze({
     ...candidate,
+    catalogSourceId: archiveId,
     sourceCatalogMatched: Boolean(source),
     sourceFamily: source?.family ?? candidate.sourceFamily ?? null,
     sourceQuality,
