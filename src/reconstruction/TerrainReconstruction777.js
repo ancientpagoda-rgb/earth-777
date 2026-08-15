@@ -4,12 +4,13 @@ import {
   reconstructionMethodSummary,
   RECONSTRUCTION_STREAMS
 } from "./ReconstructionAssimilation.js";
+import { shoreline777Sample } from "./ShorelineReconstruction777.js";
 
 const clampLatitude = (value) => Math.max(-90, Math.min(90, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 const positiveSigma = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
 
-export const TERRAIN_777_RECONSTRUCTION_POLICY = "modern-relief-explicit-hindcast-paleo-assimilation-v1";
+export const TERRAIN_777_RECONSTRUCTION_POLICY = "modern-relief-explicit-hindcast-paleo-assimilation-v2";
 
 /**
  * The default correction is intentionally zero-valued and uncertainty-incomplete.
@@ -59,27 +60,34 @@ export function terrain777BedrockSample(latitude, longitude, {
     modelCompletion
   });
 
+  const reconstructedElevationMeters = Number.isFinite(assimilation.value)
+    ? assimilation.value
+    : modernElevationMeters;
+  const shoreline = shoreline777Sample(reconstructedElevationMeters);
+
   return Object.freeze({
     ...assimilation,
     policy: TERRAIN_777_RECONSTRUCTION_POLICY,
     latitude: lat,
     longitude: lon,
     modernElevationMeters,
-    reconstructedElevationMeters: assimilation.value,
+    reconstructedElevationMeters,
     hindcastCorrectionMeters: assimilation.value == null ? null : assimilation.value - modernElevationMeters,
     reconstructionMethod: reconstructionMethodSummary(assimilation),
     reconstructionStatus: hindcastCorrection == null && paleoConstraints.length === 0
       ? "provisional-modern-anchor-awaiting-local-hindcast"
       : "assimilated-target-epoch-terrain",
-    epistemicStatus: "777 ka bedrock reconstruction. Modern ETOPO supplies spatial detail only after an explicit hindcast transform; historical observations calibrate process models and paleo constraints may directly update the target epoch."
+    shoreline,
+    medianLandAt777ka: shoreline.medianLand,
+    shorelineConfidenceClass: shoreline.confidenceClass,
+    shorelineLandProbability: shoreline.landProbability,
+    epistemicStatus: "777 ka bedrock reconstruction plus uncertainty-aware global shoreline classification. Modern ETOPO supplies spatial detail only after an explicit hindcast transform; historical observations calibrate process models and paleo constraints may directly update the target epoch."
   });
 }
 
 export function reconstructedBedrockElevation777At(latitude, longitude, options = undefined) {
   const sample = terrain777BedrockSample(latitude, longitude, options);
-  return Number.isFinite(sample.reconstructedElevationMeters)
-    ? sample.reconstructedElevationMeters
-    : sample.modernElevationMeters;
+  return sample.reconstructedElevationMeters;
 }
 
 export function terrain777ProvenanceAt(latitude, longitude, options = undefined) {
@@ -95,6 +103,7 @@ export function terrain777ProvenanceAt(latitude, longitude, options = undefined)
     modernElevationMeters: sample.modernElevationMeters,
     reconstructedElevationMeters: sample.reconstructedElevationMeters,
     hindcastCorrectionMeters: sample.hindcastCorrectionMeters,
+    shoreline: sample.shoreline,
     estimates: sample.estimates,
     historicalCalibration: sample.historicalCalibration
   });

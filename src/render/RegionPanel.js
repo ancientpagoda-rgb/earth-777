@@ -1,4 +1,4 @@
-import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
+import { terrain777BedrockSample } from "../reconstruction/TerrainReconstruction777.js";
 import { regionalState } from "../sim/regional-state.js";
 import { tectonicElevationOffsetMeters, tectonicSampleAt } from "../sim/DynamicLithosphere.js";
 import { spatialOceanState } from "../sim/SpatialOceanCirculation.js";
@@ -20,7 +20,9 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
   const soilEvolution = hydroClimate?.soilEvolutionSample?.(state, latitude, longitude, spatialDetail) ?? null;
   const tectonics = tectonicSampleAt(state, latitude, longitude, state.seed);
   const topographyOffsetMeters = tectonicElevationOffsetMeters(state, latitude, longitude, state.seed);
-  const evolvedElevationMeters = bedrockElevationAt(latitude, longitude) + topographyOffsetMeters;
+  const checkpointTerrain = terrain777BedrockSample(latitude, longitude);
+  const checkpointElevationMeters = checkpointTerrain.reconstructedElevationMeters;
+  const evolvedElevationMeters = checkpointElevationMeters + topographyOffsetMeters;
   const ocean = spatialOceanState(state, latitude, longitude, evolvedElevationMeters);
   const pft = ocean.isOcean ? null : vegetation?.pftDiagnostics?.(state, latitude, longitude, spatialDetail) ?? null;
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
@@ -56,7 +58,16 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
   if (Number.isFinite(region.subtropicalSubsidence) && region.subtropicalSubsidence > 0.12) details.push(`subsidence ${Math.round(region.subtropicalSubsidence * 100)}%`);
   if (Number.isFinite(region.orographicLift) && region.orographicLift > 0.08) details.push(`orographic lift ${Math.round(region.orographicLift * 100)}%`);
   if (Number.isFinite(region.rainShadow) && region.rainShadow > 0.08) details.push(`rain shadow ${Math.round(region.rainShadow * 100)}%`);
-  details.push(`elevation ${Math.round(evolvedElevationMeters).toLocaleString()} m`);
+  details.push(`reconstructed checkpoint elevation ${Math.round(checkpointElevationMeters).toLocaleString()} m`);
+  if (checkpointTerrain.shoreline) {
+    const shoreline = checkpointTerrain.shoreline;
+    const landChance = Math.round(shoreline.landProbability * 100);
+    if (shoreline.confidenceClass === "uncertain-shoreline") {
+      details.push(`777 ka shoreline uncertain · ${landChance}% land probability`);
+    } else {
+      details.push(`777 ka shoreline ${shoreline.confidenceClass.replace("robust-", "robust ")} · ${landChance}% land probability`);
+    }
+  }
   if (Math.abs(topographyOffsetMeters) >= 1) details.push(`branch tectonic offset ${signed(topographyOffsetMeters, 0)} m`);
   details.push(`plate ${tectonics.plateId} · ${tectonics.boundaryType}`);
   if (tectonics.boundaryWeight > 0.2) details.push(`uplift/rift ${signed(tectonics.upliftRateMmPerYear, 3)} mm/yr`);
@@ -144,5 +155,6 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
   const geomorphologyNote = river?.geomorphologyPolicy ? ` · ${river.geomorphologyPolicy}` : "";
   const groundwaterNote = waterSystem?.groundwaterPolicy ? ` · ${waterSystem.groundwaterPolicy}` : "";
   const lakeNote = waterSystem?.lakePolicy ? ` · ${waterSystem.lakePolicy}` : "";
-  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}${soilNote}${geomorphologyNote}${groundwaterNote}${lakeNote}`;
+  const shorelineNote = checkpointTerrain.shoreline?.policy ? ` · ${checkpointTerrain.shoreline.policy}` : "";
+  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}${soilNote}${geomorphologyNote}${groundwaterNote}${lakeNote}${shorelineNote}`;
 }
