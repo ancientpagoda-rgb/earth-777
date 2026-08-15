@@ -1,4 +1,5 @@
 import { GMRT_MODERN_ANCHORS, GMRT_MODERN_ANCHOR_META } from "../data/generated/gmrt-modern-anchors.generated.js";
+import { cachedTerrainPatchCandidatesAt, modernTerrainPatchCacheMeta } from "./ModernTerrainPatchCache.js";
 
 const DEG = Math.PI / 180;
 const EARTH_RADIUS_KM = 6371.0088;
@@ -17,12 +18,12 @@ function distanceKm(latA, lonA, latB, lonB) {
 
 /**
  * Return generated high-resolution modern anchors near a requested location.
- * These remain modern observations; TerrainReconstruction777 decides whether and
- * how they enter the checkpoint hindcast.
+ * Masked GMRT grid cells are preferred when available; point anchors remain a
+ * sparse fallback at evidence sites. All values are still modern observations.
  */
 export function cachedModernTerrainAnchorCandidatesAt(latitude, longitude, radiusKm = 1) {
   const radius = Math.max(0.001, Number(radiusKm) || 1);
-  return Object.freeze(GMRT_MODERN_ANCHORS
+  const pointCandidates = GMRT_MODERN_ANCHORS
     .map((record) => ({ record, distanceKm: distanceKm(latitude, longitude, record.latitude, record.longitude) }))
     .filter(({ distanceKm: d }) => d <= radius)
     .sort((a, b) => a.distanceKm - b.distanceKm)
@@ -30,9 +31,16 @@ export function cachedModernTerrainAnchorCandidatesAt(latitude, longitude, radiu
       ...record,
       distanceKm: d,
       spatialSupportKm: record.spatialSupportKm ?? Math.max(radius, 0.25)
-    })));
+    }));
+  return Object.freeze([
+    ...cachedTerrainPatchCandidatesAt(latitude, longitude),
+    ...pointCandidates
+  ]);
 }
 
 export function modernTerrainAnchorCacheMeta() {
-  return GMRT_MODERN_ANCHOR_META;
+  return Object.freeze({
+    pointCache: GMRT_MODERN_ANCHOR_META,
+    patchCache: modernTerrainPatchCacheMeta()
+  });
 }
