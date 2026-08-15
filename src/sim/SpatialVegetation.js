@@ -91,7 +91,7 @@ export class SpatialVegetation {
     this.hydrology = hydrology;
     this.pftDrivers = pftDrivers;
     this.checkpointHydrology = hydrology instanceof MassConservingHydrology
-      ? new MassConservingHydrology(hydrology.climate, hydrology.soil)
+      ? new hydrology.constructor(hydrology.climate, hydrology.soil)
       : hydrology;
     this.checkpointState = checkpointState();
     this.cache = new Map();
