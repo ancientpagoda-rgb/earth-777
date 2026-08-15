@@ -8,7 +8,7 @@ import {
   faunaPopulationAt
 } from "../src/sim/FaunaRuntime.js";
 
-const state = Object.freeze({ seed: 777001, elapsedYears: 12.5, herbivoreBiomass: 1.1, carnivoreBiomass: 0.7, productivityIndex: 1.0 });
+const state = Object.freeze({ seed: 777001, elapsedYears: 12.5, herbivoreBiomass: 1.1, carnivoreBiomass: 0.7, productivityIndex: 1.0, temperatureAnomaly: -1.0 });
 const vegetation = Object.freeze({ biomeCode: 17, npp: 950, lai: 2.8 });
 const hydrology = Object.freeze({ surfaceRunoffMmPerYear: 430 });
 
@@ -27,6 +27,7 @@ function lineage(overrides = {}) {
     sociality: 0.5,
     cognition: 0.5,
     dietBreadth: 0.5,
+    thermalOptimumK: -1.0,
     ...overrides
   };
 }
@@ -114,6 +115,44 @@ test("observed groups inherit identity from living evolutionary lineages", () =>
   assert.ok(plan.packs.every((group) => group.lineageId === 202));
   assert.ok(plan.individuals.every((animal) => animal.lineageId === (animal.role === "carnivore" ? 202 : 101)));
   assert.deepEqual(new Set(plan.lineageIds), new Set([101, 202]));
+});
+
+test("local thermal fit biases observed lineage representation without changing animal totals", () => {
+  const localState = {
+    ...state,
+    herbivoreBiomass: 4,
+    temperatureAnomaly: -1,
+    speciesLineages: [
+      lineage({ id: 101, thermalOptimumK: -1, sociality: 0.2 }),
+      lineage({ id: 102, thermalOptimumK: 3, sociality: 0.2 })
+    ]
+  };
+  const plan = buildObservedFauna({ state: localState, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 44, windowRadiusKm: 4, individualRadiusKm: 0.2 });
+  const represented = new Map();
+  for (const herd of plan.herds) represented.set(herd.lineageId, (represented.get(herd.lineageId) ?? 0) + herd.population);
+
+  assert.ok((represented.get(101) ?? 0) > (represented.get(102) ?? 0));
+  assert.equal([...represented.values()].reduce((sum, value) => sum + value, 0), plan.visiblePopulation);
+  assert.ok(plan.herds.filter((herd) => herd.lineageId === 101).every((herd) => herd.localSuitability > 0.5));
+});
+
+test("flexible lineages are favored in marginal local resources", () => {
+  const marginalVegetation = { ...vegetation, npp: 35 };
+  const marginalHydrology = { surfaceRunoffMmPerYear: 2 };
+  const localState = {
+    ...state,
+    herbivoreBiomass: 4,
+    speciesLineages: [
+      lineage({ id: 301, mobility: 0, dietBreadth: 0, sociality: 0.2 }),
+      lineage({ id: 302, mobility: 1, dietBreadth: 1, sociality: 0.2 })
+    ]
+  };
+  const plan = buildObservedFauna({ state: localState, vegetationSample: marginalVegetation, hydrologySample: marginalHydrology, latitude: 39, longitude: -95, seed: 81, windowRadiusKm: 5, individualRadiusKm: 0.2 });
+  const represented = new Map();
+  for (const herd of plan.herds) represented.set(herd.lineageId, (represented.get(herd.lineageId) ?? 0) + herd.population);
+
+  assert.ok((represented.get(302) ?? 0) > (represented.get(301) ?? 0));
+  assert.equal([...represented.values()].reduce((sum, value) => sum + value, 0), plan.visiblePopulation);
 });
 
 test("social lineages form larger, fewer groups without changing represented population", () => {
