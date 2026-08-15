@@ -4,7 +4,7 @@ const coordinateToken = (value) => `${Number(value) < 0 ? "m" : ""}${Math.abs(Nu
 
 export const GMRT_PATCH_SOURCE_ID = "gmrt-4.5.0";
 export const GMRT_GRIDSERVER_BASE = "https://www.gmrt.org/services/GridServer";
-export const GMRT_PATCH_TILE_DEGREES = 1;
+export const GMRT_PATCH_TILE_DEGREES = 0.25;
 export const GMRT_PATCH_RESOLUTION_METERS = 200;
 export const GMRT_PATCH_NODATA = -32768;
 
@@ -76,8 +76,12 @@ export function parseEsriAsciiGrid(text) {
   const ncols = headerNumber(headers, "ncols");
   const nrows = headerNumber(headers, "nrows");
   const cellsize = headerNumber(headers, "cellsize");
-  const xll = headerNumber(headers, "xllcorner") ?? headerNumber(headers, "xllcenter");
-  const yll = headerNumber(headers, "yllcorner") ?? headerNumber(headers, "yllcenter");
+  const xllCorner = headerNumber(headers, "xllcorner");
+  const yllCorner = headerNumber(headers, "yllcorner");
+  const xllCenter = headerNumber(headers, "xllcenter");
+  const yllCenter = headerNumber(headers, "yllcenter");
+  const xll = xllCorner ?? (xllCenter != null && cellsize != null ? xllCenter - cellsize / 2 : null);
+  const yll = yllCorner ?? (yllCenter != null && cellsize != null ? yllCenter - cellsize / 2 : null);
   const noData = headerNumber(headers, "nodata_value");
   if (![ncols, nrows, cellsize, xll, yll].every(finite) || ncols <= 0 || nrows <= 0 || cellsize <= 0) {
     throw new Error("Invalid GMRT ESRI ASCII header");
