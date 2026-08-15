@@ -7,6 +7,7 @@ import {
   buildGmrtMaskedPatchUrl,
   GMRT_PATCH_RESOLUTION_METERS,
   GMRT_PATCH_SOURCE_ID,
+  GMRT_PATCH_TILE_DEGREES,
   packTerrainPatchInt16,
   parseEsriAsciiGrid,
   uniqueGmrtPatchTiles
@@ -69,7 +70,7 @@ async function retrievePatch(tile) {
   return Object.freeze({
     id: tile.id,
     sourceId: GMRT_PATCH_SOURCE_ID,
-    sourceQuality: 0.97,
+    sourceQuality: 0.95,
     west: packed.west,
     east,
     south: packed.south,
@@ -85,7 +86,7 @@ async function retrievePatch(tile) {
     dataBase64: packed.dataBase64,
     requestUrl: url,
     rawSha256: await sha256Path(rawPath),
-    epistemicRole: "masked present-day high-resolution terrain anchor only; explicit 777 ka hindcast required"
+    epistemicRole: "masked present-day high-resolution terrain anchor only; high-resolution coverage is not automatically direct multibeam; explicit 777 ka hindcast required"
   });
 }
 
@@ -114,7 +115,7 @@ const meta = {
   patchCount: patches.length,
   finiteCellCount,
   resolutionMeters: GMRT_PATCH_RESOLUTION_METERS,
-  tileDegrees: 1,
+  tileDegrees: GMRT_PATCH_TILE_DEGREES,
   truncated: Number.isFinite(MAX_PATCHES) && requestedTiles.length < allTiles.length,
   scientificRole: "masked high-resolution present-day terrain patches; explicit 777 ka hindcast still required"
 };
@@ -137,7 +138,8 @@ const manifest = {
   input: {
     file: "src/data/generated/ncei-paleo-evidence.generated.js",
     evidenceRecords: NCEI_PALEO_EVIDENCE_RECORDS.length,
-    uniqueCandidateTiles: allTiles.length
+    uniqueCandidateTiles: allTiles.length,
+    tileDegrees: GMRT_PATCH_TILE_DEGREES
   },
   patches: patches.map(({ dataBase64, ...patch }) => patch),
   output: {
@@ -146,9 +148,9 @@ const manifest = {
     patches: patches.length,
     finiteCells: finiteCellCount
   },
-  epistemicRule: "Only GMRT topo-mask finite cells are cached as direct modern spatial anchors. NaN/unmeasured cells do not replace the fallback, and no cached patch is interpreted as 777 ka terrain until transformed by the reconstruction hindcast."
+  epistemicRule: "Only finite GMRT topo-mask cells are cached as high-resolution modern spatial anchors. NaN/unmeasured cells do not replace the fallback, topo-mask coverage is not automatically direct multibeam attribution, and no cached patch is interpreted as 777 ka terrain until transformed by the reconstruction hindcast."
 };
 await writeFile(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
 
-console.log(`Wrote ${patches.length} masked GMRT patches from ${allTiles.length} evidence-targeted one-degree tiles (${finiteCellCount} finite high-resolution cells).`);
+console.log(`Wrote ${patches.length} masked GMRT patches from ${allTiles.length} evidence-targeted ${GMRT_PATCH_TILE_DEGREES}° tiles (${finiteCellCount} finite high-resolution cells).`);
 if (meta.truncated) console.warn("Warning: patch ingestion was truncated by --max-patches and should not be treated as complete evidence-targeted coverage.");
