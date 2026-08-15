@@ -76,6 +76,7 @@ export class SurfaceEcologyManager {
     this.riverSample = null;
     this.hydrologySample = null;
     this.waterLevelKm = -Infinity;
+    this.riverRoutingMode = "none";
 
     this.materials = {
       grass: new THREE.MeshStandardMaterial({ color: 0x6b7a3a, roughness: 1 }),
@@ -106,14 +107,26 @@ export class SurfaceEcologyManager {
   }
 
   setContext({ latitude, longitude, state, vegetationSample = null, hydrologySample = null, riverSample = null }) {
-    const signature = [latitude.toFixed(3), longitude.toFixed(3), Math.round((state?.yearBP ?? 0) / 2500), vegetationSample?.biomeCode ?? "x"].join("|");
+    const signature = [
+      latitude.toFixed(3),
+      longitude.toFixed(3),
+      Math.round((state?.yearBP ?? 0) / 2500),
+      vegetationSample?.biomeCode ?? "x",
+      Number(riverSample?.networkCellIndex ?? -1),
+      Number(riverSample?.channelDistanceFromSelectionKm ?? -1).toFixed(1)
+    ].join("|");
     if (signature === this.contextSignature) return false;
     this.contextSignature = signature;
     this.origin = { latitude, longitude };
     this.profile = surfaceBiomeProfile(vegetationSample, state, latitude, longitude);
     this.hydrologySample = hydrologySample;
     this.riverSample = riverSample;
-    this.waterLevelKm = (Number(state?.seaLevel) - this.terrain.baseElevationMeters) / 1000 * this.terrain.verticalScale;
+    const lakeSurface = Number(riverSample?.lakeSurfaceElevationMeters);
+    const lakeCoverage = Number(riverSample?.lakeCoverageFraction) || 0;
+    const waterElevationMeters = Number.isFinite(lakeSurface) && lakeCoverage > 0.005
+      ? lakeSurface
+      : Number(state?.seaLevel);
+    this.waterLevelKm = (waterElevationMeters - this.terrain.baseElevationMeters) / 1000 * this.terrain.verticalScale;
     this.terrain.setBiomeProfile?.(this.profile);
     if (this.profile.biomeCode === 21) {
       this.materials.grass.color.setHex(0x8a7945);
@@ -153,14 +166,29 @@ export class SurfaceEcologyManager {
       this.river.geometry.dispose();
       this.river = null;
     }
+    this.riverRoutingMode = "none";
     const discharge = Number(this.riverSample?.meanDischargeM3s);
     const runoff = Number(this.hydrologySample?.surfaceRunoffMmPerYear ?? this.hydrologySample?.runoffPotentialMmPerYear);
-    if (!(discharge > 0.08 || runoff > 220)) return;
+    const routedAngle = Number(this.riverSample?.channelBearingRadians);
+    const closestX = Number(this.riverSample?.channelClosestXKm);
+    const closestZ = Number(this.riverSample?.channelClosestZKm);
+    const routeDistance = Number(this.riverSample?.channelDistanceFromSelectionKm);
+    const hasGeomorphicRoute = Number.isFinite(routedAngle) && Number.isFinite(closestX) && Number.isFinite(closestZ);
+    const routeAware = Boolean(this.riverSample?.geomorphologyPolicy || this.riverSample?.networkCellIndex != null);
+    const visibleReachKm = this.terrain.chunkSizeKm * (this.radius + 1.7);
+
+    if (hasGeomorphicRoute) {
+      if (!(discharge > 0.08) || (Number.isFinite(routeDistance) && routeDistance > visibleReachKm)) return;
+      this.riverRoutingMode = "network-routed";
+    } else {
+      if (routeAware || !(runoff > 220)) return;
+      this.riverRoutingMode = "provisional-fallback";
+    }
 
     const directionSeed = seedFor(this.origin.latitude, this.origin.longitude, 0, 0, 77);
-    let angle = random01(directionSeed) * TAU;
-    let x = Math.cos(angle + Math.PI) * 1.1;
-    let z = Math.sin(angle + Math.PI) * 1.1;
+    let angle = hasGeomorphicRoute ? routedAngle : random01(directionSeed) * TAU;
+    let x = hasGeomorphicRoute ? closestX - Math.cos(angle) * 1.35 : Math.cos(angle + Math.PI) * 1.1;
+    let z = hasGeomorphicRoute ? closestZ - Math.sin(angle) * 1.35 : Math.sin(angle + Math.PI) * 1.1;
     const step = 0.075;
     const points = [];
     for (let i = 0; i < 42; i += 1) {
@@ -168,17 +196,21 @@ export class SurfaceEcologyManager {
       points.push(new THREE.Vector3(x, y, z));
       let best = null;
       for (let candidate = -2; candidate <= 2; candidate += 1) {
-        const candidateAngle = angle + candidate * 0.28;
+        const angularStep = hasGeomorphicRoute ? 0.12 : 0.28;
+        const candidateAngle = angle + candidate * angularStep;
         const nx = x + Math.cos(candidateAngle) * step;
         const nz = z + Math.sin(candidateAngle) * step;
         const nh = this.terrain.heightAt(nx, nz);
-        const score = nh + Math.abs(candidate) * 0.00028;
+        const directionPenalty = Math.abs(candidate) * (hasGeomorphicRoute ? 0.00075 : 0.00028);
+        const score = nh + directionPenalty;
         if (!best || score < best.score) best = { x: nx, z: nz, height: nh, angle: candidateAngle, score };
       }
       if (!best) break;
       x = best.x; z = best.z; angle = best.angle;
     }
-    const widthMeters = clamp(2 + Math.log1p(Math.max(0, discharge || runoff / 80)) * 2.4, 2, 18);
+    const widthMeters = hasGeomorphicRoute
+      ? clamp(3 + Math.sqrt(Math.max(0, discharge)) * 2.6, 3, 90)
+      : clamp(2 + Math.log1p(Math.max(0, runoff / 80)) * 2.4, 2, 18);
     const geometry = riverRibbon(points, widthMeters / 2000);
     if (!geometry) return;
     this.river = new THREE.Mesh(geometry, this.materials.river);
@@ -302,6 +334,9 @@ export class SurfaceEcologyManager {
       animals: this.counts.animal,
       hominins: this.counts.hominin,
       river: Boolean(this.river),
+      riverRoutingMode: this.riverRoutingMode,
+      routedChannelDistanceKm: this.riverSample?.channelDistanceFromSelectionKm ?? null,
+      routedChannelBearingRadians: this.riverSample?.channelBearingRadians ?? null,
       biome: this.profile.biomeLabel ?? this.profile.biomeCode ?? "modeled"
     });
   }
