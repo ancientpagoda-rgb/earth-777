@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   ICE_DENSITY_KG_M3,
   iceLoad777VolumeClosure,
@@ -103,4 +104,17 @@ test("generated runtime cache starts unresolved, not zero-valued", () => {
   assert.equal(cachedIceLoad777At(70, -40), null);
   assert.equal(cachedGia777At(70, -40), null);
   assert.match(status.meta.epistemicRule, /must not be interpreted as zero ice thickness/i);
+});
+
+test("explicit ingestion command requires local model files and hashes its products", () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.scripts["data:ice-gia"], "node scripts/ingest-ice-gia-777.mjs");
+  assert.doesNotMatch(pkg.scripts["data:ingest"], /ice-gia/);
+  const source = fs.readFileSync(new URL("../scripts/ingest-ice-gia-777.mjs", import.meta.url), "utf8");
+  assert.match(source, /--ice=\/path\/ice\.json/);
+  assert.match(source, /configurationHash/);
+  assert.match(source, /sha256/);
+  assert.match(source, /Rejected .* ice cells/);
+  assert.match(source, /GIA run metadata is incomplete/);
+  assert.match(source, /Missing spatial coverage remains unknown/);
 });
