@@ -1,6 +1,8 @@
 import { advanceHomininDemography, initializeHomininDemography } from "./HomininDemography.js";
 import { inheritDemographyForChildren } from "./HomininDemographicInheritance.js";
 import { advanceHomininSocialOrganization, initializeHomininSocialOrganization } from "./HomininSocialOrganization.js";
+import { advanceHomininWaterTransport, initializeHomininWaterTransport } from "./HomininWaterTransport.js";
+import { advanceHomininConflictConstruction, initializeHomininConflictConstruction } from "./HomininConflictConstruction.js";
 import { publishHomininDemography } from "./DemographyTelemetry.js";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
@@ -55,6 +57,8 @@ export function initializeHomininLineages(state, seed = 777001) {
   state.communicationIndex ??= state.homininLineages.reduce((sum, lineage) => sum + lineage.communication, 0) / state.homininLineages.length;
   initializeHomininDemography(state, seed);
   initializeHomininSocialOrganization(state, seed);
+  initializeHomininWaterTransport(state);
+  initializeHomininConflictConstruction(state);
   publishHomininDemography(state);
   return state;
 }
@@ -93,7 +97,6 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
   const children = [];
 
   for (const lineage of living) {
-    const knowledge = lineage.cumulativeCulture;
     const technology = lineage.toolComplexity;
     const thermalBuffer = 0.58 + lineage.fireReliance * 0.34 + technology * 0.22;
     const climateSuitability = Math.exp(-0.045 * (temperature + 0.7 - lineage.ecologicalBreadth * 1.4) ** 2 * (1.2 - thermalBuffer * 0.35));
@@ -161,6 +164,8 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
   state.fireUseIndex = weighted("fireReliance");
   advanceHomininDemography(state, dt, random);
   advanceHomininSocialOrganization(state, dt);
+  advanceHomininWaterTransport(state, dt);
+  advanceHomininConflictConstruction(state, dt);
   publishHomininDemography(state);
   return state;
 }
