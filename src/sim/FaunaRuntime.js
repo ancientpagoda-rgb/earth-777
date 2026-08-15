@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v5";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v6";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -324,6 +324,63 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
   return { groups: Object.freeze(groups), individuals: Object.freeze(individuals) };
 }
 
+function predatorPreyScore(pack, herd) {
+  const dx = herd.x - pack.x;
+  const dz = herd.z - pack.z;
+  const distanceKm = Math.hypot(dx, dz);
+  const predatorMass = Number(pack.bodyMassLog10Kg);
+  const preyMass = Number(herd.bodyMassLog10Kg);
+  const dietBreadth = clamp01(pack.dietBreadth ?? 0.5);
+  const massGap = Number.isFinite(predatorMass) && Number.isFinite(preyMass)
+    ? Math.abs((preyMass - predatorMass) - 0.45)
+    : 0;
+  const sizeCompatibility = Math.exp(-0.55 * massGap * (1.05 - dietBreadth * 0.45));
+  const populationSupport = Math.sqrt(Math.max(1, Number(herd.population) || 1));
+  return populationSupport * sizeCompatibility / (0.08 + distanceKm);
+}
+
+function targetPredatorPacks(packs, herds) {
+  if (!packs?.length || !herds?.length) return Object.freeze(packs ?? []);
+  return Object.freeze(packs.map((pack) => {
+    if (pack.behavior !== "hunt" && pack.behavior !== "stalk") return pack;
+    let target = null;
+    let bestScore = -Infinity;
+    for (const herd of herds) {
+      const score = predatorPreyScore(pack, herd);
+      if (score > bestScore) {
+        bestScore = score;
+        target = herd;
+      }
+    }
+    if (!target) return pack;
+    const dx = target.x - pack.x;
+    const dz = target.z - pack.z;
+    const targetDistanceKm = Math.hypot(dx, dz);
+    return Object.freeze({
+      ...pack,
+      heading: Math.atan2(dz, dx),
+      targetGroupId: target.id,
+      targetLineageId: target.lineageId ?? null,
+      targetDistanceKm
+    });
+  }));
+}
+
+function alignCarnivoreIndividuals(individuals, packs) {
+  if (!individuals?.length) return Object.freeze([]);
+  const packById = new Map((packs ?? []).map((pack) => [pack.id, pack]));
+  return Object.freeze(individuals.map((animal) => {
+    const pack = packById.get(animal.groupId);
+    if (!pack?.targetGroupId) return animal;
+    return Object.freeze({
+      ...animal,
+      yaw: pack.heading,
+      targetGroupId: pack.targetGroupId,
+      targetLineageId: pack.targetLineageId ?? null
+    });
+  }));
+}
+
 export function buildObservedFauna({
   state = {},
   vegetationSample = null,
@@ -353,11 +410,14 @@ export function buildObservedFauna({
   const baseSeed = (Number(seed) >>> 0) ^ hashText(`${latitude.toFixed(4)}:${longitude.toFixed(4)}`);
   const herbivores = buildGroups({ role: "herbivore", population: herbivorePopulation, meanSize: field.meanHerdSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed, field, elapsedYears, lineages: lineagesForRole(state, "herbivore"), state });
   const carnivores = buildGroups({ role: "carnivore", population: carnivorePopulation, meanSize: field.meanPackSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed ^ 0x9e3779b9, field, elapsedYears, lineages: lineagesForRole(state, "carnivore"), state });
-  const individuals = Object.freeze([...herbivores.individuals, ...carnivores.individuals]);
-  const groups = [...herbivores.groups, ...carnivores.groups];
+  const packs = targetPredatorPacks(carnivores.groups, herbivores.groups);
+  const carnivoreIndividuals = alignCarnivoreIndividuals(carnivores.individuals, packs);
+  const individuals = Object.freeze([...herbivores.individuals, ...carnivoreIndividuals]);
+  const groups = [...herbivores.groups, ...packs];
   const behaviorCounts = {};
   for (const group of groups) behaviorCounts[group.behavior] = (behaviorCounts[group.behavior] || 0) + group.population;
   const lineageIds = Object.freeze([...new Set(groups.map((group) => group.lineageId).filter((id) => id != null))]);
+  const predatorTargetCount = packs.filter((pack) => pack.targetGroupId != null).length;
 
   return Object.freeze({
     policy: FAUNA_POLICY,
@@ -369,14 +429,15 @@ export function buildObservedFauna({
     visiblePopulation: herbivorePopulation,
     visibleCarnivorePopulation: carnivorePopulation,
     herds: herbivores.groups,
-    packs: carnivores.groups,
+    packs,
     individuals,
     lineageIds,
+    predatorTargetCount,
     behaviorCounts: Object.freeze(behaviorCounts),
     materializedHerbivores: herbivores.individuals.length,
-    materializedCarnivores: carnivores.individuals.length,
+    materializedCarnivores: carnivoreIndividuals.length,
     totalMaterializedPopulation: individuals.length,
     aggregateOnlyPopulation: herbivores.groups.filter((group) => group.representation === "herd").reduce((sum, group) => sum + group.population, 0),
-    aggregateOnlyCarnivorePopulation: carnivores.groups.filter((group) => group.representation === "pack").reduce((sum, group) => sum + group.population, 0)
+    aggregateOnlyCarnivorePopulation: packs.filter((group) => group.representation === "pack").reduce((sum, group) => sum + group.population, 0)
   });
 }
