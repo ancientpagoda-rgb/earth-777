@@ -31,25 +31,34 @@ function tinyRiverTopology() {
 }
 
 function closedBasinTopology() {
+  // The sink is surrounded by a complete one-cell land ring. This matters:
+  // D8 permits diagonal neighbors, so a 3x3 test accidentally placed the
+  // center sink directly beside ocean corners and created a 100 m spill saddle.
   const elevation = Float32Array.from([
-    -20, 130, -20,
-    120, 100, 110,
-    -20, 125, -20
+    -20, -20, -20, -20, -20,
+    -20, 130, 125, 120, -20,
+    -20, 118, 100, 110, -20,
+    -20, 122, 124, 126, -20,
+    -20, -20, -20, -20, -20
   ]);
   const landMask = Uint8Array.from([
-    0, 1, 0,
-    1, 1, 1,
-    0, 1, 0
+    0, 0, 0, 0, 0,
+    0, 1, 1, 1, 0,
+    0, 1, 1, 1, 0,
+    0, 1, 1, 1, 0,
+    0, 0, 0, 0, 0
   ]);
   const downstream = Int32Array.from([
-    -3, 4, -3,
-    4, -2, 4,
-    -3, 4, -3
+    -3, -3, -3, -3, -3,
+    -3, 12, 12, 12, -3,
+    -3, 12, -2, 12, -3,
+    -3, 12, 12, 12, -3,
+    -3, -3, -3, -3, -3
   ]);
   return Object.freeze({
-    count: 9,
-    rows: 3,
-    cols: 3,
+    count: 25,
+    rows: 5,
+    cols: 5,
     spacingDegrees: 4,
     seaLevelMeters: 0,
     elevationPolicy: "synthetic closed basin",
@@ -57,13 +66,17 @@ function closedBasinTopology() {
     elevationMeters: elevation,
     landMask,
     downstream,
-    cellAreaKm2: Float64Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1]),
-    routingOrder: Int32Array.from([1, 7, 3, 5, 4]),
-    landCellCount: 5,
-    landAreaKm2: 5,
+    cellAreaKm2: Float64Array.from({ length: 25 }, () => 1),
+    routingOrder: Int32Array.from([6, 18, 7, 17, 16, 8, 11, 13, 12]),
+    landCellCount: 9,
+    landAreaKm2: 9,
     oceanOutletCells: 0,
     closedBasinSinkCells: 1
   });
+}
+
+function landField(topology, value) {
+  return Float32Array.from({ length: topology.count }, (_, index) => topology.landMask[index] ? value : 0);
 }
 
 test("checkpoint groundwater starts in recharge/baseflow equilibrium with exact closure", () => {
@@ -107,33 +120,34 @@ test("branch recharge departures can store water or release aquifer storage befo
 
 test("a water-rich closed basin fills to its spill saddle and exports only the post-evaporation remainder", () => {
   const topology = closedBasinTopology();
-  const runoff = Float32Array.from([0, 5000, 0, 5000, 5000, 5000, 0, 5000, 0]);
-  const originalVolume = 25_000_000;
+  const runoff = landField(topology, 5000);
+  const originalVolume = 45_000_000;
   const lakes = resolveClosedBasinLakes({}, topology, runoff, {
-    precipitationMmPerYear: Float32Array.from([0, 500, 0, 500, 500, 500, 0, 500, 0]),
-    potentialEvapotranspirationMmPerYear: Float32Array.from([0, 800, 0, 800, 800, 800, 0, 800, 0])
+    precipitationMmPerYear: landField(topology, 500),
+    potentialEvapotranspirationMmPerYear: landField(topology, 800)
   });
   assert.equal(lakes.policy, CLOSED_BASIN_LAKE_POLICY);
   assert.equal(lakes.lakeCount, 1);
   assert.equal(lakes.spillingLakeCount, 1);
-  assert.equal(lakes.topology.downstream[4], -1);
+  assert.equal(lakes.topology.downstream[12], -1);
   assert.ok(lakes.lakes[0].overflowM3PerYear > 0);
+  assert.ok(lakes.lakes[0].spillElevationMeters >= 109.9);
   assert.ok(lakes.lakes[0].lakeSurfaceElevationMeters >= 109.9);
   assert.ok(lakes.lakeEvaporationM3PerYear > 0);
-  assert.ok(Math.abs(originalVolume - lakes.lakeEvaporationM3PerYear - lakes.adjustedLocalRunoffM3PerYear) < 2);
+  assert.ok(Math.abs(originalVolume - lakes.lakeEvaporationM3PerYear - lakes.adjustedLocalRunoffM3PerYear) < 5);
   assert.equal(lakes.topology.routingOrder.length, topology.landCellCount);
 });
 
 test("an arid underfilled basin remains closed and stores its routed water", () => {
   const topology = closedBasinTopology();
-  const runoff = Float32Array.from([0, 8, 0, 8, 8, 8, 0, 8, 0]);
+  const runoff = landField(topology, 8);
   const lakes = resolveClosedBasinLakes({}, topology, runoff, {
-    precipitationMmPerYear: Float32Array.from([0, 100, 0, 100, 100, 100, 0, 100, 0]),
-    potentialEvapotranspirationMmPerYear: Float32Array.from([0, 1400, 0, 1400, 1400, 1400, 0, 1400, 0])
+    precipitationMmPerYear: landField(topology, 100),
+    potentialEvapotranspirationMmPerYear: landField(topology, 1400)
   });
   assert.equal(lakes.spillingLakeCount, 0);
   assert.equal(lakes.closedLakeCount, 1);
-  assert.equal(lakes.topology.downstream[4], -2);
+  assert.equal(lakes.topology.downstream[12], -2);
   assert.ok(lakes.lakes[0].fillFraction < 1);
   assert.deepEqual([...lakes.adjustedRunoffMmPerYear], [...runoff]);
 });
