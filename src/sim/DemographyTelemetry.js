@@ -11,7 +11,17 @@ export function publishHomininDemography(state) {
     speciesRichness: Math.max(0, Math.round(Number(state?.homininSpeciesRichness) || 0)),
     femalePersons: Math.max(0, Math.round(Number(state?.homininFemalePersons) || 0)),
     malePersons: Math.max(0, Math.round(Number(state?.homininMalePersons) || 0)),
-    policy: state?.homininDemographyPolicy ?? null
+    householdCount: Math.max(0, Math.round(Number(state?.homininHouseholdCount) || 0)),
+    residentialGroupCount: Math.max(0, Math.round(Number(state?.homininResidentialGroupCount) || 0)),
+    activeSiteCount: Math.max(0, Math.round(Number(state?.homininActiveSiteCount) || 0)),
+    persistentSiteCount: Math.max(0, Math.round(Number(state?.homininPersistentSiteCount) || 0)),
+    largestSitePopulationPersons: Math.max(0, Math.round(Number(state?.homininLargestSitePopulationPersons) || 0)),
+    meanSettlementPersistence: Math.max(0, Math.min(1, Number(state?.homininMeanSettlementPersistence) || 0)),
+    exchangeEdgeCount: Math.max(0, Math.round(Number(state?.homininExchangeEdgeCount) || 0)),
+    exchangePersonTripsPerYear: Math.max(0, Number(state?.homininExchangePersonTripsPerYear) || 0),
+    storedFoodPersonDays: Math.max(0, Number(state?.homininStoredFoodPersonDays) || 0),
+    policy: state?.homininDemographyPolicy ?? null,
+    socialPolicy: state?.homininSocialPolicy ?? null
   });
   globalThis[HOMININ_DEMOGRAPHY_TELEMETRY_KEY] = snapshot;
   return snapshot;
