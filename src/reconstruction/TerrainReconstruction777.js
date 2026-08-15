@@ -5,7 +5,8 @@ import {
   RECONSTRUCTION_STREAMS
 } from "./ReconstructionAssimilation.js";
 import { shoreline777Sample } from "./ShorelineReconstruction777.js";
-import { EVIDENCE_RELATIONS, harvestEvidence } from "./EvidenceHarvester.js";
+import { EVIDENCE_RELATIONS } from "./EvidenceHarvester.js";
+import { harvestTopographyEvidenceAt } from "./TopographyEvidenceHarvester.js";
 
 const clampLatitude = (value) => Math.max(-90, Math.min(90, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
@@ -119,12 +120,10 @@ function harvestedCalibration(record) {
  * are forwarded as numerical 777 ka constraints.
  */
 export function terrain777BedrockSampleFromEvidence(latitude, longitude, evidenceRecords = [], options = {}) {
-  const harvest = harvestEvidence(evidenceRecords, {
+  const harvest = harvestTopographyEvidenceAt(latitude, longitude, evidenceRecords, {
     targetYearBP: 777_000,
-    latitude,
-    longitude,
     field: "bedrockElevationMeters",
-    uncertaintyScale: options.uncertaintyScaleMeters ?? 100
+    uncertaintyScaleMeters: options.uncertaintyScaleMeters ?? 100
   });
   const harvestedConstraints = harvest.targetConstraints.map(harvestedConstraint);
   const harvestedCalibrationRecords = harvest.processCalibration.map(harvestedCalibration);
@@ -142,7 +141,9 @@ export function terrain777BedrockSampleFromEvidence(latitude, longitude, evidenc
     assimilatedHarvestConstraintCount: harvest.targetConstraints.length,
     calibrationRecordCount: harvest.processCalibration.length,
     nearbyUnassimilatedEvidenceCount: harvest.nearbyPaleo.length,
-    modernAnchorEvidenceCount: harvest.modernAnchors.length
+    modernAnchorEvidenceCount: harvest.modernAnchors.length,
+    sourceCatalogMatchedCount: harvest.sourceCatalogMatchedCount,
+    sourceCatalogUnmatchedCount: harvest.sourceCatalogUnmatchedCount
   });
 }
 
