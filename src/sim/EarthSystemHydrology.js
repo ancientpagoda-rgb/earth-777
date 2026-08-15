@@ -3,6 +3,11 @@ import { closeAnnualWaterBalance } from "./WaterBalance.js";
 import { dynamicSurfaceElevationMeters } from "./GeneralAtmosphereCirculation.js";
 import { evolveRunoffNetworkTopography, DYNAMIC_GEOMORPHOLOGY_POLICY } from "./DynamicGeomorphology.js";
 import {
+  evolveSoilProfile,
+  soilEvolutionCellFields,
+  DYNAMIC_SOIL_POLICY
+} from "./DynamicSoilEvolution.js";
+import {
   resolveGroundwaterBaseflow,
   resolveClosedBasinLakes,
   GROUNDWATER_POLICY,
@@ -25,10 +30,11 @@ const COUPLED_METHODS = Object.freeze([
   "_refineNetworkTopology",
   "_balanceFor",
   "groundwaterLakeSample",
+  "soilEvolutionSample",
   "surfaceGeomorphologyPatch"
 ]);
 
-export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-atmosphere-groundwater-lakes-geomorphology-hydrology-v3";
+export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-atmosphere-soil-groundwater-lakes-geomorphology-hydrology-v4";
 export const SURFACE_GEOMORPHOLOGY_PATCH_POLICY = "coarse-geomorphology-to-local-surface-gradient-v1";
 
 function topologyCell(topology, index) {
@@ -65,6 +71,13 @@ function closestPointToOriginOnSegment(a, b) {
   const x = a.x + dx * t;
   const z = a.z + dz * t;
   return { x, z, distanceKm: Math.hypot(x, z), t, dx, dz, lengthKm: Math.sqrt(lengthSquared) };
+}
+
+function monthlyClimateFor(hydrology, globalState, latitude, longitude, spatialDetail) {
+  const months = Array.from({ length: 12 }, (_, monthIndex) =>
+    hydrology.climate.monthlyAt(globalState, monthIndex, latitude, longitude, spatialDetail)
+  );
+  return months.some((month) => !month) ? null : months;
 }
 
 export class EarthSystemHydrology extends MassConservingHydrology {
@@ -119,7 +132,8 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       round(forcing.tectonicTimeMyr, 3),
       round(forcing.tectonicBoundaryActivity, 2),
       round(forcing.productivityIndex, 2),
-      this.soil?.meta?.assetSha256 ?? "fallback-soil"
+      this.soil?.meta?.assetSha256 ?? "fallback-soil",
+      DYNAMIC_SOIL_POLICY
     ].join("|");
   }
 
@@ -138,12 +152,13 @@ export class EarthSystemHydrology extends MassConservingHydrology {
 
   _refineNetworkTopology(globalState, topology, localRunoffMmPerYear, climateForcedMask) {
     const count = topology.count;
-    const surfaceRunoffMmPerYear = new Float32Array(count);
-    const deepDrainageMmPerYear = new Float32Array(count);
+    const initialSurfaceRunoffMmPerYear = new Float32Array(count);
+    const initialDeepDrainageMmPerYear = new Float32Array(count);
     const precipitationMmPerYear = new Float32Array(count);
     const potentialEvapotranspirationMmPerYear = new Float32Array(count);
     const precipitationScale = new Float32Array(count);
-    const soilWaterCapacityMm = new Float32Array(count);
+    const initialSoilWaterCapacityMm = new Float32Array(count);
+    const localSamples = new Array(count);
     const networkClimateDetail = topology.spacingDegrees === 2 ? 0.35 : 0.1;
 
     for (const index of topology.routingOrder) {
@@ -152,21 +167,107 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       const latitude = 90 - (row + 0.5) * topology.spacingDegrees;
       const longitude = -180 + (col + 0.5) * topology.spacingDegrees;
       const local = this.sample(globalState, latitude, longitude, networkClimateDetail);
+      localSamples[index] = local;
       if (!local) continue;
-      surfaceRunoffMmPerYear[index] = Math.max(0, Number(local.surfaceRunoffMmPerYear) || 0);
-      deepDrainageMmPerYear[index] = Math.max(0, Number(local.deepDrainageMmPerYear) || 0);
+      initialSurfaceRunoffMmPerYear[index] = Math.max(0, Number(local.surfaceRunoffMmPerYear) || 0);
+      initialDeepDrainageMmPerYear[index] = Math.max(0, Number(local.deepDrainageMmPerYear) || 0);
       precipitationMmPerYear[index] = Math.max(0, Number(local.precipitationMmPerYear) || 0);
       potentialEvapotranspirationMmPerYear[index] = Math.max(0, Number(local.potentialEvapotranspirationMmPerYear) || 0);
       precipitationScale[index] = Math.max(0.12, Number(local.precipitationScale) || 1);
-      soilWaterCapacityMm[index] = Math.max(40, Number(local.soilWaterCapacityMm) || 260);
+      initialSoilWaterCapacityMm[index] = Math.max(40, Number(local.soilWaterCapacityMm) || 260);
     }
 
-    const groundwater = resolveGroundwaterBaseflow(globalState, topology, {
+    // Pass 1: checkpoint/static soil produces a preliminary discharge and
+    // geomorphic field. This field is the parent-material/erosion forcing for
+    // pedogenesis; it is not the final branch river solution.
+    const initialGroundwater = resolveGroundwaterBaseflow(globalState, topology, {
       totalRunoffMmPerYear: localRunoffMmPerYear,
-      surfaceRunoffMmPerYear,
-      deepDrainageMmPerYear,
+      surfaceRunoffMmPerYear: initialSurfaceRunoffMmPerYear,
+      deepDrainageMmPerYear: initialDeepDrainageMmPerYear,
       precipitationScale,
-      soilWaterCapacityMm
+      soilWaterCapacityMm: initialSoilWaterCapacityMm
+    });
+    const preliminaryRunoffMmPerYear = new Float32Array(initialGroundwater.effectiveRunoffMmPerYear);
+    const preliminaryGeomorphology = evolveRunoffNetworkTopography(
+      globalState,
+      topology,
+      preliminaryRunoffMmPerYear,
+      climateForcedMask
+    );
+
+    // Pass 2: climate/weathering + preliminary erosion/deposition evolve the
+    // BIOME4 soil layers. The water balance is then recomputed once with those
+    // evolved capacities/percolation values and the preliminary geomorphic
+    // elevation offset. This fixed pass avoids recursive soil<->river solving.
+    const soilFields = soilEvolutionCellFields(topology);
+    const revisedSurfaceRunoffMmPerYear = new Float32Array(initialSurfaceRunoffMmPerYear);
+    const revisedDeepDrainageMmPerYear = new Float32Array(initialDeepDrainageMmPerYear);
+    const revisedTotalRunoffMmPerYear = new Float32Array(localRunoffMmPerYear);
+    const revisedSoilWaterCapacityMm = new Float32Array(initialSoilWaterCapacityMm);
+    let evolvedSoilCellCount = 0;
+    let maxWaterBalanceResidualMm = 0;
+    let maxCapacityMultiplierChange = 0;
+    let meanFertilityAccumulator = 0;
+
+    for (const index of topology.routingOrder) {
+      const local = localSamples[index];
+      if (!local) continue;
+      const cell = topologyCell(topology, index);
+      const baselineSoil = this._soilProfile(cell.latitude, cell.longitude);
+      const evolvedSoil = evolveSoilProfile(globalState, baselineSoil, local, {
+        erosionRateMmPerYear: preliminaryGeomorphology.erosionRateMmPerYear[index],
+        depositionRateMmPerYear: preliminaryGeomorphology.depositionRateMmPerYear[index]
+      });
+      if (!evolvedSoil?.validSoil) continue;
+
+      const months = monthlyClimateFor(this, globalState, local.latitude, local.longitude, networkClimateDetail);
+      if (!months) continue;
+      const elevationMeters = dynamicSurfaceElevationMeters(globalState, local.latitude, local.longitude)
+        + (Number(preliminaryGeomorphology.netElevationOffsetMeters[index]) || 0);
+      const balance = closeAnnualWaterBalance(months, {
+        latitude: local.latitude,
+        elevationMeters,
+        soilProfile: evolvedSoil
+      });
+
+      revisedSurfaceRunoffMmPerYear[index] = Math.max(0, balance.surfaceRunoffMmPerYear);
+      revisedDeepDrainageMmPerYear[index] = Math.max(0, balance.deepDrainageMmPerYear);
+      revisedTotalRunoffMmPerYear[index] = Math.max(0, balance.runoffMmPerYear);
+      revisedSoilWaterCapacityMm[index] = Math.max(1, balance.soilWaterCapacityMm);
+
+      soilFields.appliedMask[index] = 1;
+      soilFields.capacityMultiplier[index] = evolvedSoil.capacityMultiplier;
+      soilFields.topWaterCapacityMm[index] = evolvedSoil.topWaterCapacityMm;
+      soilFields.bottomWaterCapacityMm[index] = evolvedSoil.bottomWaterCapacityMm;
+      soilFields.soilDepthMeters[index] = evolvedSoil.soilDepthMeters;
+      soilFields.fertilityIndex[index] = evolvedSoil.fertilityIndex;
+      soilFields.soilProductionMmPerYear[index] = evolvedSoil.soilProductionMmPerYear;
+      soilFields.erosionLossMmPerYear[index] = evolvedSoil.erosionLossMmPerYear;
+      soilFields.depositionGainMmPerYear[index] = evolvedSoil.depositionGainMmPerYear;
+      evolvedSoilCellCount += 1;
+      meanFertilityAccumulator += evolvedSoil.fertilityIndex;
+      maxCapacityMultiplierChange = Math.max(maxCapacityMultiplierChange, Math.abs(evolvedSoil.capacityMultiplier - 1));
+      maxWaterBalanceResidualMm = Math.max(maxWaterBalanceResidualMm, Math.abs(Number(balance.massBalanceResidualMm) || 0));
+    }
+
+    const soilEvolution = Object.freeze({
+      policy: DYNAMIC_SOIL_POLICY,
+      ...soilFields,
+      evolvedSoilCellCount,
+      evolvedSoilFraction: topology.landCellCount > 0 ? evolvedSoilCellCount / topology.landCellCount : 0,
+      meanFertilityIndex: evolvedSoilCellCount > 0 ? meanFertilityAccumulator / evolvedSoilCellCount : null,
+      maxCapacityMultiplierChange,
+      maxWaterBalanceResidualMm,
+      fixedPasses: 2,
+      epistemicStatus: "coarse deterministic pedogenesis is solved between preliminary and final river passes: climate/productivity weathering, erosion and deposition change BIOME4 soil depth/capacity/percolation; revised closed water budgets then drive final groundwater, rivers, geomorphology and lakes"
+    });
+
+    const groundwater = resolveGroundwaterBaseflow(globalState, topology, {
+      totalRunoffMmPerYear: revisedTotalRunoffMmPerYear,
+      surfaceRunoffMmPerYear: revisedSurfaceRunoffMmPerYear,
+      deepDrainageMmPerYear: revisedDeepDrainageMmPerYear,
+      precipitationScale,
+      soilWaterCapacityMm: revisedSoilWaterCapacityMm
     });
     localRunoffMmPerYear.set(groundwater.effectiveRunoffMmPerYear);
 
@@ -195,12 +296,19 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       ...geomorphology,
       topology: lakes.topology,
       geomorphicTopology: geomorphology.topology,
+      preliminaryGeomorphologySummary: Object.freeze({
+        policy: preliminaryGeomorphology.policy,
+        generatedSedimentM3PerYear: preliminaryGeomorphology.generatedSedimentM3PerYear,
+        maxAbsoluteElevationChangeMeters: preliminaryGeomorphology.maxAbsoluteElevationChangeMeters,
+        reroutedCellCount: preliminaryGeomorphology.reroutedCellCount
+      }),
+      soilEvolution,
       groundwater,
       lakes,
       waterSystemClosureErrorM3PerYear,
       waterSystemRelativeClosureError,
       waterSystemMassConserved: Math.abs(waterSystemClosureErrorM3PerYear) <= Math.max(1e-3, groundwater.landWaterInputM3PerYear * 2e-6),
-      epistemicStatus: `${geomorphology.epistemicStatus}; deep drainage is delayed through a coarse groundwater reservoir before contributing baseflow, and closed geomorphic basins resolve lake area/storage/evaporation plus spill-saddle capture without geographic special cases`
+      epistemicStatus: `${geomorphology.epistemicStatus}; preliminary runoff-driven geomorphology feeds a fixed-pass climate/weathering/erosion/deposition soil response, revised soil hydraulics recalculate runoff and recharge, deep drainage is delayed through groundwater, and closed geomorphic basins resolve lake water balance/spill without geographic special cases`
     });
   }
 
@@ -245,7 +353,39 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       totalLakeAreaKm2: lakes.totalLakeAreaKm2,
       waterSystemMassConserved: refinement.waterSystemMassConserved,
       waterSystemRelativeClosureError: refinement.waterSystemRelativeClosureError,
-      epistemicStatus: "coarse Earth-system groundwater/lake sample from the same deterministic network that drives river discharge and geomorphic response"
+      epistemicStatus: "coarse Earth-system groundwater/lake sample from the same deterministic soil-evolved network that drives river discharge and geomorphic response"
+    });
+  }
+
+  soilEvolutionSample(globalState, latitude, longitude, spatialDetail = 0.35) {
+    const network = this.network(globalState, spatialDetail);
+    const soil = network.geomorphology?.soilEvolution;
+    if (!soil) return null;
+    const cell = networkCellAt(network.topology, latitude, longitude);
+    if (!network.topology.landMask[cell.index]) return null;
+    const applied = Boolean(soil.appliedMask[cell.index]);
+    return Object.freeze({
+      policy: soil.policy,
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      spacingDegrees: network.spacingDegrees,
+      networkCellIndex: cell.index,
+      evolved: applied,
+      capacityMultiplier: applied ? soil.capacityMultiplier[cell.index] : 1,
+      topWaterCapacityMm: applied ? soil.topWaterCapacityMm[cell.index] : null,
+      bottomWaterCapacityMm: applied ? soil.bottomWaterCapacityMm[cell.index] : null,
+      totalWaterCapacityMm: applied ? soil.topWaterCapacityMm[cell.index] + soil.bottomWaterCapacityMm[cell.index] : null,
+      soilDepthMeters: applied ? soil.soilDepthMeters[cell.index] : null,
+      fertilityIndex: applied ? soil.fertilityIndex[cell.index] : 1,
+      soilProductionMmPerYear: applied ? soil.soilProductionMmPerYear[cell.index] : 0,
+      erosionLossMmPerYear: applied ? soil.erosionLossMmPerYear[cell.index] : 0,
+      depositionGainMmPerYear: applied ? soil.depositionGainMmPerYear[cell.index] : 0,
+      evolvedSoilFraction: soil.evolvedSoilFraction,
+      meanFertilityIndex: soil.meanFertilityIndex,
+      fixedPasses: soil.fixedPasses,
+      epistemicStatus: applied
+        ? "network-derived evolved BIOME4 soil from the fixed preliminary-geomorphology → pedogenesis → revised-water-budget pass"
+        : "no valid BIOME4 two-layer soil exists at this coarse network cell; the runtime retains the transparent fallback water bucket rather than fabricating evolved soil"
     });
   }
 
@@ -306,6 +446,7 @@ export class EarthSystemHydrology extends MassConservingHydrology {
     return Object.freeze({
       policy: SURFACE_GEOMORPHOLOGY_PATCH_POLICY,
       geomorphologyPolicy: geomorphology.policy,
+      soilPolicy: geomorphology.soilEvolution?.policy ?? null,
       latitude: Number(latitude),
       longitude: Number(longitude),
       networkLatitude: center.latitude,
@@ -329,7 +470,7 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       channelReachLengthKm,
       routedSlope,
       drainageReroutedCellCount: geomorphology.reroutedCellCount ?? 0,
-      epistemicStatus: "local presentation patch sampled from the same coarse conserved geomorphic river network: scientific elevation offset and finite-difference relief gradient are projected continuously; routed reach geometry identifies direction/proximity but any sub-grid channel cross-section remains presentation-only"
+      epistemicStatus: "local presentation patch sampled from the same coarse soil-evolved conserved geomorphic river network: scientific elevation offset and finite-difference relief gradient are projected continuously; routed reach geometry identifies direction/proximity but any sub-grid channel cross-section remains presentation-only"
     });
   }
 
@@ -357,13 +498,15 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       parentPolicy: base.policy,
       dynamicTopographyInLocalWaterBalance: true,
       generalAtmosphereForcing: true,
-      routingTopographyState: "preliminary routing uses evolving tectonic elevation; recharge is delayed through groundwater/baseflow; conserved discharge then drives geomorphology; closed basins resolve lake water balance and spill capture",
+      routingTopographyState: "preliminary routing uses evolving tectonic elevation; preliminary discharge drives geomorphology/pedogenesis; evolved soil hydraulics recalculate water; revised recharge/baseflow drives final geomorphology and closed-basin lakes",
       geomorphologyPolicy: DYNAMIC_GEOMORPHOLOGY_POLICY,
+      dynamicSoilPolicy: DYNAMIC_SOIL_POLICY,
       groundwaterPolicy: GROUNDWATER_POLICY,
       lakePolicy: CLOSED_BASIN_LAKE_POLICY,
       surfaceGeomorphologyPatchPolicy: SURFACE_GEOMORPHOLOGY_PATCH_POLICY,
+      fixedEarthSystemPasses: 2,
       waterAndSedimentClosureTrackedSeparately: true,
-      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to atmosphere/orbit/tectonics, coarse network hydrology distinguishes surface runoff/aquifer/lake storage, and the conserved geomorphic field can now be projected continuously into local surface presentation`
+      epistemicStatus: `${base.epistemicStatus}; the coarse network uses a fixed two-pass soil-landscape solve so climate/weathering/erosion/deposition can alter BIOME4 soil hydraulics and therefore runoff/recharge without creating recursive atmosphere-hydrology-geomorphology calls`
     });
   }
 }
