@@ -22,6 +22,7 @@ function provisionalSurfaceContext(latitude, longitude, state = null) {
     vegetationSample: { biomeCode, biomeLabel: "provisional local surface prior", npp, lai },
     hydrologySample: { surfaceRunoffMmPerYear: runoff },
     riverSample: null,
+    geomorphologyPatch: null,
     scienceCoupled: false
   };
 }
@@ -48,13 +49,17 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const hydrologySample = this.hydrology.sample(state, latitude, longitude, this.spatialDetail);
     const river = this.hydrology.networkSample?.(state, latitude, longitude, this.spatialDetail) ?? null;
     const groundwaterLake = this.hydrology.groundwaterLakeSample?.(state, latitude, longitude, this.spatialDetail) ?? null;
+    const geomorphologyPatch = this.hydrology.surfaceGeomorphologyPatch?.(state, latitude, longitude, this.spatialDetail) ?? null;
     const vegetationSample = this.vegetation?.sample?.(state, latitude, longitude, this.spatialDetail) ?? null;
     if (!hydrologySample) return provisionalSurfaceContext(latitude, longitude, state);
     return {
       state,
       vegetationSample,
       hydrologySample,
-      riverSample: river || groundwaterLake ? Object.freeze({ ...(river ?? {}), ...(groundwaterLake ?? {}) }) : null,
+      geomorphologyPatch,
+      riverSample: river || groundwaterLake || geomorphologyPatch
+        ? Object.freeze({ ...(river ?? {}), ...(groundwaterLake ?? {}), ...(geomorphologyPatch ?? {}) })
+        : null,
       scienceCoupled: true
     };
   }
@@ -63,6 +68,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     if (!this.origin) return;
     const context = this._surfaceContext(this.origin.latitude, this.origin.longitude, this.earthState);
     this.surfaceScienceStatus = context.scienceCoupled ? "science-coupled" : "provisional";
+    this.setGeomorphologyPatch(context.geomorphologyPatch);
     this.surfaceEcology.setContext({ latitude: this.origin.latitude, longitude: this.origin.longitude, ...context });
   }
 
@@ -105,7 +111,8 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       surfaceScienceStatus: this.surfaceScienceStatus,
       hydrologyProvider: Boolean(this.hydrology),
       vegetationProvider: Boolean(this.vegetation),
-      spatialDetail: this.spatialDetail
+      spatialDetail: this.spatialDetail,
+      geomorphologyPatchPolicy: this.geomorphologyPatch?.policy ?? null
     });
   }
 
