@@ -1,3 +1,5 @@
+import { homininPopulationAt } from "../sim/HomininDemography.js";
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
 const BIOMES = Object.freeze({
@@ -19,21 +21,15 @@ function familyForCode(code) {
   return BIOMES.grassland;
 }
 
-export function homininSuitability(latitude, longitude) {
-  const lat = Number(latitude) || 0;
-  const lon = Number(longitude) || 0;
-  if (lat >= -35 && lat <= 35 && lon >= -20 && lon <= 55) return 1;
-  if (lat >= -10 && lat <= 55 && lon >= -10 && lon <= 130) return 0.62;
-  if (lat >= -12 && lat <= 22 && lon >= 92 && lon <= 130) return 0.78;
-  return 0;
-}
-
 export function surfaceBiomeProfile(vegetationSample = null, state = {}, latitude = 0, longitude = 0) {
   const family = familyForCode(vegetationSample?.biomeCode);
   const npp = clamp(Math.log1p(Math.max(0, vegetationSample?.npp ?? 0)) / Math.log1p(2214), 0, 1);
   const lai = clamp((vegetationSample?.lai ?? 0) / 7.12, 0, 1);
   const productivity = clamp((state.productivityIndex ?? 1) / 1.45, 0.25, 1);
   const vigor = clamp(npp * 0.62 + lai * 0.28 + productivity * 0.10, 0.08, 1);
+  const localHominins = homininPopulationAt(state, latitude, longitude, 100);
+  const localDensity = Math.max(0, Number(localHominins?.densityPersonsPerKm2) || 0);
+  const homininDensity = localDensity > 0 ? localDensity / (localDensity + 0.018) : 0;
   return Object.freeze({
     groundColor: family.groundColor,
     grassDensity: clamp(family.grass * (0.48 + vigor * 0.72), 0, 1.15),
@@ -41,7 +37,9 @@ export function surfaceBiomeProfile(vegetationSample = null, state = {}, latitud
     shrubDensity: clamp(family.shrub * (0.45 + vigor * 0.72), 0, 1.15),
     rockDensity: family.rock,
     herbivoreDensity: clamp((state.herbivoreBiomass ?? 1) / 1.6 * (0.35 + vigor * 0.65), 0.08, 1),
-    homininDensity: clamp((state.homininPopulationIndex ?? 1) / 1.8 * homininSuitability(latitude, longitude), 0, 1),
+    homininDensity: clamp(homininDensity, 0, 1),
+    homininPersonsWithin100Km: localHominins?.estimatedPersonsWithinRadius ?? 0,
+    nearestHomininDemeDistanceKm: localHominins?.nearestDemeDistanceKm ?? null,
     vigor,
     biomeCode: vegetationSample?.biomeCode ?? null,
     biomeLabel: vegetationSample?.biomeLabel ?? null
