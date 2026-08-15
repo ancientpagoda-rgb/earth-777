@@ -1,7 +1,7 @@
 import { EVIDENCE_RELATIONS, harvestEvidence } from "./EvidenceHarvester.js";
 import { topographyEvidenceSourceById } from "./TopographyEvidenceSources.js";
 
-const finite = (value) => Number.isFinite(Number(value));
+const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 
 export const TOPOGRAPHY_EVIDENCE_HARVEST_POLICY = "source-catalog-normalized-topography-harvest-v1";
 
@@ -11,12 +11,19 @@ function inferredRelation(record, source) {
   return source?.relation ?? EVIDENCE_RELATIONS.NEARBY_PALEO;
 }
 
+function inferredField(record, source) {
+  if (record?.field) return record.field;
+  if (source?.fields?.includes("bedrockElevationMeters")) return "bedrockElevationMeters";
+  if (source?.fields?.length) return source.fields[0];
+  return "bedrockElevationMeters";
+}
+
 export function normalizeTopographyEvidenceRecord(record = {}) {
   const source = topographyEvidenceSourceById(record.sourceId);
   const relation = inferredRelation(record, source);
   return Object.freeze({
     ...record,
-    field: record.field ?? "bedrockElevationMeters",
+    field: inferredField(record, source),
     relation,
     sourceQuality: finite(record.sourceQuality) ? Number(record.sourceQuality) : source?.sourceQuality ?? 0.72,
     sourceFamily: record.sourceFamily ?? source?.family ?? null,
