@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#07100d" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%2307100d' stroke='%2378a88f' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23d1a15c'/%3E%3C/svg%3E" />
-    <meta name="description" content="Earth 777 — a scholarly grounded Free Earth simulation beginning 777,000 years before present." />
-    <title>Earth 777 — Free Earth</title>
+    <meta name="description" content="Earth 777 — a high-resolution, data-assimilated reconstruction of Earth around 777,000 years before present." />
+    <title>Earth 777 — Reconstruction</title>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/performance.css" />
   </head>
@@ -15,7 +15,7 @@
       <canvas id="earth" aria-label="Interactive reconstruction of Earth 777,000 years ago"></canvas>
 
       <header class="topbar">
-        <div class="brand"><span class="brand__mark" aria-hidden="true">◉</span><div><strong>EARTH 777</strong><small>FREE EARTH</small></div></div>
+        <div class="brand"><span class="brand__mark" aria-hidden="true">◉</span><div><strong>EARTH 777</strong><small>RECONSTRUCTION</small></div></div>
         <div class="epoch"><span>DATE</span><strong id="year-readout">777,000 BP</strong></div>
         <button class="quiet-button" id="sources-button" type="button">DATA</button>
       </header>
@@ -65,20 +65,20 @@
       <section class="timeline panel" aria-label="Simulation timeline">
         <div class="timeline__row">
           <button id="play-button" class="play-button" type="button" aria-label="Start simulation">▶</button>
-          <div class="time-control"><label for="timeline-range"><span id="timeline-date-label">777,000 BP</span><span id="elapsed-readout">checkpoint</span></label><input id="timeline-range" type="range" min="0" max="777000" value="0" step="10" /></div>
+          <div class="time-control"><label for="timeline-range"><span id="timeline-date-label">777,000 BP</span><span id="elapsed-readout">reconstruction</span></label><input id="timeline-range" type="range" min="0" max="777000" value="0" step="10" /></div>
           <label class="speed-select" for="speed-select"><span>SPEED</span><select id="speed-select" aria-label="Simulation speed"><option value="1">1×</option><option value="10">10×</option><option value="100" selected>100×</option><option value="1000">1K×</option><option value="10000">10K×</option></select></label>
         </div>
-        <div class="branch-row"><span><i></i> 777 KA CHECKPOINT</span><span id="run-seed">SEED 777001</span><button id="branch-button" class="quiet-button" type="button">NEW BRANCH</button></div>
+        <div class="branch-row"><span><i></i> 777 KA RECONSTRUCTION</span><span id="run-seed">SEED 777001</span><button id="branch-button" class="quiet-button" type="button">NEW BRANCH</button></div>
       </section>
 
       <details class="journal panel drawer-panel" aria-live="polite">
         <summary><div class="drawer-title"><small>JOURNAL</small><strong>Recent events</strong></div></summary>
-        <div class="drawer-body"><ol id="journal-list"><li><time>777,000 BP</time><span>Free Earth initialized from the MIS 19 checkpoint.</span></li></ol></div>
+        <div class="drawer-body"><ol id="journal-list"><li><time>777,000 BP</time><span>Earth 777 initialized from the data-assimilated MIS 19 reconstruction checkpoint.</span></li></ol></div>
       </details>
 
       <div class="hint" id="interaction-hint">DRAG · ZOOM · SELECT</div>
 
-      <section class="modal" id="sources-modal" role="dialog" aria-modal="true" aria-labelledby="sources-title"><div class="modal__card"><div class="modal__heading"><div><small>SCIENTIFIC PROVENANCE</small><h1 id="sources-title">What this world knows</h1></div><button id="sources-close" class="close-button" type="button" aria-label="Close sources">×</button></div><p class="modal__intro">Every layer distinguishes published constraints, derived model state, and provisional priors. Earth 777 is a plausible realization—not an exact replay.</p><div class="source-list" id="source-list"></div></div></section>
+      <section class="modal" id="sources-modal" role="dialog" aria-modal="true" aria-labelledby="sources-title"><div class="modal__card"><div class="modal__heading"><div><small>SCIENTIFIC PROVENANCE</small><h1 id="sources-title">What this world knows</h1></div><button id="sources-close" class="close-button" type="button" aria-label="Close sources">×</button></div><p class="modal__intro">Earth 777 reconstructs the target epoch from direct paleo constraints, physically transformed modern anchors, historically calibrated processes, and explicitly labeled model completion. Every layer carries its epistemic status.</p><div class="source-list" id="source-list"></div></div></section>
     </main>
     <script type="module" src="/src/bootstrap.js"></script>
   </body>
