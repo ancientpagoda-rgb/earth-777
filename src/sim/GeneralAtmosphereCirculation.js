@@ -1,5 +1,5 @@
 import { CHECKPOINT_777, checkpointState } from "../data/checkpoint-777.js";
-import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
+import { reconstructedBedrockElevation777At } from "../reconstruction/TerrainReconstruction777.js";
 import { tectonicElevationOffsetMeters } from "./DynamicLithosphere.js";
 
 const DEG = Math.PI / 180;
@@ -41,7 +41,7 @@ export function dailyMeanInsolationIndex(state, monthIndex, latitude) {
 }
 
 export function dynamicSurfaceElevationMeters(state, latitude, longitude) {
-  return bedrockElevationAt(latitude, longitude)
+  return reconstructedBedrockElevation777At(latitude, longitude)
     + tectonicElevationOffsetMeters(state, latitude, longitude, state?.tectonicSeed);
 }
 
