@@ -20,14 +20,6 @@ const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-dtYears / tauYears));
 
-const EVENTS = Object.freeze([
-  { key: "dry", threshold: 0.14, text: "A multi-decadal dry phase shifts grazing pressure toward river corridors." },
-  { key: "cold", threshold: 0.10, text: "Cool summers preserve seasonal snow across northern uplands." },
-  { key: "fire", threshold: 0.08, text: "Lightning ignites a regional grassland fire mosaic." },
-  { key: "migration", threshold: 0.12, text: "Large herbivore ranges reorganize along a changing forage frontier." },
-  { key: "hominin", threshold: 0.055, text: "A hominin population establishes a new persistent seasonal range." }
-]);
-
 export function stageForYearBP(yearBP) {
   const year = Math.max(0, Number(yearBP) || 0);
   if (year > 773_900) return "Late MIS 19c";
@@ -66,7 +58,6 @@ export class FreeEarthEngine {
     initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
-    this._eventAccumulator = 0;
   }
 
   _resetRandomStreams() {
@@ -75,7 +66,6 @@ export class FreeEarthEngine {
     this.magneticRandom = createRandom((this.seed ^ 0x6a09e667) >>> 0);
     this.evolutionRandom = createRandom((this.seed ^ 0xbb67ae85) >>> 0);
     this.homininRandom = createRandom((this.seed ^ 0x3c6ef372) >>> 0);
-    this.eventRandom = createRandom((this.seed ^ 0x85ebca6b) >>> 0);
   }
 
   reset(seed = this.seed) {
@@ -92,7 +82,6 @@ export class FreeEarthEngine {
     initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
-    this._eventAccumulator = 0;
     return this.snapshot();
   }
 
@@ -204,12 +193,6 @@ export class FreeEarthEngine {
         state.magneticStrength = Math.max(0.04, relax(state.magneticStrength, 1, subDt, 4_500) + secularNoise);
       }
     });
-
-    this._eventAccumulator += dt;
-    if (this._eventAccumulator >= 250) {
-      this._eventAccumulator %= 250;
-      for (const event of EVENTS) if (this.eventRandom() < event.threshold) this._recordEvent(event.text);
-    }
   }
 
   _recordEvent(text) {
