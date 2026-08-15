@@ -64,8 +64,9 @@ export function advanceGeologicActivity(state, dtYears, random = Math.random) {
   const dt = Math.max(0, Number(dtYears) || 0);
   const reversion = 1 - Math.exp(-dt / 65_000);
   const stochastic = gaussian(random) * 0.0016 * Math.sqrt(dt);
-  const current = Math.max(0.08, Number(state.geologicActivityIndex ?? 1) || 0);
-  state.geologicActivityIndex = Math.max(0.08, current + (1 - current) * reversion + stochastic);
+  const raw = Number(state.geologicActivityIndex ?? 1);
+  const current = Math.max(0.08, raw || 0);
+  state.geologicActivityIndex = Math.max(0.08, current + (1 - raw) * reversion + stochastic);
   return state;
 }
 
