@@ -11,7 +11,8 @@ import {
   trackedNitrogenTgN
 } from "../src/sim/EarthBiogeochemistry.js";
 import { EARTH_SYSTEM_STATUS, auditTrajectory } from "../src/sim/EarthSystemIntegrity.js";
-import { FreeEarthEngine, regionalState, stageForYearBP } from "../src/sim/free-earth.js";
+import { FreeEarthEngine, stageForYearBP } from "../src/sim/free-earth.js";
+import { regionalState } from "../src/sim/regional-state.js";
 
 test("checkpoint carries the published MIS 19 boundary conditions", () => {
   assert.equal(CHECKPOINT_777.yearsBeforePresent, 777_000);
