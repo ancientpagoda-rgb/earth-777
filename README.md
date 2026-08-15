@@ -53,6 +53,12 @@ npm run dev
 
 Then open the local URL printed by Vite.
 
+## Controls
+
+- Mouse / touchpad: drag to orbit, scroll to zoom, click the globe to inspect a region.
+- Keyboard: arrow keys orbit, `+` and `-` zoom, `Enter` selects the center reticle, `F` descends, `Space` plays or pauses, `S` opens sources.
+- Gamepad: left stick orbits, right stick or triggers zoom, `A` selects, `X` descends, `Start` plays or pauses, `Y` opens sources, `LB`/`RB` change speed, D-pad left/right scrubs the timeline.
+
 ## Test and build
 
 ```bash

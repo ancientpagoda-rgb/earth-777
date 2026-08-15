@@ -49,6 +49,8 @@ export class EarthView {
     this.diagnosticsCacheAt = -Infinity;
     this.rasterWorker = new RasterTaskClient();
     this.performanceController = new AdaptivePerformanceController({ targetFps: 60, initialTier: "high" });
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1));
@@ -109,6 +111,21 @@ export class EarthView {
     this.continuousUntilMs = performance.now() + 1_000;
     this.onSelect?.({ latitude: selection.latitude, longitude: selection.longitude, normal: this.selectionDirection.clone() });
     this.invalidate();
+  }
+
+  selectNormalized(pointerX, pointerY) {
+    if (this.mode !== "globe") return false;
+    this.pointer.x = pointerX;
+    this.pointer.y = pointerY;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObject(this.earth)[0];
+    if (!hit) return false;
+    this._applySelection(hit);
+    return true;
+  }
+
+  selectViewCenter() {
+    return this.selectNormalized(0, 0);
   }
 
   descendToSelection() { return beginDescent(this); }
@@ -188,6 +205,50 @@ export class EarthView {
     this.terrain.configure({ radius: settings.effectiveTerrainRadius, segments: settings.effectiveTerrainSegments });
     this.diagnosticsCacheAt = -Infinity;
     return true;
+  }
+
+  orbitBy(deltaAzimuth, deltaPolar) {
+    if (this.mode !== "globe" || (!deltaAzimuth && !deltaPolar)) return;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    spherical.theta -= deltaAzimuth;
+    spherical.phi = clamp(spherical.phi + deltaPolar, 0.18, Math.PI - 0.18);
+    offset.setFromSpherical(spherical);
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.camera.lookAt(this.controls.target);
+    this.continuousUntilMs = performance.now() + 400;
+    this.controls.update();
+    this.invalidate();
+  }
+
+  zoomBy(deltaDistance) {
+    if (this.mode !== "globe" || !deltaDistance) return;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    offset.setLength(clamp(offset.length() + deltaDistance, this.controls.minDistance, this.controls.maxDistance));
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.continuousUntilMs = performance.now() + 400;
+    this.controls.update();
+    this.invalidate();
+  }
+
+  orbitBy(deltaAzimuth, deltaPolar) {
+    if (!deltaAzimuth && !deltaPolar) return;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    spherical.theta -= deltaAzimuth;
+    spherical.phi = clamp(spherical.phi + deltaPolar, 0.18, Math.PI - 0.18);
+    offset.setFromSpherical(spherical);
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.camera.lookAt(this.controls.target);
+    this.controls.update();
+  }
+
+  zoomBy(deltaDistance) {
+    if (!deltaDistance) return;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    offset.setLength(clamp(offset.length() + deltaDistance, this.controls.minDistance, this.controls.maxDistance));
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.controls.update();
   }
 
   resize() {

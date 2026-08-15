@@ -1,4 +1,5 @@
 import { SOURCES } from "./data/provenance.js";
+import { GamepadDriver, GAMEPAD_HINT, KEYBOARD_HINT, POINTER_HINT, clamp } from "./input/gamepad.js";
 import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
 import { loadKrapp777Vegetation } from "./data/krapp-777-vegetation.js";
 import { loadBiome4Soil } from "./data/biome4-soil.js";
@@ -18,7 +19,7 @@ const ui = {
   statePanel: $(".state-panel"), locationPanel: $(".location-panel"), journalPanel: $(".journal"),
   locationTitle: $("#location-title"), locationDetail: $("#location-detail"), locationCoordinates: $("#location-coordinates"), surface: $("#surface-button"),
   play: $("#play-button"), range: $("#timeline-range"), elapsed: $("#elapsed-readout"), speedSelect: $("#speed-select"), seed: $("#run-seed"), branch: $("#branch-button"), journal: $("#journal-list"),
-  sourcesButton: $("#sources-button"), sourcesModal: $("#sources-modal"), sourcesClose: $("#sources-close"), sourceList: $("#source-list"), hint: $("#interaction-hint"),
+  sourcesButton: $("#sources-button"), sourcesButtonMobile: $("#sources-button-mobile"), sourcesModal: $("#sources-modal"), sourcesClose: $("#sources-close"), sourceList: $("#source-list"), hint: $("#interaction-hint"),
   perfHud: $("#perf-hud"), perfFps: $("#perf-fps"), perfFrame: $("#perf-frame"), perfRender: $("#perf-render"), perfSim: $("#perf-sim"),
   perfCalls: $("#perf-calls"), perfTriangles: $("#perf-triangles"), perfWorker: $("#perf-worker"), perfLod: $("#perf-lod"), perfChunks: $("#perf-chunks"), perfDpr: $("#perf-dpr"), perfMode: $("#perf-mode")
 };
@@ -38,6 +39,9 @@ let climate777 = null;
 let hydroClimate = null;
 let spatialVegetation = null;
 let lastJournalSignature = "";
+let lastSourcesTrigger = null;
+let gamepadConnected = false;
+let hintBase = "DRAG · ZOOM · SELECT";
 const SIMULATION_INTERVAL_MS = 100;
 const UI_UPDATE_INTERVAL_MS = 250;
 const REGION_UPDATE_INTERVAL_MS = 5_000;
@@ -53,6 +57,57 @@ function requestFrame() {
 const earthView = new EarthView($("#earth"), engine.snapshot(), handleRegionSelect, {
   onInvalidate: requestFrame,
   onModeChange: handleModeChange
+});
+const speedPresets = [...ui.speedSelect.options].map((option) => Number(option.value)).filter(Number.isFinite).sort((a, b) => a - b);
+const gamepad = new GamepadDriver({
+  onConnectionChange(connected) {
+    gamepadConnected = connected;
+    document.body.classList.toggle("gamepad-active", connected);
+    updateInteractionHint();
+    requestFrame();
+  },
+  onOrbit({ x, y, deltaSeconds }) {
+    if (isSourcesOpen()) return;
+    earthView.orbitBy(x * deltaSeconds * 1.95, y * deltaSeconds * 1.5);
+  },
+  onZoom({ value, deltaSeconds }) {
+    if (isSourcesOpen()) return;
+    earthView.zoomBy(value * deltaSeconds * 4.4);
+  },
+  onSelect() {
+    if (isSourcesOpen()) return;
+    earthView.selectViewCenter();
+  },
+  onFocus() {
+    if (isSourcesOpen()) return;
+    earthView.toggleSurface();
+  },
+  onBack() {
+    if (isSourcesOpen()) closeSources();
+    else if (earthView.mode === "surface") earthView.toggleSurface();
+  },
+  onToggleSources() {
+    toggleSources();
+  },
+  onPreviousSpeed() {
+    if (isSourcesOpen()) return;
+    stepSpeed(-1);
+  },
+  onNextSpeed() {
+    if (isSourcesOpen()) return;
+    stepSpeed(1);
+  },
+  onTogglePlay() {
+    if (isSourcesOpen()) {
+      closeSources();
+      return;
+    }
+    setPlaying(!playing);
+  },
+  onTimelineStep(direction) {
+    if (isSourcesOpen()) return;
+    seekTimeline(Number(ui.range.value) + direction * 7_500);
+  }
 });
 
 function formatYear(yearBP) { return `${Math.max(0, Math.round(yearBP)).toLocaleString()} BP`; }
@@ -74,6 +129,20 @@ function ecosystemDescription(value) {
   if (value < 0.68) return "contracting";
   if (value > 1.16) return "expanding";
   return "stable";
+}
+
+function updateInteractionHint(baseText = hintBase) {
+  hintBase = baseText;
+  if (!ui.hint) return;
+  if (gamepadConnected && baseText === "DRAG · ZOOM · SELECT") {
+    ui.hint.textContent = GAMEPAD_HINT;
+    return;
+  }
+  if (!gamepadConnected && baseText === "DRAG · ZOOM · SELECT") {
+    ui.hint.textContent = `${POINTER_HINT} · ${KEYBOARD_HINT}`;
+    return;
+  }
+  ui.hint.textContent = baseText;
 }
 
 function updateInterface(state, forceTexture = false, forceRegion = false) {
@@ -106,8 +175,32 @@ function updateInterface(state, forceTexture = false, forceRegion = false) {
   earthView.updateState(state, forceTexture, surfaceDetail);
 }
 
+function isSourcesOpen() {
+  return ui.sourcesModal.classList.contains("is-open");
+}
+
+function openSources(trigger = document.activeElement) {
+  lastSourcesTrigger = trigger instanceof HTMLElement ? trigger : null;
+  ui.sourcesModal.classList.add("is-open");
+  ui.sourcesClose.focus();
+}
+
+function closeSources() {
+  if (!isSourcesOpen()) return;
+  ui.sourcesModal.classList.remove("is-open");
+  lastSourcesTrigger?.focus?.();
+}
+
+function toggleSources(trigger = document.activeElement) {
+  if (isSourcesOpen()) closeSources();
+  else openSources(trigger);
+}
+
 function updateJournal(state) {
-  const entries = [...state.events.slice(-4).reverse(), { yearBP: 777_000, text: "Free Earth initialized from the MIS 19 checkpoint." }].slice(0, 5);
+  const entries = [
+    ...state.events.slice(-4).reverse(),
+    { yearBP: 777_000, text: "Earth 777 initialized from the data-assimilated MIS 19 reconstruction checkpoint." }
+  ].slice(0, 5);
   const signature = entries.map((entry) => `${entry.yearBP}:${entry.text}`).join("|");
   if (signature === lastJournalSignature) return;
   lastJournalSignature = signature;
@@ -135,7 +228,7 @@ function handleModeChange(mode) {
   if (mode === "descent") {
     ui.surface.textContent = "DESCENDING…";
     ui.surface.disabled = true;
-    ui.hint.textContent = "DESCENDING · TERRAIN STREAMING";
+    updateInteractionHint("DESCENDING · TERRAIN STREAMING");
   } else if (mode === "surface") {
     ui.surface.textContent = "RETURN TO GLOBE";
     ui.surface.disabled = false;
@@ -143,11 +236,11 @@ function handleModeChange(mode) {
     if (ui.journalPanel) ui.journalPanel.open = false;
     if (ui.perfHud) ui.perfHud.open = false;
     if (ui.locationPanel) ui.locationPanel.open = true;
-    ui.hint.textContent = "DRAG · MOVE · ZOOM";
+    updateInteractionHint("DRAG · MOVE · ZOOM");
   } else {
     ui.surface.textContent = "DESCEND TO REGION";
     ui.surface.disabled = !selected;
-    ui.hint.textContent = "DRAG · ZOOM · SELECT";
+    updateInteractionHint("DRAG · ZOOM · SELECT");
   }
   requestFrame();
 }
@@ -168,6 +261,17 @@ function setPlaying(next) {
   requestFrame();
 }
 
+function setSpeed(nextSpeed) {
+  speed = nextSpeed;
+  ui.speedSelect.value = String(nextSpeed);
+}
+
+function stepSpeed(direction) {
+  const currentIndex = Math.max(0, speedPresets.indexOf(speed));
+  const nextIndex = clamp(currentIndex + direction, 0, speedPresets.length - 1);
+  setSpeed(speedPresets[nextIndex]);
+}
+
 function setSeed(nextSeed) {
   seed = Number(nextSeed) >>> 0;
   engine.setObserverRelevance({});
@@ -183,6 +287,85 @@ function setSeed(nextSeed) {
   ui.seed.textContent = `SEED ${seed}`;
   setPlaying(false);
   updateInterface(engine.snapshot(), true, true);
+}
+
+function seekTimeline(elapsedYears) {
+  const targetYears = clamp(Math.round(elapsedYears), 0, 777_000);
+  const state = profiler.measure("simMs", () => engine.seek(targetYears));
+  profiler.measure("uiMs", () => updateInterface(state, true, true));
+  requestFrame();
+}
+
+function isInteractiveTarget(target) {
+  return target instanceof HTMLElement && Boolean(target.closest("button, input, a, textarea, select, summary"));
+}
+
+function handleKeyboardControl(event) {
+  if (isInteractiveTarget(event.target)) return;
+
+  if (event.key === "Escape") {
+    closeSources();
+    return;
+  }
+
+  if (event.code === "Space") {
+    if (event.repeat) return;
+    event.preventDefault();
+    if (isSourcesOpen()) {
+      closeSources();
+      return;
+    }
+    setPlaying(!playing);
+    return;
+  }
+
+  if (event.code === "KeyS") {
+    if (event.repeat) return;
+    event.preventDefault();
+    toggleSources(ui.sourcesButtonMobile ?? ui.sourcesButton);
+    return;
+  }
+
+  if (isSourcesOpen()) return;
+
+  switch (event.code) {
+    case "ArrowLeft":
+      event.preventDefault();
+      earthView.orbitBy(-0.18, 0);
+      break;
+    case "ArrowRight":
+      event.preventDefault();
+      earthView.orbitBy(0.18, 0);
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      earthView.orbitBy(0, -0.14);
+      break;
+    case "ArrowDown":
+      event.preventDefault();
+      earthView.orbitBy(0, 0.14);
+      break;
+    case "Equal":
+    case "NumpadAdd":
+      event.preventDefault();
+      earthView.zoomBy(-0.3);
+      break;
+    case "Minus":
+    case "NumpadSubtract":
+      event.preventDefault();
+      earthView.zoomBy(0.3);
+      break;
+    case "Enter":
+      event.preventDefault();
+      earthView.selectViewCenter();
+      break;
+    case "KeyF":
+      event.preventDefault();
+      earthView.toggleSurface();
+      break;
+    default:
+      break;
+  }
 }
 
 function populateSources() {
@@ -237,15 +420,14 @@ ui.range.addEventListener("input", () => {
   ui.range.style.setProperty("--progress", `${Number(ui.range.value) / 777_000 * 100}%`);
 });
 ui.range.addEventListener("change", () => {
-  const state = profiler.measure("simMs", () => engine.seek(Number(ui.range.value)));
-  profiler.measure("uiMs", () => updateInterface(state, true, true));
-  requestFrame();
+  seekTimeline(Number(ui.range.value));
 });
-ui.speedSelect.addEventListener("change", () => { speed = Number(ui.speedSelect.value) || 100; });
+ui.speedSelect.addEventListener("change", () => { setSpeed(Number(ui.speedSelect.value) || 100); });
 ui.perfHud?.addEventListener("toggle", () => { if (ui.perfHud.open) updatePerformanceHud(performance.now(), true); });
-ui.sourcesButton.addEventListener("click", () => ui.sourcesModal.classList.add("is-open"));
-ui.sourcesClose.addEventListener("click", () => ui.sourcesModal.classList.remove("is-open"));
-ui.sourcesModal.addEventListener("click", (event) => { if (event.target === ui.sourcesModal) ui.sourcesModal.classList.remove("is-open"); });
+ui.sourcesButton.addEventListener("click", (event) => openSources(event.currentTarget));
+ui.sourcesButtonMobile?.addEventListener("click", (event) => openSources(event.currentTarget));
+ui.sourcesClose.addEventListener("click", closeSources);
+ui.sourcesModal.addEventListener("click", (event) => { if (event.target === ui.sourcesModal) closeSources(); });
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -254,6 +436,9 @@ document.addEventListener("visibilitychange", () => {
     requestFrame();
   }
 });
+addEventListener("keydown", handleKeyboardControl);
+addEventListener("gamepadconnected", () => requestFrame());
+addEventListener("gamepaddisconnected", () => requestFrame());
 
 function frame(now) {
   rafId = null;
@@ -278,13 +463,16 @@ function frame(now) {
       }
     }
   }
+  gamepad.update(deltaSeconds);
   const needsAnotherFrame = earthView.render(deltaSeconds, now);
   profiler.record("renderMs", earthView.diagnostics().renderMs);
   updatePerformanceHud(now);
-  if (playing || needsAnotherFrame) requestFrame();
+  if (playing || needsAnotherFrame || gamepad.connected) requestFrame();
 }
 
 populateSources();
+updateInteractionHint("DRAG · ZOOM · SELECT");
+setSpeed(speed);
 updateInterface(engine.snapshot(), true);
 updatePerformanceHud(performance.now(), true);
 
