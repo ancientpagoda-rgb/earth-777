@@ -1,5 +1,6 @@
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
+const coordinateToken = (value) => `${Number(value) < 0 ? "m" : ""}${Math.abs(Number(value)).toFixed(3).replace(".", "p")}`;
 
 export const GMRT_PATCH_SOURCE_ID = "gmrt-4.5.0";
 export const GMRT_GRIDSERVER_BASE = "https://www.gmrt.org/services/GridServer";
@@ -16,7 +17,7 @@ export function gmrtPatchTileFor(latitude, longitude, tileDegrees = GMRT_PATCH_T
   const north = Math.min(90, south + size);
   const east = west + size;
   return Object.freeze({
-    id: `gmrt-${south.toFixed(3)}-${west.toFixed(3)}-${size.toFixed(3)}`.replace(/\./g, "p").replace(/-/g, "m"),
+    id: `gmrt-${coordinateToken(south)}-${coordinateToken(west)}-${coordinateToken(size)}`,
     south,
     north,
     west,
