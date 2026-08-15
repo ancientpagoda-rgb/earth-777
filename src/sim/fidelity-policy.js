@@ -19,8 +19,7 @@ const BASE_NODES = Object.freeze([
   { id: "herbivores", localUncertainty: 0.56, evidence: "energy-limited biomass coupled to species lineages" },
   { id: "carnivores", localUncertainty: 0.60, evidence: "prey-supported biomass coupled to species lineages" },
   { id: "evolution", localUncertainty: 0.70, evidence: "open anonymous lineage adaptation, competition, speciation and extinction" },
-  { id: "hominins", localUncertainty: 0.70, evidence: "species-resolved hominin lineage ecology and trait evolution" },
-  { id: "culture", localUncertainty: 0.78, evidence: "population-linked innovation, cultural loss, communication, tools and fire reliance" },
+  { id: "hominins", localUncertainty: 0.70, evidence: "species-resolved hominin lineage ecology with culture/tool traits internal to the lineage model" },
   { id: "magnetism", localUncertainty: 0.40, evidence: "reversal chronology constrained; secular field dynamics provisional" }
 ]);
 
@@ -72,8 +71,6 @@ const EDGES = Object.freeze([
   { from: "herbivores", to: "hominins", strength: 0.44 },
   { from: "evolution", to: "hominins", strength: 0.24 },
   { from: "climate", to: "hominins", strength: 0.40 },
-  { from: "hominins", to: "culture", strength: 0.92 },
-  { from: "culture", to: "hominins", strength: 0.46 },
   { from: "magnetism", to: "hominins", strength: 0.05 }
 ]);
 
@@ -81,21 +78,21 @@ const SENSITIVITY = Object.freeze({
   orbit: 0.92, geology: 0.54, tectonics: 0.72, carbon: 0.94, methane: 0.82, nitrogen: 0.76,
   climate: 1.00, ocean: 0.92, ice: 0.95, seaLevel: 0.72, hydrology: 0.88,
   vegetation: 0.84, herbivores: 0.64, carnivores: 0.52, evolution: 0.66,
-  hominins: 0.66, culture: 0.54, magnetism: 0.24
+  hominins: 0.66, magnetism: 0.24
 });
 
 const COMPUTE_COST = Object.freeze({
   orbit: 0.12, geology: 0.16, tectonics: 0.34, carbon: 0.36, methane: 0.24, nitrogen: 0.28,
   climate: 1.00, ocean: 0.48, ice: 0.82, seaLevel: 0.34, hydrology: 0.72,
   vegetation: 0.64, herbivores: 0.62, carnivores: 0.68, evolution: 0.78,
-  hominins: 0.88, culture: 0.56, magnetism: 0.42
+  hominins: 0.88, magnetism: 0.42
 });
 
 function localUncertaintyFor(node, state) {
   if (node.id === "seaLevel" && Number.isFinite(state?.seaLevelUncertainty)) {
     return clamp01(0.18 + state.seaLevelUncertainty / 45);
   }
-  if (["climate", "hydrology", "vegetation", "ocean", "tectonics", "evolution", "hominins", "culture"].includes(node.id)) {
+  if (["climate", "hydrology", "vegetation", "ocean", "tectonics", "evolution", "hominins"].includes(node.id)) {
     const elapsed = clamp01((state?.elapsedYears ?? 0) / 777_000);
     const divergencePenalty = node.id === "climate" ? 0.18
       : node.id === "hydrology" ? 0.24
@@ -125,7 +122,6 @@ function activityFor(id, state) {
     case "carnivores": return clamp01(0.40 + Math.abs(Math.log(Math.max(1e-6, state?.carnivoreBiomass ?? 1))) * 0.7);
     case "evolution": return clamp01(0.42 + Math.min(0.45, (state?.speciesRichness ?? 12) / 80) + Math.min(0.25, state?.evolutionaryNoveltyIndex ?? 0));
     case "hominins": return clamp01(0.42 + Math.abs(Math.log(Math.max(1e-6, state?.homininPopulationIndex ?? 1))) * 0.55 + Math.min(0.2, (state?.homininSpeciesRichness ?? 2) / 20));
-    case "culture": return clamp01(0.28 + (state?.cultureIndex ?? 0) * 0.36 + (state?.technologyIndex ?? 0) * 0.28 + (state?.communicationIndex ?? 0) * 0.18);
     case "magnetism": return clamp01(0.28 + Math.abs(1 - (state?.magneticStrength ?? 1)) * 0.72);
     default: return 0.55;
   }

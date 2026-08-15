@@ -55,11 +55,13 @@ test("Free Earth actually executes CWF-selected substeps", () => {
   assert.ok((diagnostics.executedSubsteps[refined.id] ?? 0) > diagnostics.executedSubsteps.orbit);
 });
 
-test("fidelity changes do not reshuffle the exogenous event random stream", () => {
+test("event log contains only state-triggered events and stays stable across fidelity budgets", () => {
   const low = new FreeEarthEngine(12345, { fidelityBudget: 0.5 }).advance(12_000);
   const high = new FreeEarthEngine(12345, { fidelityBudget: 2 }).advance(12_000);
 
   assert.deepEqual(low.events, high.events);
+  assert.ok(low.events.length > 0);
+  assert.ok(low.events.every((event) => /Matuyama–Brunhes/.test(event.text)));
 });
 
 test("adaptive Free Earth remains deterministic for the same seed and runtime policy", () => {
