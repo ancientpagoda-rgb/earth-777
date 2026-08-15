@@ -1,7 +1,9 @@
+import { RECONSTRUCTION_STREAMS } from "./ReconstructionAssimilation.js";
+
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const positiveSigma = (value) => finite(value) && Number(value) > 0 ? Number(value) : null;
 
-export const GIA_777_POLICY = "gravitational-topographic-relative-sea-level-decomposition-v1";
+export const GIA_777_POLICY = "gravitational-topographic-relative-sea-level-decomposition-v2";
 
 export const GIA_777_MODEL_REFERENCE = Object.freeze({
   sourceId: "selen4",
@@ -38,12 +40,16 @@ export function gia777RelativeSeaLevelSample({
 
   const localGiaCorrectionMeters = seaSurface - solidEarth;
   const relativeSeaLevelMetersVsModern = eustatic + localGiaCorrectionMeters;
+  const targetSeaSurfaceMetersVsModern = eustatic + seaSurface;
   const eustaticSigma = positiveSigma(globalEustaticSigmaMeters);
   const solidSigma = positiveSigma(solidEarthSigmaMeters);
   const seaSigma = positiveSigma(localSeaSurfaceSigmaMeters);
   const localUncertaintyComplete = solidSigma != null && seaSigma != null;
   const totalSigmaMeters = eustaticSigma != null && localUncertaintyComplete
     ? Math.hypot(eustaticSigma, solidSigma, seaSigma)
+    : null;
+  const seaSurfaceDatumSigmaMeters = eustaticSigma != null && seaSigma != null
+    ? Math.hypot(eustaticSigma, seaSigma)
     : null;
 
   const hasLocalCorrection = Math.abs(localGiaCorrectionMeters) > 1e-12;
@@ -60,6 +66,8 @@ export function gia777RelativeSeaLevelSample({
     solidEarthSigmaMeters: solidSigma,
     localSeaSurfaceTargetMinusEustaticMeters: seaSurface,
     localSeaSurfaceSigmaMeters: seaSigma,
+    targetSeaSurfaceMetersVsModern,
+    targetSeaSurfaceSigmaMeters: seaSurfaceDatumSigmaMeters,
     localGiaCorrectionMeters,
     relativeSeaLevelMetersVsModern,
     sigmaMeters: totalSigmaMeters,
@@ -72,6 +80,35 @@ export function gia777RelativeSeaLevelSample({
         ? "local-correction-supplied-without-verified-sle-solver"
         : "global-eustatic-only-local-gia-unresolved",
     note: note ?? "The default zero local correction is a neutral placeholder, not evidence that GIA was zero at 777 ka. Local relative sea level requires both sea-surface/gravity response and solid-Earth displacement."
+  });
+}
+
+/** Component to add to a modern solid-bed anchor before target-epoch shoreline testing. */
+export function gia777BedrockHindcastComponent(giaSample) {
+  if (!giaSample || !finite(giaSample.solidEarthTargetMinusModernMeters)) return null;
+  return Object.freeze({
+    value: Number(giaSample.solidEarthTargetMinusModernMeters),
+    sigma: positiveSigma(giaSample.solidEarthSigmaMeters),
+    stream: RECONSTRUCTION_STREAMS.PROCESS,
+    sourceId: giaSample.sourceId ?? "gia-777-unresolved",
+    method: `${giaSample.method ?? "GIA"}: solid-Earth target-minus-modern displacement`,
+    transformed: true,
+    note: "This is only the GIA solid-Earth component. Other tectonic, erosion/deposition and dynamic-topography corrections remain separate."
+  });
+}
+
+/** Sea-surface datum to compare against a target-epoch solid-bed elevation. */
+export function gia777SeaSurfaceDatum(giaSample) {
+  if (!giaSample || !finite(giaSample.targetSeaSurfaceMetersVsModern)) return null;
+  const sigma = positiveSigma(giaSample.targetSeaSurfaceSigmaMeters);
+  return Object.freeze({
+    meanMetersVsModern: Number(giaSample.targetSeaSurfaceMetersVsModern),
+    sigmaMeters: sigma,
+    lower95MetersVsModern: sigma == null ? null : Number(giaSample.targetSeaSurfaceMetersVsModern) - 1.96 * sigma,
+    upper95MetersVsModern: sigma == null ? null : Number(giaSample.targetSeaSurfaceMetersVsModern) + 1.96 * sigma,
+    sourceId: giaSample.sourceId ?? "gia-777-unresolved",
+    method: `${giaSample.method ?? "GIA"}: eustatic plus local sea-surface/gravity perturbation`,
+    solverExecuted: Boolean(giaSample.solverExecuted)
   });
 }
 
