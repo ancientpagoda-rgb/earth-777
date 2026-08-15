@@ -1,6 +1,7 @@
 import { TerrainChunkManager } from "./TerrainChunkManager.js";
 import { SurfaceEcologyManager } from "./SurfaceEcologyManager.js";
 import { SurfaceBuiltEnvironmentManager } from "./SurfaceBuiltEnvironmentManager.js";
+import { WorldStreamScheduler } from "../sim/WorldStreamScheduler.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -39,6 +40,24 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceScienceStatus = "provisional";
     this.surfaceContextActive = false;
     this.lastSurfaceContext = null;
+
+    this.worldScheduler = new WorldStreamScheduler({ budgetMs: 2.5 });
+    this.worldScheduler.registerSystem({
+      id: "surface-terrain",
+      scope: "observed",
+      priority: 100,
+      maxSliceMs: 1.45,
+      hasWork: () => this.queue.length > 0,
+      run: ({ sliceMs }) => TerrainChunkManager.prototype.pump.call(this, sliceMs)
+    });
+    this.worldScheduler.registerSystem({
+      id: "surface-ecology",
+      scope: "observed",
+      priority: 90,
+      maxSliceMs: 1.15,
+      hasWork: () => (this.surfaceEcology?.queue?.length ?? 0) > 0,
+      run: ({ sliceMs }) => this.surfaceEcology?.pump(sliceMs) ?? 0
+    });
   }
 
   setScienceProviders({ hydrology = this.hydrology, vegetation = this.vegetation, spatialDetail = this.spatialDetail } = {}) {
@@ -59,6 +78,13 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const next = Boolean(active);
     const changed = next !== this.surfaceContextActive;
     this.surfaceContextActive = next;
+    if (this.origin) {
+      this.worldScheduler.setFocus({
+        latitude: this.origin.latitude,
+        longitude: this.origin.longitude,
+        mode: next ? "surface" : "globe"
+      });
+    }
     if (next && refresh && (changed || this.origin)) this._refreshSurfaceContext();
     return changed;
   }
@@ -106,6 +132,11 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
 
   setOrigin(latitude, longitude) {
     super.setOrigin(latitude, longitude);
+    this.worldScheduler.setFocus({
+      latitude: this.origin.latitude,
+      longitude: this.origin.longitude,
+      mode: this.surfaceContextActive ? "surface" : "globe"
+    });
     if (this.surfaceContextActive) this._refreshSurfaceContext();
   }
 
@@ -121,12 +152,22 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   update(cameraPosition) {
     super.update(cameraPosition);
     this.surfaceEcology.update(cameraPosition);
+    if (this.origin) {
+      const focus = this._geographicAt(cameraPosition.x, cameraPosition.z);
+      this.worldScheduler.setFocus({ latitude: focus.latitude, longitude: focus.longitude, mode: "surface" });
+    }
   }
 
   pump(budgetMs = 2.5) {
-    const terrainWork = super.pump(Math.max(0.5, budgetMs * 0.62));
-    const ecologyWork = this.surfaceEcology.pump(Math.max(0.35, budgetMs * 0.38));
-    return terrainWork + ecologyWork;
+    const result = this.worldScheduler.pump({
+      budgetMs: Math.max(0.1, budgetMs),
+      context: Object.freeze({
+        terrainQueuedChunks: this.queue.length,
+        ecologyQueuedChunks: this.surfaceEcology?.queue?.length ?? 0,
+        spatialDetail: this.spatialDetail
+      })
+    });
+    return result.workUnits;
   }
 
   hasPendingWork() {
@@ -143,6 +184,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       terrainQueuedChunks: terrain.queuedChunks,
       ecology,
       builtEnvironment,
+      worldStreaming: this.worldScheduler.diagnostics(),
       surfaceScienceStatus: this.surfaceScienceStatus,
       surfaceContextActive: this.surfaceContextActive,
       hydrologyProvider: Boolean(this.hydrology),
@@ -164,6 +206,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceBuiltEnvironment?.dispose();
     this.surfaceBuiltEnvironment = null;
     this.lastSurfaceContext = null;
+    this.worldScheduler = null;
     super.dispose();
   }
 }
