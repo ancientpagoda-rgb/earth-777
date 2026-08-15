@@ -1,5 +1,6 @@
 import { advanceHomininDemography, initializeHomininDemography } from "./HomininDemography.js";
 import { inheritDemographyForChildren } from "./HomininDemographicInheritance.js";
+import { advanceHomininSocialOrganization, initializeHomininSocialOrganization } from "./HomininSocialOrganization.js";
 import { publishHomininDemography } from "./DemographyTelemetry.js";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
@@ -53,6 +54,7 @@ export function initializeHomininLineages(state, seed = 777001) {
   state.technologyIndex ??= state.homininLineages.reduce((sum, lineage) => sum + lineage.toolComplexity, 0) / state.homininLineages.length;
   state.communicationIndex ??= state.homininLineages.reduce((sum, lineage) => sum + lineage.communication, 0) / state.homininLineages.length;
   initializeHomininDemography(state, seed);
+  initializeHomininSocialOrganization(state, seed);
   publishHomininDemography(state);
   return state;
 }
@@ -158,6 +160,7 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
   state.communicationIndex = weighted("communication");
   state.fireUseIndex = weighted("fireReliance");
   advanceHomininDemography(state, dt, random);
+  advanceHomininSocialOrganization(state, dt);
   publishHomininDemography(state);
   return state;
 }

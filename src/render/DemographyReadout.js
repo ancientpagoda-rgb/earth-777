@@ -11,7 +11,10 @@ function update() {
   const state = globalThis[HOMININ_DEMOGRAPHY_TELEMETRY_KEY];
   if (!readout || !state || !Number.isFinite(state.populationPersons)) return;
   const text = Math.round(state.populationPersons).toLocaleString();
-  const title = `${state.speciesRichness.toLocaleString()} lineage${state.speciesRichness === 1 ? "" : "s"} · ${state.demeCount.toLocaleString()} demes · births ${Math.round(state.birthsPerYear).toLocaleString()}/yr · deaths ${Math.round(state.deathsPerYear).toLocaleString()}/yr · net ${signedPercent(state.growthPerYear)}`;
+  const social = Number.isFinite(state.householdCount)
+    ? ` · ${state.householdCount.toLocaleString()} households · ${state.residentialGroupCount.toLocaleString()} residential groups · ${state.activeSiteCount.toLocaleString()} occupied sites (${state.persistentSiteCount.toLocaleString()} persistent) · largest co-resident site ${state.largestSitePopulationPersons.toLocaleString()} · ${state.exchangeEdgeCount.toLocaleString()} exchange ties`
+    : "";
+  const title = `${state.speciesRichness.toLocaleString()} lineage${state.speciesRichness === 1 ? "" : "s"} · ${state.demeCount.toLocaleString()} demes${social} · births ${Math.round(state.birthsPerYear).toLocaleString()}/yr · deaths ${Math.round(state.deathsPerYear).toLocaleString()}/yr · net ${signedPercent(state.growthPerYear)}`;
   if (readout.textContent !== text) readout.textContent = text;
   if (readout.title !== title) readout.title = title;
 }
