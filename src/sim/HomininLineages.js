@@ -1,3 +1,7 @@
+import { advanceHomininDemography, initializeHomininDemography } from "./HomininDemography.js";
+import { inheritDemographyForChildren } from "./HomininDemographicInheritance.js";
+import { publishHomininDemography } from "./DemographyTelemetry.js";
+
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-dtYears / tauYears));
@@ -48,6 +52,8 @@ export function initializeHomininLineages(state, seed = 777001) {
   state.cultureIndex ??= state.homininLineages.reduce((sum, lineage) => sum + lineage.cumulativeCulture, 0) / state.homininLineages.length;
   state.technologyIndex ??= state.homininLineages.reduce((sum, lineage) => sum + lineage.toolComplexity, 0) / state.homininLineages.length;
   state.communicationIndex ??= state.homininLineages.reduce((sum, lineage) => sum + lineage.communication, 0) / state.homininLineages.length;
+  initializeHomininDemography(state, seed);
+  publishHomininDemography(state);
   return state;
 }
 
@@ -135,7 +141,10 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
     }
   }
 
-  if (children.length) state.homininLineages.push(...children);
+  if (children.length) {
+    state.homininLineages.push(...children);
+    inheritDemographyForChildren(state, children);
+  }
   const survivors = state.homininLineages.filter((lineage) => lineage.extinctionYearBP == null && lineage.populationIndex > 0);
   const totalPopulation = survivors.reduce((sum, lineage) => sum + lineage.populationIndex, 0);
   state.homininSpeciesRichness = survivors.length;
@@ -148,5 +157,7 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
   state.technologyIndex = weighted("toolComplexity");
   state.communicationIndex = weighted("communication");
   state.fireUseIndex = weighted("fireReliance");
+  advanceHomininDemography(state, dt, random);
+  publishHomininDemography(state);
   return state;
 }
