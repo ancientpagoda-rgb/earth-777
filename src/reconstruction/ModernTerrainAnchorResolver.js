@@ -3,7 +3,7 @@ import { topographyEvidenceSourceById } from "./TopographyEvidenceSources.js";
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 
-export const MODERN_TERRAIN_ANCHOR_POLICY = "best-local-anchor-correlated-source-selection-v1";
+export const MODERN_TERRAIN_ANCHOR_POLICY = "best-local-anchor-correlated-source-selection-v2";
 
 export const BATHYMETRY_SOURCE_CLASS = Object.freeze({
   LAND: "land",
@@ -12,21 +12,31 @@ export const BATHYMETRY_SOURCE_CLASS = Object.freeze({
   SEISMIC: "seismic",
   ISOLATED_SOUNDING: "isolated-sounding",
   ENC_SOUNDING: "enc-sounding",
-  INTERPOLATED: "interpolated",
-  PREDICTED: "predicted",
+  LIDAR: "bathymetric-lidar",
+  OPTICAL: "optical-depth",
+  DIRECT_MIXED: "direct-measurement-mix",
+  INTERPOLATED: "interpolated-or-contour-derived",
+  PREDICTED: "gravity-predicted",
+  INDIRECT_OBSERVED: "indirect-observed",
+  MIXED_GRID: "mixed-pre-generated-grid",
   UNKNOWN: "unknown"
 });
 
 const SOURCE_CLASS_PRIOR = Object.freeze({
   [BATHYMETRY_SOURCE_CLASS.MULTIBEAM]: 1.00,
+  [BATHYMETRY_SOURCE_CLASS.LIDAR]: 0.98,
+  [BATHYMETRY_SOURCE_CLASS.DIRECT_MIXED]: 0.97,
   [BATHYMETRY_SOURCE_CLASS.SINGLEBEAM]: 0.94,
   [BATHYMETRY_SOURCE_CLASS.SEISMIC]: 0.91,
+  [BATHYMETRY_SOURCE_CLASS.OPTICAL]: 0.90,
   [BATHYMETRY_SOURCE_CLASS.ENC_SOUNDING]: 0.89,
   [BATHYMETRY_SOURCE_CLASS.ISOLATED_SOUNDING]: 0.84,
+  [BATHYMETRY_SOURCE_CLASS.INDIRECT_OBSERVED]: 0.79,
   [BATHYMETRY_SOURCE_CLASS.LAND]: 0.82,
   [BATHYMETRY_SOURCE_CLASS.INTERPOLATED]: 0.66,
   [BATHYMETRY_SOURCE_CLASS.PREDICTED]: 0.58,
-  [BATHYMETRY_SOURCE_CLASS.UNKNOWN]: 0.62
+  [BATHYMETRY_SOURCE_CLASS.MIXED_GRID]: 0.61,
+  [BATHYMETRY_SOURCE_CLASS.UNKNOWN]: 0.56
 });
 
 const SOURCE_ROLE_PRIOR = Object.freeze({
@@ -75,6 +85,7 @@ function preferredSolidBed(candidate, latitude) {
   return 1;
 }
 
+/** GEBCO 2026 Type Identifier (TID) classes. */
 export function gebcoTidSourceClass(tid) {
   const value = Number(tid);
   if (value === 0) return BATHYMETRY_SOURCE_CLASS.LAND;
@@ -83,8 +94,14 @@ export function gebcoTidSourceClass(tid) {
   if (value === 12) return BATHYMETRY_SOURCE_CLASS.SEISMIC;
   if (value === 13) return BATHYMETRY_SOURCE_CLASS.ISOLATED_SOUNDING;
   if (value === 14) return BATHYMETRY_SOURCE_CLASS.ENC_SOUNDING;
-  if (value >= 40 && value < 50) return BATHYMETRY_SOURCE_CLASS.INTERPOLATED;
-  if (value >= 50) return BATHYMETRY_SOURCE_CLASS.PREDICTED;
+  if (value === 15) return BATHYMETRY_SOURCE_CLASS.LIDAR;
+  if (value === 16) return BATHYMETRY_SOURCE_CLASS.OPTICAL;
+  if (value === 17) return BATHYMETRY_SOURCE_CLASS.DIRECT_MIXED;
+  if (value === 40 || value === 45) return BATHYMETRY_SOURCE_CLASS.PREDICTED;
+  if ([41, 42, 43, 44].includes(value)) return BATHYMETRY_SOURCE_CLASS.INTERPOLATED;
+  if ([46, 47, 48].includes(value)) return BATHYMETRY_SOURCE_CLASS.INDIRECT_OBSERVED;
+  if (value === 70) return BATHYMETRY_SOURCE_CLASS.MIXED_GRID;
+  if (value === 71 || value === 72) return BATHYMETRY_SOURCE_CLASS.UNKNOWN;
   return BATHYMETRY_SOURCE_CLASS.UNKNOWN;
 }
 
@@ -139,6 +156,6 @@ export function resolveModernTerrainAnchor(candidates = [], options = {}) {
     selected,
     ranked: Object.freeze(ranked),
     candidateCount: ranked.length,
-    rule: "Select the strongest local modern anchor; do not statistically fuse overlapping global compilations as independent measurements. Direct survey provenance and solid-bed polar geometry are preferred over interpolated/predicted or ice-surface products."
+    rule: "Select the strongest local modern anchor; do not statistically fuse overlapping global compilations as independent measurements. Direct survey provenance and solid-bed polar geometry are preferred over interpolated/predicted, mixed-grid, unknown-source or ice-surface products."
   });
 }
