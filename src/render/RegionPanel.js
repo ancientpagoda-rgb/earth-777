@@ -16,6 +16,7 @@ function latitudeLabel(latitude) {
 export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer, hydroClimate, vegetation, spatialDetail }) {
   const region = regionalState(state, latitude, longitude, { climateLayer, hydroClimate, vegetation, spatialDetail });
   const river = hydroClimate?.networkSample?.(state, latitude, longitude, spatialDetail) ?? null;
+  const waterSystem = hydroClimate?.groundwaterLakeSample?.(state, latitude, longitude, spatialDetail) ?? null;
   const tectonics = tectonicSampleAt(state, latitude, longitude, state.seed);
   const topographyOffsetMeters = tectonicElevationOffsetMeters(state, latitude, longitude, state.seed);
   const evolvedElevationMeters = bedrockElevationAt(latitude, longitude) + topographyOffsetMeters;
@@ -23,10 +24,13 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
   const pft = ocean.isOcean ? null : vegetation?.pftDiagnostics?.(state, latitude, longitude, spatialDetail) ?? null;
   const latLabel = `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
   const lonLabel = `${Math.abs(longitude).toFixed(1)}°${longitude >= 0 ? "E" : "W"}`;
+  const localLake = Number(waterSystem?.lakeCoverageFraction) > 0.005;
 
   ui.locationTitle.textContent = ocean.isOcean
     ? "branch ocean"
-    : pft?.succession?.biomeLabel ?? region.hydroclimatePotentialBiome ?? region.biome;
+    : localLake
+      ? waterSystem.lakeSpilling ? "overflowing branch lake" : "closed branch lake"
+      : pft?.succession?.biomeLabel ?? region.hydroclimatePotentialBiome ?? region.biome;
 
   const details = [`mean annual temperature ${signed(region.annualTemperature, 1)} °C`];
   if (Number.isFinite(region.annualPrecipitation)) details.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
@@ -71,6 +75,23 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
     else if (region.soilStatus && region.soilStatus !== "unavailable") details.push(`BIOME4 soil ${region.soilStatus} · fallback bucket`);
     if (Number.isFinite(region.surfaceRunoff)) details.push(`surface runoff ${Math.round(region.surfaceRunoff).toLocaleString()} mm/yr`);
     if (Number.isFinite(region.deepDrainage)) details.push(`deep drainage ${Math.round(region.deepDrainage).toLocaleString()} mm/yr`);
+    if (waterSystem) {
+      const groundwaterBits = [];
+      if (Number.isFinite(waterSystem.baseflowMmPerYear)) groundwaterBits.push(`baseflow ${waterSystem.baseflowMmPerYear.toFixed(1)} mm/yr`);
+      if (Number.isFinite(waterSystem.baseflowFraction)) groundwaterBits.push(`${Math.round(waterSystem.baseflowFraction * 100)}% of routed flow`);
+      if (Number.isFinite(waterSystem.groundwaterStorageChangeMmPerYear)) groundwaterBits.push(`aquifer storage ${signed(waterSystem.groundwaterStorageChangeMmPerYear, 1)} mm/yr`);
+      if (Number.isFinite(waterSystem.groundwaterResidenceTimeYears)) groundwaterBits.push(`residence ~${Math.round(waterSystem.groundwaterResidenceTimeYears).toLocaleString()} yr`);
+      if (groundwaterBits.length) details.push(`groundwater ${groundwaterBits.join(" · ")}`);
+      if (localLake) {
+        const lakeBits = [];
+        if (Number.isFinite(waterSystem.lakeAreaKm2)) lakeBits.push(`area ${Math.round(waterSystem.lakeAreaKm2).toLocaleString()} km²`);
+        if (Number.isFinite(waterSystem.lakeDepthMeters)) lakeBits.push(`local depth ${waterSystem.lakeDepthMeters.toFixed(1)} m`);
+        if (Number.isFinite(waterSystem.lakeFillFraction)) lakeBits.push(`fill ${Math.round(waterSystem.lakeFillFraction * 100)}%`);
+        if (Number.isFinite(waterSystem.lakeEvaporationM3PerYear)) lakeBits.push(`evap ${Math.round(waterSystem.lakeEvaporationM3PerYear).toLocaleString()} m³/yr`);
+        if (waterSystem.lakeSpilling && Number.isFinite(waterSystem.lakeOverflowM3PerYear)) lakeBits.push(`spill ${Math.round(waterSystem.lakeOverflowM3PerYear).toLocaleString()} m³/yr`);
+        if (lakeBits.length) details.push(`lake ${lakeBits.join(" · ")}`);
+      }
+    }
     if (Number.isFinite(region.runoffPotential) && !Number.isFinite(region.surfaceRunoff)) details.push(`local runoff ${Math.round(region.runoffPotential).toLocaleString()} mm/yr`);
     if (Number.isFinite(region.npp)) details.push(`BIOME4 NPP ${region.npp.toFixed(1)} source units`);
     if (Number.isFinite(region.lai)) details.push(`LAI ${region.lai.toFixed(2)}`);
@@ -102,11 +123,13 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
 
   ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${details.join(" · ")}.`;
   const routingNote = river && !ocean.isOcean
-    ? ` · ${river.spacingDegrees}° accumulating network · global forcing coverage ${Math.round((river.globalClimateForcingFraction ?? river.globalClimateForcingCoverageFraction) * 100)}% · water closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}${Number.isFinite(river.sedimentRelativeClosureError) ? ` · sediment closure ${Math.abs(river.sedimentRelativeClosureError).toExponential(1)}` : ""}`
+    ? ` · ${river.spacingDegrees}° accumulating network · global forcing coverage ${Math.round((river.globalClimateForcingFraction ?? river.globalClimateForcingCoverageFraction) * 100)}% · river closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}${Number.isFinite(river.sedimentRelativeClosureError) ? ` · sediment closure ${Math.abs(river.sedimentRelativeClosureError).toExponential(1)}` : ""}${Number.isFinite(waterSystem?.waterSystemRelativeClosureError) ? ` · full water closure ${Math.abs(waterSystem.waterSystemRelativeClosureError).toExponential(1)}` : ""}`
     : "";
   const oceanNote = ocean.isOcean ? ` · ${ocean.policy}` : "";
   const atmosphereNote = region.atmospherePolicy ? ` · ${region.atmospherePolicy}` : "";
   const landSurfaceNote = region.landSurfacePolicy ? ` · ${region.landSurfacePolicy}` : "";
   const geomorphologyNote = river?.geomorphologyPolicy ? ` · ${river.geomorphologyPolicy}` : "";
-  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}${geomorphologyNote}`;
+  const groundwaterNote = waterSystem?.groundwaterPolicy ? ` · ${waterSystem.groundwaterPolicy}` : "";
+  const lakeNote = waterSystem?.lakePolicy ? ` · ${waterSystem.lakePolicy}` : "";
+  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}${geomorphologyNote}${groundwaterNote}${lakeNote}`;
 }

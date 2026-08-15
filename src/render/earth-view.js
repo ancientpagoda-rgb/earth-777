@@ -112,17 +112,20 @@ export class EarthView {
   setHydroClimate(hydroClimate, spatialDetail = this.spatialDetail, refresh = true) {
     this.hydroClimate = hydroClimate;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
+    this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
   setVegetation(vegetation, spatialDetail = this.spatialDetail, refresh = true) {
     this.vegetation = vegetation;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
+    this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
 
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
+    this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     this.terrain.setEarthSystemState?.(state, state.seed);
     this.applyPerformanceSettings(false);
     const now = performance.now();
@@ -136,7 +139,26 @@ export class EarthView {
   _requestCloudRaster(state) { requestCloudRaster(this, state); }
 
   updateSurfaceWater() {
-    this.surfaceWater.position.y = (this.lastState.seaLevel - this.terrain.baseElevationMeters) / 1000 * this.terrain.verticalScale;
+    if (!this.terrain.origin) return;
+    const { latitude, longitude } = this.terrain.origin;
+    const waterSystem = this.hydroClimate?.groundwaterLakeSample?.(this.lastState, latitude, longitude, this.spatialDetail) ?? null;
+    const lakeSurface = Number(waterSystem?.lakeSurfaceElevationMeters);
+    const lakeCoverage = Number(waterSystem?.lakeCoverageFraction) || 0;
+    const lakeAreaKm2 = Number(waterSystem?.lakeAreaKm2) || 0;
+    const hasLake = Number.isFinite(lakeSurface) && lakeCoverage > 0.005 && lakeAreaKm2 > 0;
+    const surfaceElevationMeters = hasLake ? lakeSurface : Number(this.lastState.seaLevel) || 0;
+    this.surfaceWater.position.set(0, (surfaceElevationMeters - this.terrain.baseElevationMeters) / 1000 * this.terrain.verticalScale, 0);
+    if (hasLake) {
+      const diameterKm = 2 * Math.sqrt(lakeAreaKm2 / Math.PI);
+      const scale = clamp(diameterKm / 220, 0.0025, 1);
+      this.surfaceWater.scale.set(scale, scale, scale);
+      this.surfaceWater.userData.waterBody = "lake";
+      this.surfaceWater.userData.lakeCoverageFraction = lakeCoverage;
+    } else {
+      this.surfaceWater.scale.set(1, 1, 1);
+      this.surfaceWater.userData.waterBody = "ocean";
+      this.surfaceWater.userData.lakeCoverageFraction = 0;
+    }
   }
 
   applyPerformanceSettings(force = false) {

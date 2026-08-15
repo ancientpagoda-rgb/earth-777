@@ -7,6 +7,7 @@ import { checkpointState } from "../src/data/checkpoint-777.js";
 import { Krapp777ClimateLayer } from "../src/data/krapp-777-climate.js";
 import { dynamicSurfaceElevationMeters } from "../src/sim/GeneralAtmosphereCirculation.js";
 import { DYNAMIC_GEOMORPHOLOGY_POLICY } from "../src/sim/DynamicGeomorphology.js";
+import { GROUNDWATER_POLICY, CLOSED_BASIN_LAKE_POLICY } from "../src/sim/GroundwaterLakes.js";
 import { MassConservingHydrology } from "../src/sim/MassConservingHydrology.js";
 import { SpatialHydroClimate } from "../src/sim/SpatialHydroClimate.js";
 import { installEarthSystemHydrologyCoupling } from "../src/sim/EarthSystemHydrology.js";
@@ -49,7 +50,7 @@ test("runtime conserved water balance uses evolving surface elevation", () => {
   assert.ok(Math.abs(sample.elevationMeters - expected) < 0.11);
 });
 
-test("runtime river network closes water and sediment on evolving tectonic plus geomorphic topography", () => {
+test("runtime river network closes groundwater, lakes, routed water and sediment on one evolved topology", () => {
   const hydrology = new MassConservingHydrology(new SpatialHydroClimate(climate));
   const checkpoint = checkpointState();
   const state = {
@@ -64,12 +65,19 @@ test("runtime river network closes water and sediment on evolving tectonic plus 
   const network = hydrology.network(state, 0.1);
   assert.ok(network.geomorphology);
   assert.equal(network.geomorphology.policy, DYNAMIC_GEOMORPHOLOGY_POLICY);
+  assert.equal(network.geomorphology.groundwater.policy, GROUNDWATER_POLICY);
+  assert.equal(network.geomorphology.lakes.policy, CLOSED_BASIN_LAKE_POLICY);
   assert.equal(network.accumulation.massConserved, true);
   assert.equal(network.geomorphology.sedimentMassConserved, true);
+  assert.equal(network.geomorphology.groundwater.massConserved, true);
+  assert.equal(network.geomorphology.waterSystemMassConserved, true);
   assert.ok(Math.abs(network.accumulation.relativeClosureError) < 1e-12);
   assert.ok(Math.abs(network.geomorphology.sedimentRelativeClosureError) < 1e-10);
+  assert.ok(Math.abs(network.geomorphology.groundwater.relativeClosureError) < 1e-10);
+  assert.ok(Math.abs(network.geomorphology.waterSystemRelativeClosureError) <= 2e-6);
   assert.ok(network.geomorphology.generatedSedimentM3PerYear > 0);
   assert.ok(network.geomorphology.maxAbsoluteElevationChangeMeters > 0);
+  assert.ok(network.geomorphology.lakes.lakeCount >= 0);
   assert.match(network.topology.elevationPolicy, /dynamic tectonic surface plus runoff-driven erosion/);
   const regional = hydrology.networkSample(state, 0, 20, 0.1);
   assert.ok(regional);
@@ -77,6 +85,14 @@ test("runtime river network closes water and sediment on evolving tectonic plus 
   assert.equal(regional.routeAcyclic, true);
   assert.equal(regional.networkMassConserved, true);
   assert.equal(regional.sedimentMassConserved, true);
+  const waterSystem = hydrology.groundwaterLakeSample(state, 0, 20, 0.1);
+  assert.ok(waterSystem);
+  assert.equal(waterSystem.groundwaterPolicy, GROUNDWATER_POLICY);
+  assert.equal(waterSystem.lakePolicy, CLOSED_BASIN_LAKE_POLICY);
+  assert.equal(waterSystem.groundwaterMassConserved, true);
+  assert.equal(waterSystem.waterSystemMassConserved, true);
+  assert.ok(Number.isFinite(waterSystem.baseflowMmPerYear));
+  assert.ok(Number.isFinite(waterSystem.groundwaterResidenceTimeYears));
 });
 
 test("browser entrypoint installs Earth-system hydrology coupling before main", () => {
