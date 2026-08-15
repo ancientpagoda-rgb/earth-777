@@ -182,7 +182,7 @@ test("body mass affects observed scale and spacing without changing aggregate po
   assert.ok(large.herds[0].spacingScale > small.herds[0].spacingScale);
 });
 
-test("hunting packs target actual observed herds and face their selected prey", () => {
+test("hunting packs target actual observed herds and spend bounded movement approaching prey", () => {
   const predatorState = {
     ...state,
     herbivoreBiomass: 4,
@@ -194,21 +194,36 @@ test("hunting packs target actual observed herds and face their selected prey", 
   };
   const plan = buildObservedFauna({ state: predatorState, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 123, windowRadiusKm: 4, individualRadiusKm: 4 });
   const herdById = new Map(plan.herds.map((herd) => [herd.id, herd]));
+  const packById = new Map(plan.packs.map((pack) => [pack.id, pack]));
   const targeted = plan.packs.filter((pack) => pack.targetGroupId != null);
 
   assert.ok(targeted.length > 0);
   assert.equal(plan.predatorTargetCount, targeted.length);
+  assert.ok(targeted.some((pack) => pack.approachDistanceKm > 0));
   for (const pack of targeted) {
     const target = herdById.get(pack.targetGroupId);
     assert.ok(target);
     assert.equal(pack.targetLineageId, target.lineageId);
     assert.ok(Number.isFinite(pack.targetDistanceKm));
+    assert.ok(Number.isFinite(pack.targetDistanceBeforeKm));
+    assert.ok(pack.approachDistanceKm >= 0);
+    assert.ok(pack.approachDistanceKm <= pack.movementDistanceKm + 1e-12);
+    assert.ok(pack.targetDistanceKm <= pack.targetDistanceBeforeKm + 1e-12);
+    assert.ok(Math.abs((pack.targetDistanceBeforeKm - pack.approachDistanceKm) - pack.targetDistanceKm) < 1e-10);
+    const clearanceKm = target.radiusKm + pack.radiusKm;
+    if (pack.targetDistanceBeforeKm >= clearanceKm) assert.ok(pack.targetDistanceKm >= clearanceKm - 1e-12);
     const expectedHeading = Math.atan2(target.z - pack.z, target.x - pack.x);
     assert.ok(Math.abs(pack.heading - expectedHeading) < 1e-12);
   }
   const targetedIndividuals = plan.individuals.filter((animal) => animal.role === "carnivore" && animal.targetGroupId != null);
   assert.ok(targetedIndividuals.length > 0);
-  assert.ok(targetedIndividuals.every((animal) => herdById.has(animal.targetGroupId)));
+  for (const animal of targetedIndividuals) {
+    const pack = packById.get(animal.groupId);
+    assert.ok(pack?.targetGroupId);
+    assert.equal(animal.targetGroupId, pack.targetGroupId);
+    assert.equal(animal.targetLineageId, pack.targetLineageId);
+    assert.ok(Math.abs(animal.yaw - pack.heading) < 1e-12);
+  }
   assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
   assert.equal(plan.packs.reduce((sum, pack) => sum + pack.population, 0), plan.visibleCarnivorePopulation);
 });
