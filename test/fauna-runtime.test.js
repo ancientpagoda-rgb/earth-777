@@ -16,6 +16,21 @@ function cell(scope, key, south, north, west, east) {
   return Object.freeze({ scope, key, latitude: (south + north) * 0.5, longitude: (west + east) * 0.5, bounds: Object.freeze({ south, north, west, east }) });
 }
 
+function lineage(overrides = {}) {
+  return {
+    id: 101,
+    extinctionYearBP: null,
+    populationIndex: 1,
+    trophicLevel: 0.2,
+    bodyMassLog10Kg: 1,
+    mobility: 0.5,
+    sociality: 0.5,
+    cognition: 0.5,
+    dietBreadth: 0.5,
+    ...overrides
+  };
+}
+
 test("cell area shrinks toward the poles", () => {
   const equatorial = approximateCellAreaKm2(cell("local", "eq", -0.5, 0.5, 0, 1));
   const polar = approximateCellAreaKm2(cell("local", "polar", 79.5, 80.5, 0, 1));
@@ -48,6 +63,32 @@ test("group behavior is deterministic and moves with simulated time", () => {
   assert.ok(["graze", "drink", "travel", "flee", "rest"].includes(a.behavior));
 });
 
+test("lineage mobility changes movement distance without changing behavior category", () => {
+  const field = faunaPopulationAt({ state, vegetationSample: vegetation, hydrologySample: hydrology, areaKm2: 10 });
+  const slow = faunaGroupBehaviorAt({ role: "herbivore", id: "trait-herd", elapsedYears: 4, field, lineage: lineage({ mobility: 0 }) });
+  const fast = faunaGroupBehaviorAt({ role: "herbivore", id: "trait-herd", elapsedYears: 4, field, lineage: lineage({ mobility: 1 }) });
+
+  assert.equal(slow.behavior, fast.behavior);
+  assert.ok(fast.distanceKm > slow.distanceKm * 1.9);
+});
+
+test("broad diets buffer scarcity-driven travel", () => {
+  const scarceField = { productivity: 0.4, waterAccess: 0.4, predatorPressure: 0, preyPressure: 0.4 };
+  const narrow = faunaGroupBehaviorAt({ role: "herbivore", id: "scarcity-herd", elapsedYears: 4, field: scarceField, lineage: lineage({ dietBreadth: 0 }) });
+  const broad = faunaGroupBehaviorAt({ role: "herbivore", id: "scarcity-herd", elapsedYears: 4, field: scarceField, lineage: lineage({ dietBreadth: 1 }) });
+
+  assert.equal(narrow.behavior, "travel");
+  assert.notEqual(broad.behavior, "travel");
+});
+
+test("cognition modestly changes directional wandering", () => {
+  const field = faunaPopulationAt({ state, vegetationSample: vegetation, hydrologySample: hydrology, areaKm2: 10 });
+  const low = faunaGroupBehaviorAt({ role: "herbivore", id: "cognitive-herd", elapsedYears: 4.125, field, lineage: lineage({ cognition: 0 }) });
+  const high = faunaGroupBehaviorAt({ role: "herbivore", id: "cognitive-herd", elapsedYears: 4.125, field, lineage: lineage({ cognition: 1 }) });
+
+  assert.notEqual(low.heading, high.heading);
+});
+
 test("observed fauna is deterministic for seed, place, and time", () => {
   const options = { state, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 777001, windowRadiusKm: 3, individualRadiusKm: 0.6 };
   const first = buildObservedFauna(options);
@@ -61,8 +102,8 @@ test("observed groups inherit identity from living evolutionary lineages", () =>
   const lineageState = {
     ...state,
     speciesLineages: [
-      { id: 101, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, bodyMassLog10Kg: 2.0 },
-      { id: 202, extinctionYearBP: null, populationIndex: 0.7, trophicLevel: 0.8, bodyMassLog10Kg: 0.7 }
+      lineage({ id: 101, trophicLevel: 0.2, bodyMassLog10Kg: 2.0 }),
+      lineage({ id: 202, populationIndex: 0.7, trophicLevel: 0.8, bodyMassLog10Kg: 0.7 })
     ]
   };
   const plan = buildObservedFauna({ state: lineageState, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 777001, windowRadiusKm: 3, individualRadiusKm: 3 });
@@ -73,6 +114,33 @@ test("observed groups inherit identity from living evolutionary lineages", () =>
   assert.ok(plan.packs.every((group) => group.lineageId === 202));
   assert.ok(plan.individuals.every((animal) => animal.lineageId === (animal.role === "carnivore" ? 202 : 101)));
   assert.deepEqual(new Set(plan.lineageIds), new Set([101, 202]));
+});
+
+test("social lineages form larger, fewer groups without changing represented population", () => {
+  const lowSocialState = { ...state, speciesLineages: [lineage({ sociality: 0 })] };
+  const highSocialState = { ...state, speciesLineages: [lineage({ sociality: 1 })] };
+  const options = { vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 77, windowRadiusKm: 3, individualRadiusKm: 0.2 };
+  const low = buildObservedFauna({ ...options, state: lowSocialState });
+  const high = buildObservedFauna({ ...options, state: highSocialState });
+
+  assert.equal(low.visiblePopulation, high.visiblePopulation);
+  assert.ok(high.herds.length < low.herds.length);
+  assert.ok(high.herds[0].groupSizeScale > low.herds[0].groupSizeScale);
+  assert.equal(low.herds.reduce((sum, herd) => sum + herd.population, 0), low.visiblePopulation);
+  assert.equal(high.herds.reduce((sum, herd) => sum + herd.population, 0), high.visiblePopulation);
+});
+
+test("body mass affects observed scale and spacing without changing aggregate population", () => {
+  const smallState = { ...state, speciesLineages: [lineage({ bodyMassLog10Kg: -0.3 })] };
+  const largeState = { ...state, speciesLineages: [lineage({ bodyMassLog10Kg: 3.0 })] };
+  const options = { vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 88, windowRadiusKm: 2, individualRadiusKm: 2 };
+  const small = buildObservedFauna({ ...options, state: smallState });
+  const large = buildObservedFauna({ ...options, state: largeState });
+
+  assert.equal(small.visiblePopulation, large.visiblePopulation);
+  assert.ok(small.individuals.length > 0 && large.individuals.length > 0);
+  assert.ok(large.individuals[0].scale > small.individuals[0].scale);
+  assert.ok(large.herds[0].spacingScale > small.herds[0].spacingScale);
 });
 
 test("group populations conserve the observed aggregate populations", () => {
