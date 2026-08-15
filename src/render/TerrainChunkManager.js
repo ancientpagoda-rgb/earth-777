@@ -41,8 +41,8 @@ export class TerrainChunkManager {
     this.topographySignature = "none";
     this.geomorphologyPatch = null;
     this.geomorphologySignature = "none";
-    this.contourIntervalMeters = 50;
-    this.contourOpacity = 0.32;
+    this.contourIntervalMeters = 20;
+    this.contourOpacity = 0.50;
     this.contourUniforms = null;
     this.chunks = new Map();
     this.queue = [];
@@ -75,14 +75,17 @@ export class TerrainChunkManager {
           `float contourCoord = vTerrainElevationMeters / max(1.0, uContourIntervalMeters);
 float contourFraction = fract(contourCoord);
 float contourDistance = min(contourFraction, 1.0 - contourFraction);
-float contourAA = max(fwidth(contourCoord) * 1.35, 0.0075);
-float contourLine = 1.0 - smoothstep(0.0, contourAA * 1.8, contourDistance);
-gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * uContourOpacity);
+float contourAA = max(fwidth(contourCoord) * 1.15, 0.011);
+float contourLine = 1.0 - smoothstep(contourAA * 0.35, contourAA * 1.85, contourDistance);
+float contourIndex = floor(abs(contourCoord) + 0.5);
+float majorContour = 1.0 - step(0.01, abs(mod(contourIndex, 5.0)));
+float contourStrength = contourLine * mix(uContourOpacity, min(0.82, uContourOpacity * 1.45), majorContour);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.24, contourStrength);
 #include <dithering_fragment>`
         );
       this.contourUniforms = shader.uniforms;
     };
-    this.material.customProgramCacheKey = () => "earth777-terrain-contours-v1";
+    this.material.customProgramCacheKey = () => "earth777-terrain-contours-v2";
   }
 
   setEarthSystemState(state, seed = state?.seed ?? this.branchSeed) {
@@ -143,8 +146,8 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
   }
 
   setContourSettings({ intervalMeters = this.contourIntervalMeters, opacity = this.contourOpacity } = {}) {
-    this.contourIntervalMeters = Math.max(10, Number(intervalMeters) || 50);
-    this.contourOpacity = clamp(opacity, 0, 0.8);
+    this.contourIntervalMeters = Math.max(5, Number(intervalMeters) || 20);
+    this.contourOpacity = clamp(opacity, 0, 0.85);
     if (this.contourUniforms) {
       this.contourUniforms.uContourIntervalMeters.value = this.contourIntervalMeters;
       this.contourUniforms.uContourOpacity.value = this.contourOpacity;
@@ -157,8 +160,8 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
     const topologyChanged = nextSegments !== this.segments;
     this.radius = nextRadius;
     this.segments = nextSegments;
-    const intervalMeters = nextSegments >= 22 ? 25 : nextSegments >= 16 ? 50 : nextSegments >= 12 ? 75 : 100;
-    const opacity = nextSegments >= 16 ? 0.34 : 0.24;
+    const intervalMeters = nextSegments >= 24 ? 10 : nextSegments >= 18 ? 20 : nextSegments >= 14 ? 25 : 50;
+    const opacity = nextSegments >= 18 ? 0.52 : nextSegments >= 14 ? 0.46 : 0.38;
     this.setContourSettings({ intervalMeters, opacity });
     if (topologyChanged) {
       this.clear();
@@ -310,13 +313,15 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
         const elevationMeters = this._elevationAt(latitude, longitude);
         const channelIncisionMeters = this._channelIncisionMeters(localX, localZ);
         const visualElevationMeters = elevationMeters - channelIncisionMeters;
-        const y = (visualElevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale
-          + this._microreliefKm(localX, localZ, elevationMeters);
+        const microreliefKm = this._microreliefKm(localX, localZ, elevationMeters);
+        const microreliefMeters = this.verticalScale > 0 ? microreliefKm / this.verticalScale * 1000 : 0;
+        const displayedElevationMeters = visualElevationMeters + microreliefMeters;
+        const y = (visualElevationMeters - this.baseElevationMeters) / 1000 * this.verticalScale + microreliefKm;
         positions[vertexOffset * 3] = localX;
         positions[vertexOffset * 3 + 1] = y;
         positions[vertexOffset * 3 + 2] = localZ;
-        elevations[vertexOffset] = visualElevationMeters;
-        const [r, g, b] = terrainColor(latitude, visualElevationMeters, visualElevationMeters - this.baseElevationMeters, this.biomeProfile?.groundColor);
+        elevations[vertexOffset] = displayedElevationMeters;
+        const [r, g, b] = terrainColor(latitude, displayedElevationMeters, displayedElevationMeters - this.baseElevationMeters, this.biomeProfile?.groundColor);
         colors[vertexOffset * 3] = r;
         colors[vertexOffset * 3 + 1] = g;
         colors[vertexOffset * 3 + 2] = b;
@@ -357,6 +362,8 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.34, contourLine * 
       chunkSizeKm: this.chunkSizeKm,
       contourIntervalMeters: this.contourIntervalMeters,
       contourOpacity: this.contourOpacity,
+      contourMajorEvery: 5,
+      contoursFollowDisplayedTerrain: true,
       dynamicTopography: Boolean(this.earthState),
       geomorphologyProjected: Boolean(patch),
       geomorphicElevationOffsetMeters: patch?.geomorphicElevationOffsetMeters ?? null,
