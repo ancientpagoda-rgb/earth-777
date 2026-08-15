@@ -1,4 +1,5 @@
 import { advanceHomininDemography, initializeHomininDemography } from "./HomininDemography.js";
+import { inheritDemographyForChildren } from "./HomininDemographicInheritance.js";
 import { publishHomininDemography } from "./DemographyTelemetry.js";
 
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
@@ -140,7 +141,10 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
     }
   }
 
-  if (children.length) state.homininLineages.push(...children);
+  if (children.length) {
+    state.homininLineages.push(...children);
+    inheritDemographyForChildren(state, children);
+  }
   const survivors = state.homininLineages.filter((lineage) => lineage.extinctionYearBP == null && lineage.populationIndex > 0);
   const totalPopulation = survivors.reduce((sum, lineage) => sum + lineage.populationIndex, 0);
   state.homininSpeciesRichness = survivors.length;
