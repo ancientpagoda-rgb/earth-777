@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v6";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v7";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -289,6 +289,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       representation: materialized ? "individuals" : role === "carnivore" ? "pack" : "herd",
       behavior: behavior.behavior,
       heading: behavior.heading,
+      movementDistanceKm: behavior.distanceKm,
       localSuitability,
       groupSizeScale: lineage ? groupSizeScale : null,
       spacingScale: lineage ? spacingScale : null,
@@ -355,13 +356,28 @@ function targetPredatorPacks(packs, herds) {
     if (!target) return pack;
     const dx = target.x - pack.x;
     const dz = target.z - pack.z;
-    const targetDistanceKm = Math.hypot(dx, dz);
+    const targetDistanceBeforeKm = Math.hypot(dx, dz);
+    const heading = Math.atan2(dz, dx);
+    const clearanceKm = Math.max(0, Number(target.radiusKm) || 0) + Math.max(0, Number(pack.radiusKm) || 0);
+    const availableApproachKm = Math.max(0, targetDistanceBeforeKm - clearanceKm);
+    const approachDistanceKm = Math.min(Math.max(0, Number(pack.movementDistanceKm) || 0), availableApproachKm);
+    const approachXKm = Math.cos(heading) * approachDistanceKm;
+    const approachZKm = Math.sin(heading) * approachDistanceKm;
+    const x = pack.x + approachXKm;
+    const z = pack.z + approachZKm;
+    const targetDistanceKm = Math.hypot(target.x - x, target.z - z);
     return Object.freeze({
       ...pack,
-      heading: Math.atan2(dz, dx),
+      x,
+      z,
+      heading,
       targetGroupId: target.id,
       targetLineageId: target.lineageId ?? null,
-      targetDistanceKm
+      targetDistanceKm,
+      targetDistanceBeforeKm,
+      approachDistanceKm,
+      approachXKm,
+      approachZKm
     });
   }));
 }
@@ -374,6 +390,8 @@ function alignCarnivoreIndividuals(individuals, packs) {
     if (!pack?.targetGroupId) return animal;
     return Object.freeze({
       ...animal,
+      x: animal.x + (Number(pack.approachXKm) || 0),
+      z: animal.z + (Number(pack.approachZKm) || 0),
       yaw: pack.heading,
       targetGroupId: pack.targetGroupId,
       targetLineageId: pack.targetLineageId ?? null
