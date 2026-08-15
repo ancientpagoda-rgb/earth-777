@@ -8,6 +8,11 @@ function signed(value, digits = 2) {
   return Number(value) > 0 ? `+${rounded}` : rounded.replace("-", "−");
 }
 
+function latitudeLabel(latitude) {
+  if (!Number.isFinite(latitude)) return null;
+  return `${Math.abs(latitude).toFixed(1)}°${latitude >= 0 ? "N" : "S"}`;
+}
+
 export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer, hydroClimate, vegetation, spatialDetail }) {
   const region = regionalState(state, latitude, longitude, { climateLayer, hydroClimate, vegetation, spatialDetail });
   const river = hydroClimate?.networkSample?.(state, latitude, longitude, spatialDetail) ?? null;
@@ -21,11 +26,22 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
 
   ui.locationTitle.textContent = ocean.isOcean
     ? "branch ocean"
-    : pft?.succession?.biomeLabel ?? region.biome;
+    : pft?.succession?.biomeLabel ?? region.hydroclimatePotentialBiome ?? region.biome;
 
   const details = [`mean annual temperature ${signed(region.annualTemperature, 1)} °C`];
   if (Number.isFinite(region.annualPrecipitation)) details.push(`precipitation ${Math.round(region.annualPrecipitation).toLocaleString()} mm/yr`);
   if (Number.isFinite(region.cloudCover)) details.push(`cloud ${region.cloudCover.toFixed(1)}%`);
+  if (Number.isFinite(region.windSpeed)) {
+    const east = Number.isFinite(region.windEast) ? signed(region.windEast, 1) : "—";
+    const north = Number.isFinite(region.windNorth) ? signed(region.windNorth, 1) : "—";
+    details.push(`wind ${region.windSpeed.toFixed(1)} m/s · E ${east} / N ${north}`);
+  }
+  const itcz = latitudeLabel(region.itczLatitude);
+  if (itcz) details.push(`wet-season ITCZ ${itcz}`);
+  if (Number.isFinite(region.oceanMoistureFetch)) details.push(`ocean moisture fetch ${Math.round(region.oceanMoistureFetch * 100)}%`);
+  if (Number.isFinite(region.subtropicalSubsidence) && region.subtropicalSubsidence > 0.12) details.push(`subsidence ${Math.round(region.subtropicalSubsidence * 100)}%`);
+  if (Number.isFinite(region.orographicLift) && region.orographicLift > 0.08) details.push(`orographic lift ${Math.round(region.orographicLift * 100)}%`);
+  if (Number.isFinite(region.rainShadow) && region.rainShadow > 0.08) details.push(`rain shadow ${Math.round(region.rainShadow * 100)}%`);
   details.push(`elevation ${Math.round(evolvedElevationMeters).toLocaleString()} m`);
   if (Math.abs(topographyOffsetMeters) >= 1) details.push(`branch tectonic offset ${signed(topographyOffsetMeters, 0)} m`);
   details.push(`plate ${tectonics.plateId} · ${tectonics.boundaryType}`);
@@ -41,6 +57,7 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
     details.push(`overturning ${ocean.overturningIndex.toFixed(2)}×`);
   } else {
     details.push(`soil moisture ${Math.round(region.moisture * 100)}%`);
+    if (region.hydroclimatePotentialBiome && region.hydroclimatePotentialBiome !== region.biome) details.push(`hydroclimate tendency ${region.hydroclimatePotentialBiome}`);
     if (region.soilProfileApplied && Number.isFinite(region.soilWaterCapacity)) details.push(`BIOME4 soil capacity ${Math.round(region.soilWaterCapacity).toLocaleString()} mm`);
     else if (region.soilStatus && region.soilStatus !== "unavailable") details.push(`BIOME4 soil ${region.soilStatus} · fallback bucket`);
     if (Number.isFinite(region.surfaceRunoff)) details.push(`surface runoff ${Math.round(region.surfaceRunoff).toLocaleString()} mm/yr`);
@@ -70,5 +87,6 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
     ? ` · ${river.spacingDegrees}° accumulating network · global forcing coverage ${Math.round((river.globalClimateForcingFraction ?? river.globalClimateForcingCoverageFraction) * 100)}% · closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}`
     : "";
   const oceanNote = ocean.isOcean ? ` · ${ocean.policy}` : "";
-  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}`;
+  const atmosphereNote = region.atmospherePolicy ? ` · ${region.atmospherePolicy}` : "";
+  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}`;
 }
