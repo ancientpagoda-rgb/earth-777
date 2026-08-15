@@ -13,6 +13,8 @@ const CLOUD_INTERVAL_MS = 15_000;
 const EARTH_REFRESH_YEARS = 2_500;
 const CLOUD_REFRESH_YEARS = 10_000;
 const DIAGNOSTICS_INTERVAL_MS = 250;
+const SURFACE_PUMP_ACTIVE_MS = 0.9;
+const SURFACE_PUMP_IDLE_MS = 2.3;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 export class EarthView {
@@ -46,7 +48,7 @@ export class EarthView {
     this.diagnosticsCache = null;
     this.diagnosticsCacheAt = -Infinity;
     this.rasterWorker = new RasterTaskClient();
-    this.performanceController = new AdaptivePerformanceController({ targetFps: 60, initialTier: "ultra" });
+    this.performanceController = new AdaptivePerformanceController({ targetFps: 60, initialTier: "high" });
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1));
@@ -218,7 +220,8 @@ export class EarthView {
       const floor = this.terrain.heightAt(this.surfaceCamera.position.x, this.surfaceCamera.position.z) + 0.18;
       if (this.surfaceCamera.position.y < floor) this.surfaceCamera.position.y = floor;
       this.terrain.update(this.surfaceCamera.position);
-      const pumped = this.terrain.pump(2.3);
+      const pumpBudget = this.interacting ? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS;
+      const pumped = this.terrain.pump(pumpBudget);
       continuous = pumped > 0 || this.terrain.hasPendingWork?.() === true || this.simulationPlaying || continuous;
       this.renderer.render(this.surfaceScene, this.surfaceCamera);
     }
