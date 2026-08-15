@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  advanceGeologicActivity,
   advanceLithosphere,
   initializeLithosphere,
   tectonicElevationOffsetMeters,
@@ -15,6 +16,24 @@ import {
 } from "../src/sim/SpatialOceanCirculation.js";
 import { deriveCompetitiveBiomeSuccession } from "../src/sim/BiomeSuccession.js";
 import { FreeEarthEngine } from "../src/sim/free-earth.js";
+
+test("lithosphere initializes and deterministically advances geologic activity", () => {
+  const first = initializeLithosphere({ elapsedYears: 0 }, 777001);
+  const second = initializeLithosphere({ elapsedYears: 0 }, 777001);
+  const sequence = () => {
+    let index = 0;
+    const values = [0.25, 0.5];
+    return () => values[index++ % values.length];
+  };
+
+  assert.equal(first.geologicActivityIndex, 1);
+  advanceGeologicActivity(first, 25, sequence());
+  advanceGeologicActivity(second, 25, sequence());
+
+  assert.equal(first.geologicActivityIndex, second.geologicActivityIndex);
+  assert.notEqual(first.geologicActivityIndex, 1);
+  assert.ok(first.geologicActivityIndex >= 0.08);
+});
 
 test("tectonic topography begins at the reference baseline and diverges causally with branch time", () => {
   const state = initializeLithosphere({ elapsedYears: 0, geologicActivityIndex: 1 }, 777001);

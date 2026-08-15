@@ -1,3 +1,5 @@
+import { gaussian } from "./random.js";
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const wrapLongitude = (longitude) => ((Number(longitude) + 540) % 360) - 180;
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-dtYears / tauYears));
@@ -50,9 +52,21 @@ function localDeltaDegrees(latitude, longitude, plate) {
 export function initializeLithosphere(state, seed = 777001) {
   state.tectonicSeed ??= Number(seed) >>> 0;
   state.tectonicTimeMyr ??= (Number(state.elapsedYears) || 0) / 1_000_000;
+  state.geologicActivityIndex ??= 1;
   state.tectonicBoundaryActivity ??= 1;
   state.mantleHeatIndex ??= 1;
   state.meanDynamicTopographyMeters ??= 0;
+  return state;
+}
+
+export function advanceGeologicActivity(state, dtYears, random = Math.random) {
+  initializeLithosphere(state, state.tectonicSeed);
+  const dt = Math.max(0, Number(dtYears) || 0);
+  const reversion = 1 - Math.exp(-dt / 65_000);
+  const stochastic = gaussian(random) * 0.0016 * Math.sqrt(dt);
+  const raw = Number(state.geologicActivityIndex ?? 1);
+  const current = Math.max(0.08, raw || 0);
+  state.geologicActivityIndex = Math.max(0.08, current + (1 - raw) * reversion + stochastic);
   return state;
 }
 

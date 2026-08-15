@@ -9,7 +9,7 @@ import {
   initializeBiogeochemistry,
   syncAtmosphereFromReservoirs
 } from "./EarthBiogeochemistry.js";
-import { advanceLithosphere, initializeLithosphere } from "./DynamicLithosphere.js";
+import { advanceGeologicActivity, advanceLithosphere, initializeLithosphere } from "./DynamicLithosphere.js";
 import { advanceOceanCirculation, initializeOceanCirculation } from "./SpatialOceanCirculation.js";
 import { advanceEvolutionaryEcology, initializeEvolutionaryEcology } from "./EvolutionaryEcology.js";
 import { advanceHomininLineages, initializeHomininLineages } from "./HomininLineages.js";
@@ -34,15 +34,6 @@ function orbitalSummerIndex(state) {
     + (state.eccentricity - 0.023) * 28 * Math.cos(state.precession * Math.PI / 180);
 }
 
-function updateGeologicActivity(state, dt, random) {
-  const reversion = 1 - Math.exp(-dt / 65_000);
-  const stochastic = gaussian(random) * 0.0016 * Math.sqrt(dt);
-  state.geologicActivityIndex = Math.max(
-    0.08,
-    positive(state.geologicActivityIndex ?? 1, 0.08) + (1 - state.geologicActivityIndex) * reversion + stochastic
-  );
-}
-
 export class FreeEarthEngine {
   constructor(seed = 777001, { fidelityBudget = 1, observerRelevance = {}, fidelityRefreshYears = 250 } = {}) {
     this.seed = Number(seed) >>> 0;
@@ -51,7 +42,6 @@ export class FreeEarthEngine {
     this.state = initializeBiogeochemistry(checkpointState());
     this.state.seed = this.seed;
     this.state.oceanTemperatureAnomaly = this.state.temperatureAnomaly;
-    this.state.geologicActivityIndex = 1;
     initializeLithosphere(this.state, this.seed);
     initializeOceanCirculation(this.state);
     initializeEvolutionaryEcology(this.state, this.seed);
@@ -75,7 +65,6 @@ export class FreeEarthEngine {
     this.state = initializeBiogeochemistry(checkpointState());
     this.state.seed = this.seed;
     this.state.oceanTemperatureAnomaly = this.state.temperatureAnomaly;
-    this.state.geologicActivityIndex = 1;
     initializeLithosphere(this.state, this.seed);
     initializeOceanCirculation(this.state);
     initializeEvolutionaryEcology(this.state, this.seed);
@@ -121,7 +110,7 @@ export class FreeEarthEngine {
     state.seaLevelLower95 = forcing.seaLevelLower95;
     state.seaLevelUpper95 = forcing.seaLevelUpper95;
 
-    updateGeologicActivity(state, dt, this.geologyRandom);
+    advanceGeologicActivity(state, dt, this.geologyRandom);
     this.fidelity.update(state);
     this.fidelity.recordExecution("orbit", 1);
     this.fidelity.recordExecution("geology", 1);
