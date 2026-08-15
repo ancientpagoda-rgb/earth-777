@@ -38,10 +38,17 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   }
 
   setScienceProviders({ hydrology = this.hydrology, vegetation = this.vegetation, spatialDetail = this.spatialDetail } = {}) {
-    this.hydrology = hydrology?.sample ? hydrology : null;
-    this.vegetation = vegetation?.sample ? vegetation : null;
-    this.spatialDetail = clamp(spatialDetail, 0, 1);
-    this._refreshSurfaceContext();
+    const nextHydrology = hydrology?.sample ? hydrology : null;
+    const nextVegetation = vegetation?.sample ? vegetation : null;
+    const nextSpatialDetail = clamp(spatialDetail, 0, 1);
+    const changed = nextHydrology !== this.hydrology
+      || nextVegetation !== this.vegetation
+      || Math.abs(nextSpatialDetail - this.spatialDetail) > 1e-6;
+    this.hydrology = nextHydrology;
+    this.vegetation = nextVegetation;
+    this.spatialDetail = nextSpatialDetail;
+    if (changed) this._refreshSurfaceContext();
+    return changed;
   }
 
   _surfaceContext(latitude, longitude, state = this.earthState) {
