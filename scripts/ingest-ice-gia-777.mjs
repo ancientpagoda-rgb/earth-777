@@ -90,6 +90,20 @@ await writeFile(MANIFEST_PATH, `${JSON.stringify({
   generatedBy: "scripts/ingest-ice-gia-777.mjs",
   targetYearBP: 777000,
   sources: { iceFile: icePathArg, giaFile: giaPathArg, runFile: runPathArg, sha256: sourceHashes },
+  run: {
+    solverId: giaCache.run.solverId,
+    solverVersion: giaCache.run.solverVersion,
+    solverSourceDoi: giaCache.run.solverSourceDoi,
+    runId: giaCache.run.runId,
+    iceHistoryId: giaCache.run.iceHistoryId,
+    earthModelId: giaCache.run.earthModelId,
+    rheologyDescription: giaCache.run.rheologyDescription,
+    shorelineIteration: giaCache.run.shorelineIteration,
+    rotationIncluded: giaCache.run.rotationIncluded,
+    configurationHash: giaCache.run.configurationHash,
+    inputManifestHash: giaCache.run.inputManifestHash,
+    outputHash: giaCache.run.outputHash
+  },
   validation: { iceEligibleCells: generatedIce.length, giaEligibleCells: generatedGia.length, giaRunStatus: giaCache.run.status },
   output: { file: "src/data/generated/ice-gia-777.generated.js", sha256: outputHash },
   caveat: "Ingestion validates provenance/schema eligibility; it does not independently validate the scientific correctness of the supplied ice history, rheology, solver configuration, or model fit."
