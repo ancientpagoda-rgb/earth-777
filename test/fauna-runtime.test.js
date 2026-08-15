@@ -182,6 +182,37 @@ test("body mass affects observed scale and spacing without changing aggregate po
   assert.ok(large.herds[0].spacingScale > small.herds[0].spacingScale);
 });
 
+test("hunting packs target actual observed herds and face their selected prey", () => {
+  const predatorState = {
+    ...state,
+    herbivoreBiomass: 4,
+    carnivoreBiomass: 2,
+    speciesLineages: [
+      lineage({ id: 401, trophicLevel: 0.2, bodyMassLog10Kg: 1.4, sociality: 0.4 }),
+      lineage({ id: 402, trophicLevel: 0.85, bodyMassLog10Kg: 0.9, mobility: 1, cognition: 1, dietBreadth: 0, sociality: 0.6 })
+    ]
+  };
+  const plan = buildObservedFauna({ state: predatorState, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 123, windowRadiusKm: 4, individualRadiusKm: 4 });
+  const herdById = new Map(plan.herds.map((herd) => [herd.id, herd]));
+  const targeted = plan.packs.filter((pack) => pack.targetGroupId != null);
+
+  assert.ok(targeted.length > 0);
+  assert.equal(plan.predatorTargetCount, targeted.length);
+  for (const pack of targeted) {
+    const target = herdById.get(pack.targetGroupId);
+    assert.ok(target);
+    assert.equal(pack.targetLineageId, target.lineageId);
+    assert.ok(Number.isFinite(pack.targetDistanceKm));
+    const expectedHeading = Math.atan2(target.z - pack.z, target.x - pack.x);
+    assert.ok(Math.abs(pack.heading - expectedHeading) < 1e-12);
+  }
+  const targetedIndividuals = plan.individuals.filter((animal) => animal.role === "carnivore" && animal.targetGroupId != null);
+  assert.ok(targetedIndividuals.length > 0);
+  assert.ok(targetedIndividuals.every((animal) => herdById.has(animal.targetGroupId)));
+  assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
+  assert.equal(plan.packs.reduce((sum, pack) => sum + pack.population, 0), plan.visibleCarnivorePopulation);
+});
+
 test("group populations conserve the observed aggregate populations", () => {
   const plan = buildObservedFauna({ state, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 9, windowRadiusKm: 3, individualRadiusKm: 0.3 });
   assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
