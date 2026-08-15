@@ -168,6 +168,7 @@ export class FreeEarthEngine {
 
     this.fidelity.execute("evolution", dt, (subDt) => advanceEvolutionaryEcology(state, subDt, this.evolutionRandom));
     this.fidelity.execute("hominins", dt, (subDt) => advanceHomininLineages(state, subDt, this.homininRandom));
+    this._recordLineageEvents();
 
     this.fidelity.execute("magnetism", dt, (subDt) => {
       if (state.yearBP <= 773_000 && state.magneticPolarity < 0) {
@@ -181,6 +182,22 @@ export class FreeEarthEngine {
         state.magneticStrength = Math.max(0.04, relax(state.magneticStrength, 1, subDt, 4_500) + secularNoise);
       }
     });
+  }
+
+  _recordLineageEvents() {
+    const yearBP = Math.round(this.state.yearBP);
+    for (const lineage of this.state.speciesLineages ?? []) {
+      if (lineage.parentId != null && lineage.birthYearBP === yearBP) {
+        this._recordEvent(`Animal lineage ${lineage.id} branches from lineage ${lineage.parentId}.`);
+      }
+      if (lineage.extinctionYearBP === yearBP) this._recordEvent(`Animal lineage ${lineage.id} becomes extinct.`);
+    }
+    for (const lineage of this.state.homininLineages ?? []) {
+      if (lineage.parentId != null && lineage.birthYearBP === yearBP) {
+        this._recordEvent(`Hominin lineage ${lineage.id} branches from ${lineage.parentId}.`);
+      }
+      if (lineage.extinctionYearBP === yearBP) this._recordEvent(`Hominin lineage ${lineage.id} becomes extinct.`);
+    }
   }
 
   _recordEvent(text) {
