@@ -10,8 +10,10 @@ function update() {
   const readout = document.querySelector("#hominin-readout");
   const state = globalThis[HOMININ_DEMOGRAPHY_TELEMETRY_KEY];
   if (!readout || !state || !Number.isFinite(state.populationPersons)) return;
-  readout.textContent = Math.round(state.populationPersons).toLocaleString();
-  readout.title = `${state.speciesRichness.toLocaleString()} lineage${state.speciesRichness === 1 ? "" : "s"} · ${state.demeCount.toLocaleString()} demes · births ${Math.round(state.birthsPerYear).toLocaleString()}/yr · deaths ${Math.round(state.deathsPerYear).toLocaleString()}/yr · net ${signedPercent(state.growthPerYear)}`;
+  const text = Math.round(state.populationPersons).toLocaleString();
+  const title = `${state.speciesRichness.toLocaleString()} lineage${state.speciesRichness === 1 ? "" : "s"} · ${state.demeCount.toLocaleString()} demes · births ${Math.round(state.birthsPerYear).toLocaleString()}/yr · deaths ${Math.round(state.deathsPerYear).toLocaleString()}/yr · net ${signedPercent(state.growthPerYear)}`;
+  if (readout.textContent !== text) readout.textContent = text;
+  if (readout.title !== title) readout.title = title;
 }
 
 update();
