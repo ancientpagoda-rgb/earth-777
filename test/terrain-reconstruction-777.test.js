@@ -26,7 +26,7 @@ test("default terrain reconstruction preserves ETOPO numerically but labels it a
   assert.match(sample.epistemicStatus, /Modern ETOPO supplies spatial detail only after an explicit hindcast transform/);
 });
 
-test("an explicit hindcast correction changes the target-epoch terrain estimate", () => {
+test("an explicit hindcast correction changes the target-epoch terrain estimate without inventing complete uncertainty", () => {
   const latitude = 46;
   const longitude = 8;
   const modern = bedrockElevationAt(latitude, longitude);
@@ -40,20 +40,23 @@ test("an explicit hindcast correction changes the target-epoch terrain estimate"
   });
   close(sample.reconstructedElevationMeters, modern - 42);
   assert.equal(sample.reconstructionStatus, "assimilated-target-epoch-terrain");
-  assert.equal(sample.sigma, 18);
+  assert.equal(sample.sigma, null);
 });
 
-test("paleo target evidence fuses with the transformed modern anchor instead of replacing provenance", () => {
+test("paleo target evidence fuses only when local modern-anchor uncertainty is explicitly supplied", () => {
   const latitude = 10;
   const longitude = 20;
   const modern = bedrockElevationAt(latitude, longitude);
   const transformedValue = modern + 30;
   const paleoValue = transformedValue + 20;
+  const modernSigma = 4;
+  const correctionSigma = 20;
+  const transformedSigma = Math.hypot(modernSigma, correctionSigma);
   const sample = terrain777BedrockSample(latitude, longitude, {
-    hindcastCorrection: { value: 30, sigma: 20, sourceId: "hindcast-test", method: "test" },
+    modernAnchorSigmaMeters: modernSigma,
+    hindcastCorrection: { value: 30, sigma: correctionSigma, sourceId: "hindcast-test", method: "test" },
     paleoConstraints: [{ value: paleoValue, sigma: 10, sourceId: "paleo-test", method: "dated target evidence" }]
   });
-  const transformedSigma = 20; // modern anchor has no declared measurement sigma, so the correction carries the available uncertainty.
   const expected = (transformedValue / (transformedSigma ** 2) + paleoValue / (10 ** 2))
     / (1 / (transformedSigma ** 2) + 1 / (10 ** 2));
   close(sample.reconstructedElevationMeters, expected);
