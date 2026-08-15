@@ -79,11 +79,32 @@ function circulationWind(state, monthIndex, latitude, longitude) {
   else zonalMs = -4.2;
 
   const tropicalPull = Math.exp(-((absLat / 34) ** 2));
-  const meridionalMs = clamp((localThermalEquator - lat) * 0.34 * tropicalPull, -8.5, 8.5);
+  let meridionalMs = clamp((localThermalEquator - lat) * 0.34 * tropicalPull, -8.5, 8.5);
   const seasonalJetShift = Math.sin((lat - localThermalEquator) * DEG * 2) * (absLat > 22 ? 1.8 : 0.6);
   zonalMs += seasonalJetShift;
 
-  return { eastMs: zonalMs, northMs: meridionalMs, itczLatitude: localThermalEquator, local };
+  // Surface pressure gradients emerge from differential heating. Sampling the
+  // neighboring surface makes monsoon-like onshore flow possible on any
+  // continent without naming a region or prescribing a historical outcome.
+  const gradientStep = 5.5;
+  const lonStep = gradientStep / Math.max(0.22, Math.cos(lat * DEG));
+  const eastThermal = surfaceThermalResponse(state, monthIndex, lat, wrapLongitude(longitude + lonStep)).thermal;
+  const westThermal = surfaceThermalResponse(state, monthIndex, lat, wrapLongitude(longitude - lonStep)).thermal;
+  const northThermal = surfaceThermalResponse(state, monthIndex, clamp(lat + gradientStep, -89.5, 89.5), longitude).thermal;
+  const southThermal = surfaceThermalResponse(state, monthIndex, clamp(lat - gradientStep, -89.5, 89.5), longitude).thermal;
+  const pressureGradientEastMs = clamp((eastThermal - westThermal) * 0.42, -7.5, 7.5);
+  const pressureGradientNorthMs = clamp((northThermal - southThermal) * 0.42, -7.5, 7.5);
+  zonalMs += pressureGradientEastMs;
+  meridionalMs += pressureGradientNorthMs;
+
+  return {
+    eastMs: zonalMs,
+    northMs: meridionalMs,
+    pressureGradientEastMs,
+    pressureGradientNorthMs,
+    itczLatitude: localThermalEquator,
+    local
+  };
 }
 
 function offsetUpwind(latitude, longitude, eastMs, northMs, degrees) {
@@ -171,6 +192,8 @@ export function atmosphericCirculationAt(state, monthIndex, latitude, longitude,
     windEastMs: round(wind.eastMs, 3),
     windNorthMs: round(wind.northMs, 3),
     windSpeedMs: round(Math.hypot(wind.eastMs, wind.northMs), 3),
+    pressureGradientEastMs: round(wind.pressureGradientEastMs, 3),
+    pressureGradientNorthMs: round(wind.pressureGradientNorthMs, 3),
     oceanMoistureFetch: round(moisture.oceanFetch, 4),
     landMoistureRecycling: round(moisture.landRecycle, 4),
     moistureSupplyIndex: round(moisture.moistureSupply, 5),
