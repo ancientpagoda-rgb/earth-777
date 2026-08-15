@@ -57,6 +57,24 @@ test("observed fauna is deterministic for seed, place, and time", () => {
   assert.deepEqual(first.individuals, second.individuals);
 });
 
+test("observed groups inherit identity from living evolutionary lineages", () => {
+  const lineageState = {
+    ...state,
+    speciesLineages: [
+      { id: 101, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, bodyMassLog10Kg: 2.0 },
+      { id: 202, extinctionYearBP: null, populationIndex: 0.7, trophicLevel: 0.8, bodyMassLog10Kg: 0.7 }
+    ]
+  };
+  const plan = buildObservedFauna({ state: lineageState, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 777001, windowRadiusKm: 3, individualRadiusKm: 3 });
+
+  assert.ok(plan.herds.length > 0);
+  assert.ok(plan.packs.length > 0);
+  assert.ok(plan.herds.every((group) => group.lineageId === 101));
+  assert.ok(plan.packs.every((group) => group.lineageId === 202));
+  assert.ok(plan.individuals.every((animal) => animal.lineageId === (animal.role === "carnivore" ? 202 : 101)));
+  assert.deepEqual(new Set(plan.lineageIds), new Set([101, 202]));
+});
+
 test("group populations conserve the observed aggregate populations", () => {
   const plan = buildObservedFauna({ state, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 9, windowRadiusKm: 3, individualRadiusKm: 0.3 });
   assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
