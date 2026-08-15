@@ -8,13 +8,14 @@ import {
   networkSpacingForSpatialDetail,
   RIVER_NETWORK_POLICY,
   routeRunoffParcel,
-  RUNOFF_ROUTING_POLICY
+  RUNOFF_ROUTING_POLICY,
+  traceRunoffNetwork
 } from "./RunoffRouting.js";
 
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 const quantize = (value, step) => Math.round((Number(value) || 0) / step) * step;
 
-export const MASS_CONSERVING_HYDROLOGY_POLICY = "closed-water-budget-etopo-routing-v2";
+export const MASS_CONSERVING_HYDROLOGY_POLICY = "closed-water-budget-state-routing-v3";
 
 export class MassConservingHydrology {
   constructor(spatialHydroClimate, soilLayer = null) {
@@ -67,6 +68,18 @@ export class MassConservingHydrology {
       round(forcing.seaLevel ?? 0, 0),
       this.soil?.meta?.assetSha256 ?? "fallback-soil"
     ].join("|");
+  }
+
+  _routingElevationAt(_globalState, latitude, longitude) {
+    return bedrockElevationAt(latitude, longitude);
+  }
+
+  _routingTopologySignature(_globalState) {
+    return "modern-etopo-reference";
+  }
+
+  _refineNetworkTopology(_globalState, _topology, _localRunoffMmPerYear, _climateForcedMask) {
+    return null;
   }
 
   _soilProfile(latitude, longitude) {
@@ -200,6 +213,7 @@ export class MassConservingHydrology {
     return routeRunoffParcel(sample.latitude, sample.longitude, sample.runoffMmPerYear, {
       spacingDegrees: sample.gridSpacingDegrees,
       seaLevelMeters: globalState.seaLevel ?? 0,
+      elevationAt: (lat, lon) => this._routingElevationAt(globalState, lat, lon),
       ...options
     });
   }
@@ -210,18 +224,21 @@ export class MassConservingHydrology {
 
     const forcingState = this._networkForcingState(globalState);
     const spacingDegrees = networkSpacingForSpatialDetail(spatialDetail);
-    const topologyKey = `${spacingDegrees}|${forcingState.seaLevel}`;
+    const topologyKey = `${spacingDegrees}|${forcingState.seaLevel}|${this._routingTopologySignature(forcingState)}`;
     let topology = this.networkTopologyCache.get(topologyKey);
     if (!topology) {
       topology = buildRunoffNetworkTopology({
         spacingDegrees,
-        seaLevelMeters: forcingState.seaLevel
+        seaLevelMeters: forcingState.seaLevel,
+        elevationAt: (latitude, longitude) => this._routingElevationAt(forcingState, latitude, longitude),
+        elevationPolicy: this._routingTopologySignature(forcingState)
       });
       this.networkTopologyCache.set(topologyKey, topology);
       if (this.networkTopologyCache.size > 4) {
         this.networkTopologyCache.delete(this.networkTopologyCache.keys().next().value);
       }
     }
+    const preliminaryTopology = topology;
 
     // Match local water-balance cells to the coarse network grid. The selected
     // region can still use 0.5° climate separately from this network solve.
@@ -242,6 +259,24 @@ export class MassConservingHydrology {
       activeRunoffCells += 1;
     }
 
+    const refinement = this._refineNetworkTopology(
+      forcingState,
+      preliminaryTopology,
+      localRunoffMmPerYear,
+      climateForcedMask
+    );
+    if (refinement?.topology) {
+      topology = refinement.topology;
+      activeRunoffCells = 0;
+      for (let index = 0; index < topology.count; index += 1) {
+        if (!topology.landMask[index]) {
+          localRunoffMmPerYear[index] = 0;
+          climateForcedMask[index] = 0;
+        }
+        if (topology.landMask[index] && localRunoffMmPerYear[index] > 0) activeRunoffCells += 1;
+      }
+    }
+
     const accumulation = accumulateRunoffNetwork(topology, localRunoffMmPerYear, climateForcedMask);
     const result = Object.freeze({
       policy: RIVER_NETWORK_POLICY,
@@ -250,13 +285,15 @@ export class MassConservingHydrology {
       spacingDegrees,
       networkClimateDetail,
       topology,
+      preliminaryTopology,
+      geomorphology: refinement?.topology ? refinement : null,
       localRunoffMmPerYear,
       climateForcedMask,
       accumulation,
       activeRunoffCells,
       climateForcedLandCellCount: accumulation.climateForcedLandCellCount,
       climateForcingCoverageFraction: accumulation.climateForcingCoverageFraction,
-      epistemicStatus: `model-derived upstream-accumulating river network from closed local water budgets${this.soil ? " using the official BIOME4 static spatial soil driver where valid" : ""}; discharge is complete only over the explicitly tracked climate-forced part of each basin; deep soil drainage currently joins routed runoff immediately pending groundwater/baseflow; ETOPO is a modern-bedrock baseline and channel hydraulics are not yet simulated`
+      epistemicStatus: `model-derived upstream-accumulating river network from closed local water budgets${this.soil ? " using the official BIOME4 static spatial soil driver where valid" : ""}; routing elevation is ${topology.elevationPolicy}; discharge is complete only over the explicitly tracked climate-forced part of each basin; deep soil drainage currently joins routed runoff immediately pending groundwater/baseflow; channel hydraulics are not yet simulated`
     });
     this.networkCache.set(signature, result);
     if (this.networkCache.size > 3) this.networkCache.delete(this.networkCache.keys().next().value);
@@ -268,16 +305,13 @@ export class MassConservingHydrology {
     const cell = networkCellAt(network.topology, latitude, longitude);
     if (!network.topology.landMask[cell.index]) return null;
     const localRunoffMmPerYear = network.localRunoffMmPerYear[cell.index];
-    const route = routeRunoffParcel(cell.latitude, cell.longitude, localRunoffMmPerYear, {
-      spacingDegrees: network.spacingDegrees,
-      seaLevelMeters: network.forcingState.seaLevel,
-      maxSteps: 1024
-    });
+    const route = traceRunoffNetwork(network.topology, cell.index, 1024);
     const upstreamAreaKm2 = network.accumulation.upstreamAreaKm2[cell.index];
     const upstreamClimateForcedAreaKm2 = network.accumulation.climateForcedUpstreamAreaKm2[cell.index];
     const upstreamClimateForcingCoverageFraction = upstreamAreaKm2 > 0
       ? upstreamClimateForcedAreaKm2 / upstreamAreaKm2
       : 0;
+    const geomorphology = network.geomorphology;
     return Object.freeze({
       policy: RIVER_NETWORK_POLICY,
       latitude: cell.latitude,
@@ -296,9 +330,19 @@ export class MassConservingHydrology {
       upstreamClimateForcingCoverageFraction,
       globalClimateForcingCoverageFraction: network.accumulation.climateForcingCoverageFraction,
       outlet: route.outlet,
-      routeCellsToOutlet: route.path.length,
+      routeCellsToOutlet: route.routeCellsToOutlet,
+      routeAcyclic: route.acyclic,
       networkMassConserved: network.accumulation.massConserved,
       networkRelativeClosureError: network.accumulation.relativeClosureError,
+      geomorphologyPolicy: geomorphology?.policy ?? null,
+      erosionRateMmPerYear: geomorphology ? geomorphology.erosionRateMmPerYear[cell.index] : null,
+      depositionRateMmPerYear: geomorphology ? geomorphology.depositionRateMmPerYear[cell.index] : null,
+      geomorphicElevationOffsetMeters: geomorphology ? geomorphology.netElevationOffsetMeters[cell.index] : null,
+      sedimentIncomingM3PerYear: geomorphology ? geomorphology.sedimentIncomingM3PerYear[cell.index] : null,
+      sedimentOutgoingM3PerYear: geomorphology ? geomorphology.sedimentOutgoingM3PerYear[cell.index] : null,
+      drainageReroutedCellCount: geomorphology?.reroutedCellCount ?? 0,
+      sedimentMassConserved: geomorphology?.sedimentMassConserved ?? null,
+      sedimentRelativeClosureError: geomorphology?.sedimentRelativeClosureError ?? null,
       epistemicStatus: network.epistemicStatus
     });
   }
@@ -313,10 +357,11 @@ export class MassConservingHydrology {
       waterBalancePolicy: WATER_BALANCE_POLICY,
       runoffRoutingPolicy: RUNOFF_ROUTING_POLICY,
       riverNetworkPolicy: RIVER_NETWORK_POLICY,
+      routingTopologyPolicy: this._routingTopologySignature(globalState),
       cachedWaterBalanceCells: this.cache.size,
       cachedNetworks: this.networkCache.size,
       stateSignature: this._stateSignature(globalState, spatialDetail),
-      epistemicStatus: "model-derived closed land water budget with optional study-constrained BIOME4 static two-layer soil, parcel routing, and upstream-accumulating river network; deep drainage is not yet groundwater/baseflow and this is not a reconstructed river network"
+      epistemicStatus: "model-derived closed land water budget with optional study-constrained BIOME4 static two-layer soil, state-dependent parcel routing, and upstream-accumulating river network; deep drainage is not yet groundwater/baseflow and this is not a reconstructed river network"
     });
   }
 }

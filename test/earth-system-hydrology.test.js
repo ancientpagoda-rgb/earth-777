@@ -6,6 +6,7 @@ import test from "node:test";
 import { checkpointState } from "../src/data/checkpoint-777.js";
 import { Krapp777ClimateLayer } from "../src/data/krapp-777-climate.js";
 import { dynamicSurfaceElevationMeters } from "../src/sim/GeneralAtmosphereCirculation.js";
+import { DYNAMIC_GEOMORPHOLOGY_POLICY } from "../src/sim/DynamicGeomorphology.js";
 import { MassConservingHydrology } from "../src/sim/MassConservingHydrology.js";
 import { SpatialHydroClimate } from "../src/sim/SpatialHydroClimate.js";
 import { installEarthSystemHydrologyCoupling } from "../src/sim/EarthSystemHydrology.js";
@@ -46,6 +47,36 @@ test("runtime conserved water balance uses evolving surface elevation", () => {
   assert.ok(sample);
   const expected = dynamicSurfaceElevationMeters(state, sample.latitude, sample.longitude);
   assert.ok(Math.abs(sample.elevationMeters - expected) < 0.11);
+});
+
+test("runtime river network closes water and sediment on evolving tectonic plus geomorphic topography", () => {
+  const hydrology = new MassConservingHydrology(new SpatialHydroClimate(climate));
+  const checkpoint = checkpointState();
+  const state = {
+    ...checkpoint,
+    elapsedYears: 180_000,
+    yearBP: checkpoint.yearBP - 180_000,
+    oceanTemperatureAnomaly: checkpoint.temperatureAnomaly + 0.35,
+    tectonicTimeMyr: 0.18,
+    tectonicBoundaryActivity: 1.2,
+    productivityIndex: 0.9
+  };
+  const network = hydrology.network(state, 0.1);
+  assert.ok(network.geomorphology);
+  assert.equal(network.geomorphology.policy, DYNAMIC_GEOMORPHOLOGY_POLICY);
+  assert.equal(network.accumulation.massConserved, true);
+  assert.equal(network.geomorphology.sedimentMassConserved, true);
+  assert.ok(Math.abs(network.accumulation.relativeClosureError) < 1e-12);
+  assert.ok(Math.abs(network.geomorphology.sedimentRelativeClosureError) < 1e-10);
+  assert.ok(network.geomorphology.generatedSedimentM3PerYear > 0);
+  assert.ok(network.geomorphology.maxAbsoluteElevationChangeMeters > 0);
+  assert.match(network.topology.elevationPolicy, /dynamic tectonic surface plus runoff-driven erosion/);
+  const regional = hydrology.networkSample(state, 0, 20, 0.1);
+  assert.ok(regional);
+  assert.equal(regional.geomorphologyPolicy, DYNAMIC_GEOMORPHOLOGY_POLICY);
+  assert.equal(regional.routeAcyclic, true);
+  assert.equal(regional.networkMassConserved, true);
+  assert.equal(regional.sedimentMassConserved, true);
 });
 
 test("browser entrypoint installs Earth-system hydrology coupling before main", () => {

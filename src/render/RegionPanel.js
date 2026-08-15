@@ -88,15 +88,25 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
       details.push(`upstream area ${Math.round(river.upstreamAreaKm2).toLocaleString()} km²`);
       details.push(`forcing coverage ${Math.round(river.upstreamClimateForcingCoverageFraction * 100)}% of upstream area`);
       details.push(`drainage ${river.outlet} · ${river.routeCellsToOutlet} routed cells`);
+      if (river.geomorphologyPolicy) {
+        const geomorphicBits = [];
+        if (Number.isFinite(river.erosionRateMmPerYear)) geomorphicBits.push(`erosion ${river.erosionRateMmPerYear.toFixed(3)} mm/yr`);
+        if (Number.isFinite(river.depositionRateMmPerYear)) geomorphicBits.push(`deposition ${river.depositionRateMmPerYear.toFixed(3)} mm/yr`);
+        if (Number.isFinite(river.geomorphicElevationOffsetMeters)) geomorphicBits.push(`relief Δ ${signed(river.geomorphicElevationOffsetMeters, 1)} m`);
+        if (Number.isFinite(river.sedimentOutgoingM3PerYear)) geomorphicBits.push(`sediment ${river.sedimentOutgoingM3PerYear.toLocaleString(undefined, { maximumFractionDigits: 0 })} m³/yr`);
+        if (geomorphicBits.length) details.push(`geomorphology ${geomorphicBits.join(" · ")}`);
+        if (river.drainageReroutedCellCount > 0) details.push(`drainage links migrated ${river.drainageReroutedCellCount.toLocaleString()} cells globally at this network solve`);
+      }
     }
   }
 
   ui.locationDetail.textContent = `${region.checkpointClimate ? "Climate" : "Modeled climate"}: ${details.join(" · ")}.`;
   const routingNote = river && !ocean.isOcean
-    ? ` · ${river.spacingDegrees}° accumulating network · global forcing coverage ${Math.round((river.globalClimateForcingFraction ?? river.globalClimateForcingCoverageFraction) * 100)}% · closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}`
+    ? ` · ${river.spacingDegrees}° accumulating network · global forcing coverage ${Math.round((river.globalClimateForcingFraction ?? river.globalClimateForcingCoverageFraction) * 100)}% · water closure ${Math.abs(river.networkRelativeClosureError).toExponential(1)}${Number.isFinite(river.sedimentRelativeClosureError) ? ` · sediment closure ${Math.abs(river.sedimentRelativeClosureError).toExponential(1)}` : ""}`
     : "";
   const oceanNote = ocean.isOcean ? ` · ${ocean.policy}` : "";
   const atmosphereNote = region.atmospherePolicy ? ` · ${region.atmospherePolicy}` : "";
   const landSurfaceNote = region.landSurfacePolicy ? ` · ${region.landSurfacePolicy}` : "";
-  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}`;
+  const geomorphologyNote = river?.geomorphologyPolicy ? ` · ${river.geomorphologyPolicy}` : "";
+  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}${geomorphologyNote}`;
 }
