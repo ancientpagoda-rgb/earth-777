@@ -80,9 +80,10 @@ test("Earth 777 fidelity plan is bounded, labeled as policy, deterministic, and 
   assert.equal(first.policy, "consequence-weighted-fidelity-v2");
   assert.match(first.epistemicStatus, /not a scientific measurement/);
   assert.equal(first.graphConverged, true);
-  assert.ok(first.targets.length >= 18);
+  assert.ok(first.targets.length >= 17);
   const ids = new Set(first.targets.map((target) => target.id));
-  for (const id of ["tectonics", "ocean", "evolution", "hominins", "culture"]) assert.ok(ids.has(id));
+  for (const id of ["tectonics", "ocean", "evolution", "hominins"]) assert.ok(ids.has(id));
+  assert.ok(!ids.has("culture"));
 
   const allocation = first.targets.reduce((sum, target) => sum + target.allocation, 0);
   assert.ok(Math.abs(allocation - 1) < 1e-9);
