@@ -33,8 +33,16 @@ test("post-checkpoint tectonic evolution is added after the reconstructed checkp
   assert.ok(Number.isFinite(base));
 });
 
-test("atmosphere no longer imports ETOPO directly as its checkpoint terrain", () => {
-  const source = fs.readFileSync(new URL("../src/sim/GeneralAtmosphereCirculation.js", import.meta.url), "utf8");
-  assert.match(source, /reconstructedBedrockElevation777At/);
-  assert.doesNotMatch(source, /generated\/etopo-2022\.generated\.js/);
+test("atmosphere and surface renderer no longer import ETOPO directly as checkpoint terrain", () => {
+  const atmosphere = fs.readFileSync(new URL("../src/sim/GeneralAtmosphereCirculation.js", import.meta.url), "utf8");
+  const terrain = fs.readFileSync(new URL("../src/render/TerrainChunkManager.js", import.meta.url), "utf8");
+  for (const source of [atmosphere, terrain]) {
+    assert.match(source, /reconstructedBedrockElevation777At/);
+    assert.doesNotMatch(source, /generated\/etopo-2022\.generated\.js/);
+  }
+});
+
+test("surface diagnostics identify the reconstructed checkpoint terrain path", () => {
+  const terrain = fs.readFileSync(new URL("../src/render/TerrainChunkManager.js", import.meta.url), "utf8");
+  assert.match(terrain, /reconstructedCheckpointTerrain:\s*true/);
 });
