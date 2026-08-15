@@ -9,6 +9,7 @@ function biomeFromHydroClimate(globalState, latitude, temperatureCelsius, soilMo
   if (temperatureCelsius > 23) return soilMoistureIndex > 0.7 ? "tropical woodland" : "warm savanna";
   if (soilMoistureIndex > 0.68) return "temperate forest";
   if (soilMoistureIndex > 0.38) return "open woodland";
+  if (soilMoistureIndex < 0.18) return "desert / semi-desert";
   return "dry grassland";
 }
 
@@ -60,7 +61,20 @@ export function regionalState(
     soilSource: hydro.soilSource ?? null,
     soilPolicy: hydro.soilPolicy ?? null,
     waterBalanceResidual: Number.isFinite(hydro.waterBalanceResidualMm) ? hydro.waterBalanceResidualMm : null,
+    atmospherePolicy: hydro.atmospherePolicy ?? null,
+    itczLatitude: Number.isFinite(hydro.itczLatitude) ? hydro.itczLatitude : null,
+    windEast: Number.isFinite(hydro.windEastMs) ? hydro.windEastMs : null,
+    windNorth: Number.isFinite(hydro.windNorthMs) ? hydro.windNorthMs : null,
+    windSpeed: Number.isFinite(hydro.windSpeedMs) ? hydro.windSpeedMs : null,
+    oceanMoistureFetch: Number.isFinite(hydro.oceanMoistureFetch) ? hydro.oceanMoistureFetch : null,
+    landMoistureRecycling: Number.isFinite(hydro.landMoistureRecycling) ? hydro.landMoistureRecycling : null,
+    convectiveAscent: Number.isFinite(hydro.convectiveAscent) ? hydro.convectiveAscent : null,
+    subtropicalSubsidence: Number.isFinite(hydro.subtropicalSubsidence) ? hydro.subtropicalSubsidence : null,
+    orographicLift: Number.isFinite(hydro.orographicLift) ? hydro.orographicLift : null,
+    rainShadow: Number.isFinite(hydro.rainShadow) ? hydro.rainShadow : null,
+    wettestMonthIndex: Number.isInteger(hydro.wettestMonthIndex) ? hydro.wettestMonthIndex : null,
     biome: vegetationState?.biomeLabel ?? fallbackBiome,
+    hydroclimatePotentialBiome: fallbackBiome,
     biomeCode: vegetationState?.biomeCode ?? null,
     npp: Number.isFinite(vegetationState?.npp) ? round(vegetationState.npp, 1) : null,
     lai: Number.isFinite(vegetationState?.lai) ? round(vegetationState.lai, 2) : null,
@@ -93,16 +107,16 @@ export function regionalState(
     vegetationSource: vegetationState?.source ?? null,
     checkpointVegetation: Boolean(vegetationState) && globalState.elapsedYears <= 0,
     climateSource: closedBudget
-      ? "krapp-777 + branch-hydroclimate + closed-water-budget"
-      : "krapp-777 + branch-hydroclimate",
+      ? "krapp-777 + general-atmosphere + closed-water-budget"
+      : "krapp-777 + general-atmosphere",
     checkpointClimate: globalState.elapsedYears <= 0,
     gridSpacingDegrees: hydro.gridSpacingDegrees,
     hydroClimatePolicy: hydro.policy,
     waterBalancePolicy: hydro.waterBalancePolicy ?? null,
     confidence: closedBudget
-      ? `Krapp 777 ka climate + model-derived branch response at ${hydro.gridSpacingDegrees}°; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; vegetation uses the published 777 ka BIOME4 category/NPP/LAI baseline with continuous hydro-CO₂ response, an independently implemented BIOME4 climate-eligibility sieve, and opt-in source-operational daily rooting/water/phenology diagnostics; those diagnostics do not feed back into hydrology and categorical transitions remain disabled" : ""}`
+      ? `Krapp 777 ka calibrated climate + general orbital/land-ocean circulation at ${hydro.gridSpacingDegrees}°; moisture transport includes ITCZ/Hadley migration, thermal pressure-gradient winds, ocean fetch, recycling, subsidence and orography; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; lightweight vegetation retains the published checkpoint category for fast sampling while selected-region BIOME4 competition supplies lagged categorical succession" : ""}`
       : globalState.elapsedYears > 0
-        ? `Krapp 777 ka checkpoint + model-derived gridded branch response at ${hydro.gridSpacingDegrees}°; moisture/runoff remain diagnostic proxies`
-        : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; moisture/runoff are model-derived diagnostic proxies`
+        ? `Krapp 777 ka checkpoint + general intermediate-complexity atmospheric circulation at ${hydro.gridSpacingDegrees}°; moisture/runoff remain lower-fidelity diagnostics where the closed water budget is unavailable`
+        : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; general atmosphere branch anomaly is zero at initialization`
   });
 }
