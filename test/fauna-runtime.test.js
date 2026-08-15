@@ -63,7 +63,7 @@ test("group behavior is deterministic and moves with simulated time", () => {
   assert.ok(["graze", "drink", "travel", "flee", "rest"].includes(a.behavior));
 });
 
-test("lineage mobility changes movement distance without changing population", () => {
+test("lineage mobility changes movement distance without changing behavior category", () => {
   const field = faunaPopulationAt({ state, vegetationSample: vegetation, hydrologySample: hydrology, areaKm2: 10 });
   const slow = faunaGroupBehaviorAt({ role: "herbivore", id: "trait-herd", elapsedYears: 4, field, lineage: lineage({ mobility: 0 }) });
   const fast = faunaGroupBehaviorAt({ role: "herbivore", id: "trait-herd", elapsedYears: 4, field, lineage: lineage({ mobility: 1 }) });
@@ -125,20 +125,22 @@ test("social lineages form larger, fewer groups without changing represented pop
 
   assert.equal(low.visiblePopulation, high.visiblePopulation);
   assert.ok(high.herds.length < low.herds.length);
+  assert.ok(high.herds[0].groupSizeScale > low.herds[0].groupSizeScale);
   assert.equal(low.herds.reduce((sum, herd) => sum + herd.population, 0), low.visiblePopulation);
   assert.equal(high.herds.reduce((sum, herd) => sum + herd.population, 0), high.visiblePopulation);
 });
 
-test("body mass affects observed scale and group spacing", () => {
+test("body mass affects observed scale and spacing without changing aggregate population", () => {
   const smallState = { ...state, speciesLineages: [lineage({ bodyMassLog10Kg: -0.3 })] };
   const largeState = { ...state, speciesLineages: [lineage({ bodyMassLog10Kg: 3.0 })] };
   const options = { vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 88, windowRadiusKm: 2, individualRadiusKm: 2 };
   const small = buildObservedFauna({ ...options, state: smallState });
   const large = buildObservedFauna({ ...options, state: largeState });
 
+  assert.equal(small.visiblePopulation, large.visiblePopulation);
   assert.ok(small.individuals.length > 0 && large.individuals.length > 0);
   assert.ok(large.individuals[0].scale > small.individuals[0].scale);
-  assert.ok(large.herds[0].radiusKm > 0);
+  assert.ok(large.herds[0].spacingScale > small.herds[0].spacingScale);
 });
 
 test("group populations conserve the observed aggregate populations", () => {
