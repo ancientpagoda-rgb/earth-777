@@ -63,6 +63,49 @@ export const TOPOGRAPHY_EVIDENCE_SOURCES = Object.freeze([
     note: "Curated multi-resolution multibeam synthesis, especially valuable where ocean-floor measurements are much finer than global base grids."
   }),
   source({
+    sourceId: "bedmachine-greenland-v6",
+    family: "polar-subglacial-bed",
+    fields: ["bedrockElevationMeters", "bathymetryMeters", "iceThicknessMeters", "surfaceElevationMeters"],
+    relation: EVIDENCE_RELATIONS.MODERN_ANCHOR,
+    sourceQuality: 0.96,
+    spatialResolution: "150 m",
+    access: "nasa-earthdata-nsidc",
+    doi: "10.5067/6B6B225B8V2D",
+    note: "Modern Greenland bed topography and bathymetry inferred from radar, mass conservation, multibeam and related constraints. The bed is a much better spatial anchor for paleo ice/GIA reconstruction than the modern ice surface, but still requires deep-time vertical-motion transformation."
+  }),
+  source({
+    sourceId: "bedmachine-antarctica-v4",
+    family: "polar-subglacial-bed",
+    fields: ["bedrockElevationMeters", "bathymetryMeters", "iceThicknessMeters", "surfaceElevationMeters"],
+    relation: EVIDENCE_RELATIONS.MODERN_ANCHOR,
+    sourceQuality: 0.96,
+    spatialResolution: "500 m",
+    access: "nasa-earthdata-nsidc",
+    doi: "10.5067/POJQI54A45HX",
+    note: "Modern Antarctic bed topography/bathymetry combining ice-thickness constraints, ice-flow perturbation analysis, REMA surface elevation and other measurements. It anchors the solid bed beneath ice rather than assuming modern ice-surface height is paleotopography."
+  }),
+  source({
+    sourceId: "rema-mosaic-v2",
+    family: "polar-modern-surface-dem",
+    fields: ["surfaceElevationMeters", "surfaceElevationChange"],
+    relation: EVIDENCE_RELATIONS.MODERN_ANCHOR,
+    sourceQuality: 0.94,
+    spatialResolution: "2 m",
+    access: "pgc-download-stac",
+    doi: "10.7910/DVN/EBW8UC",
+    note: "Very high-resolution time-stamped Antarctic DSM. Useful for modern surface geometry and change validation; deep-time solid-bed reconstruction should prefer BedMachine where ice is present."
+  }),
+  source({
+    sourceId: "ibcao-5.1",
+    family: "arctic-modern-bathymetry",
+    fields: ["bathymetryMeters", "arcticSeabedGeometry"],
+    relation: EVIDENCE_RELATIONS.MODERN_ANCHOR,
+    sourceQuality: 0.95,
+    spatialResolution: "100 m",
+    access: "gebco-download",
+    note: "High-resolution Arctic Ocean bathymetry compilation north of 64°N and a regional source for GEBCO. Useful for paleo shelf/strait geometry once sea level, GIA and sediment/tectonic corrections are applied."
+  }),
+  source({
     sourceId: "ncei-paleo-search",
     family: "paleo-record-discovery",
     fields: ["sedimentCore", "lakeCore", "paleoceanography", "loessPaleosol", "speleothem", "pollen"],
