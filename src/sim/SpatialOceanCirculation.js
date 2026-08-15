@@ -62,6 +62,10 @@ export function advanceOceanCirculation(state, dtYears) {
   const acidityTarget = Math.max(0.1, Math.log(co2 / 245 + 1));
   state.oceanAcidityIndex = relax(state.oceanAcidityIndex, acidityTarget, dt, 160);
   exchangeCarbon(state, dt);
+  state.carbonFluxes = Object.freeze({
+    ...(state.carbonFluxes ?? {}),
+    surfaceToDeepPgCPerYear: Number(state.oceanCirculationCarbonFluxPgCPerYear) || 0
+  });
   return state;
 }
 
