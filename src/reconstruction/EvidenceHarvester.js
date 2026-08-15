@@ -1,7 +1,7 @@
 const DEG = Math.PI / 180;
 const EARTH_RADIUS_KM = 6371.0088;
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-const finite = (value) => Number.isFinite(Number(value));
+const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 
 export const EVIDENCE_HARVEST_POLICY = "target-age-distance-uncertainty-source-ranking-v1";
 
