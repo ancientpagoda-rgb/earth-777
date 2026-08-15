@@ -14,6 +14,10 @@ import {
   TOPOGRAPHY_EVIDENCE_SOURCES,
   topographyEvidenceSourceById
 } from "../src/reconstruction/TopographyEvidenceSources.js";
+import {
+  normalizeTopographyEvidenceRecord,
+  TOPOGRAPHY_EVIDENCE_HARVEST_POLICY
+} from "../src/reconstruction/TopographyEvidenceHarvester.js";
 
 function close(actual, expected, tolerance = 1e-9) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
@@ -103,6 +107,12 @@ test("spatial distance lowers otherwise identical evidence rank", () => {
   assert.ok(remote.distanceKm > local.distanceKm);
 });
 
+test("missing coordinates remain unresolved rather than becoming zero-zero", () => {
+  const ranked = rankEvidenceRecord({ sourceId: "unlocated", relation: EVIDENCE_RELATIONS.NEARBY_PALEO, ageBP: 777_000, value: 10, sigma: 10 }, { targetYearBP: 777_000 });
+  assert.equal(ranked.distanceKm, null);
+  assert.equal(ranked.scoreComponents.spatial, 0.72);
+});
+
 test("target-overlapping age intervals are eligible while non-overlapping intervals are not", () => {
   const records = [
     { sourceId: "overlap", relation: EVIDENCE_RELATIONS.TARGET_INTERVAL, ageRangeBP: [775_000, 779_000], value: 1, sigma: 1 },
@@ -124,9 +134,22 @@ test("topography source manifest spans modern DEMs, paleo discovery, geomorphic 
   assert.equal(topographyEvidenceSourceById("spratt-lisiecki-2016").relation, EVIDENCE_RELATIONS.DIRECT_TARGET);
 });
 
-test("terrain harvester path reports policy and evidence accounting", () => {
-  const sample = terrain777BedrockSampleFromEvidence(0, 0, []);
+test("source normalization inherits catalog relation and quality but explicit record relation wins", () => {
+  const gebco = normalizeTopographyEvidenceRecord({ sourceId: "gebco-2026", value: -100 });
+  assert.equal(gebco.sourceCatalogMatched, true);
+  assert.equal(gebco.relation, EVIDENCE_RELATIONS.MODERN_ANCHOR);
+  assert.equal(gebco.sourceQuality, topographyEvidenceSourceById("gebco-2026").sourceQuality);
+  const direct = normalizeTopographyEvidenceRecord({ sourceId: "usgs-marine-terraces", relation: EVIDENCE_RELATIONS.DIRECT_TARGET, ageBP: 777_000, value: 4 });
+  assert.equal(direct.relation, EVIDENCE_RELATIONS.DIRECT_TARGET);
+});
+
+test("terrain harvester path reports source normalization and evidence accounting", () => {
+  const sample = terrain777BedrockSampleFromEvidence(0, 0, [{ sourceId: "gebco-2026", value: -20 }]);
   assert.equal(sample.policy, TERRAIN_777_RECONSTRUCTION_POLICY);
-  assert.equal(sample.evidenceRecordCount, 0);
-  assert.equal(sample.evidenceHarvest.policy, "target-age-distance-uncertainty-source-ranking-v1");
+  assert.equal(sample.evidenceRecordCount, 1);
+  assert.equal(sample.evidenceHarvest.policy, TOPOGRAPHY_EVIDENCE_HARVEST_POLICY);
+  assert.equal(sample.evidenceHarvest.genericRankingPolicy, "target-age-distance-uncertainty-source-ranking-v1");
+  assert.equal(sample.sourceCatalogMatchedCount, 1);
+  assert.equal(sample.modernAnchorEvidenceCount, 1);
+  assert.equal(sample.assimilatedHarvestConstraintCount, 0);
 });
