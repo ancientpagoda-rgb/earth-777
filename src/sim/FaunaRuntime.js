@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v10";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v11";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -463,10 +463,18 @@ function spreadHerdAlarms(herds, packs) {
     if (!threat) return herd;
     const dx = herd.x - threat.x;
     const dz = herd.z - threat.z;
-    const distanceToThreatKm = Math.hypot(dx, dz);
-    const heading = distanceToThreatKm > 1e-12 ? Math.atan2(dz, dx) : source.heading;
+    const alarmThreatDistanceBeforeKm = Math.hypot(dx, dz);
+    const heading = alarmThreatDistanceBeforeKm > 1e-12 ? Math.atan2(dz, dx) : source.heading;
+    const alarmMoveDistanceKm = Math.max(0, Number(herd.movementDistanceKm) || 0) * (0.35 + responseStrength * 0.65);
+    const alarmMoveXKm = Math.cos(heading) * alarmMoveDistanceKm;
+    const alarmMoveZKm = Math.sin(heading) * alarmMoveDistanceKm;
+    const x = herd.x + alarmMoveXKm;
+    const z = herd.z + alarmMoveZKm;
+    const alarmThreatDistanceKm = Math.hypot(x - threat.x, z - threat.z);
     return Object.freeze({
       ...herd,
+      x,
+      z,
       behavior: "flee",
       heading,
       alarmSourceGroupId: source.id,
@@ -474,7 +482,12 @@ function spreadHerdAlarms(herds, packs) {
       alarmThreatLineageId: threat.lineageId ?? null,
       alarmDistanceKm,
       alarmRadiusKm,
-      alarmResponseStrength: responseStrength
+      alarmResponseStrength: responseStrength,
+      alarmThreatDistanceBeforeKm,
+      alarmThreatDistanceKm,
+      alarmMoveDistanceKm,
+      alarmMoveXKm,
+      alarmMoveZKm
     });
   }));
 }
@@ -502,8 +515,8 @@ function alignHerbivoreIndividuals(individuals, herds) {
     return Object.freeze({
       ...animal,
       behavior: "flee",
-      x: animal.x + (Number(herd.fleeXKm) || 0),
-      z: animal.z + (Number(herd.fleeZKm) || 0),
+      x: animal.x + (Number(herd.fleeXKm) || Number(herd.alarmMoveXKm) || 0),
+      z: animal.z + (Number(herd.fleeZKm) || Number(herd.alarmMoveZKm) || 0),
       yaw: herd.heading,
       threatGroupId: herd.threatGroupId ?? null,
       threatLineageId: herd.threatLineageId ?? null,
@@ -574,6 +587,7 @@ export function buildObservedFauna({
   const predatorTargetCount = packs.filter((pack) => pack.targetGroupId != null).length;
   const threatenedHerdCount = herds.filter((herd) => herd.threatGroupId != null).length;
   const alarmedHerdCount = herds.filter((herd) => herd.alarmThreatGroupId != null).length;
+  const movedAlarmedHerdCount = herds.filter((herd) => Number(herd.alarmMoveDistanceKm) > 0).length;
 
   return Object.freeze({
     policy: FAUNA_POLICY,
@@ -591,6 +605,7 @@ export function buildObservedFauna({
     predatorTargetCount,
     threatenedHerdCount,
     alarmedHerdCount,
+    movedAlarmedHerdCount,
     behaviorCounts: Object.freeze(behaviorCounts),
     materializedHerbivores: herbivoreIndividuals.length,
     materializedCarnivores: carnivoreIndividuals.length,
