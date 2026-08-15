@@ -158,6 +158,31 @@ export function faunaForCells(cells = [], context = {}) {
 
 export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsedYears = 0, field = {}, lineage = null } = {}) {
   const phase = fract((Number(elapsedYears) || 0) * 365.2425 + random01(hashText(id)) * 31.7);
+  if (!lineage) {
+    let behavior;
+    if (role === "carnivore") {
+      const huntDrive = clamp01((field.preyPressure ?? 0.5) * 0.76 + phase * 0.24);
+      behavior = huntDrive > 0.64 ? "hunt" : phase > 0.72 ? "travel" : phase > 0.38 ? "stalk" : "rest";
+    } else {
+      const threat = clamp01((field.predatorPressure ?? 0.1) * 0.72 + random01(hashText(id) + Math.floor(elapsedYears * 12)) * 0.18);
+      const need = clamp01((1 - (field.productivity ?? 0.6)) * 0.58 + (1 - (field.waterAccess ?? 0.6)) * 0.42);
+      behavior = threat > 0.66 ? "flee"
+        : need > 0.58 ? "travel"
+          : phase < 0.15 ? "drink"
+            : phase > 0.84 ? "rest"
+              : "graze";
+    }
+    const seed = hashText(id);
+    const seasonal = (Number(elapsedYears) || 0) * TAU;
+    const heading = random01(seed + 17) * TAU + Math.sin(seasonal + random01(seed + 29) * TAU) * 0.72;
+    const distanceKm = behavior === "flee" ? 0.16
+      : behavior === "travel" || behavior === "hunt" ? 0.11
+        : behavior === "stalk" ? 0.06
+          : behavior === "drink" ? 0.04
+            : 0.025;
+    return Object.freeze({ role, behavior, heading, distanceKm });
+  }
+
   const traits = lineageTraits(lineage);
   let behavior;
   if (role === "carnivore") {
@@ -242,6 +267,8 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       representation: materialized ? "individuals" : role === "carnivore" ? "pack" : "herd",
       behavior: behavior.behavior,
       heading: behavior.heading,
+      groupSizeScale: lineage ? groupSizeScale : null,
+      spacingScale: lineage ? spacingScale : null,
       mobility: lineage ? traits.mobility : null,
       sociality: lineage ? traits.sociality : null,
       dietBreadth: lineage ? traits.dietBreadth : null,
@@ -255,7 +282,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       const animalSeed = seed + index * 101.3 + animalIndex * 17.7;
       const animalAngle = random01(animalSeed + 71) * TAU;
       const animalDistance = groupRadiusKm * Math.sqrt(random01(animalSeed + 89));
-      const wobble = 0.004 * (0.75 + traits.mobility * 0.5) * Math.sin((Number(elapsedYears) || 0) * 365.2425 * TAU + random01(animalSeed + 109) * TAU);
+      const wobble = 0.004 * (lineage ? 0.75 + traits.mobility * 0.5 : 1) * Math.sin((Number(elapsedYears) || 0) * 365.2425 * TAU + random01(animalSeed + 109) * TAU);
       const baseScale = role === "carnivore" ? 0.62 + random01(animalSeed + 113) * 0.48 : 0.72 + random01(animalSeed + 113) * 0.72;
       individuals.push(Object.freeze({
         id: `${id}:${animalIndex}`,
