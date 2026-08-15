@@ -1,4 +1,5 @@
 import { homininPopulationAt } from "../sim/HomininDemography.js";
+import { homininSocialAt } from "../sim/HomininSocialOrganization.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -28,6 +29,7 @@ export function surfaceBiomeProfile(vegetationSample = null, state = {}, latitud
   const productivity = clamp((state.productivityIndex ?? 1) / 1.45, 0.25, 1);
   const vigor = clamp(npp * 0.62 + lai * 0.28 + productivity * 0.10, 0.08, 1);
   const localHominins = homininPopulationAt(state, latitude, longitude, 100);
+  const localSocial = homininSocialAt(state, latitude, longitude, 100);
   const localDensity = Math.max(0, Number(localHominins?.densityPersonsPerKm2) || 0);
   const homininDensity = localDensity > 0 ? localDensity / (localDensity + 0.018) : 0;
   return Object.freeze({
@@ -40,6 +42,18 @@ export function surfaceBiomeProfile(vegetationSample = null, state = {}, latitud
     homininDensity: clamp(homininDensity, 0, 1),
     homininPersonsWithin100Km: localHominins?.estimatedPersonsWithinRadius ?? 0,
     nearestHomininDemeDistanceKm: localHominins?.nearestDemeDistanceKm ?? null,
+    homininSocialSiteId: localSocial?.nearestSiteId ?? null,
+    homininSocialSiteDistanceKm: localSocial?.nearestSiteDistanceKm ?? null,
+    homininSocialSiteOffsetEastKm: localSocial?.siteOffsetEastKm ?? null,
+    homininSocialSiteOffsetNorthKm: localSocial?.siteOffsetNorthKm ?? null,
+    homininSocialSitePopulationPersons: localSocial?.sitePopulationPersons ?? 0,
+    homininSocialSiteHouseholds: localSocial?.householdCount ?? 0,
+    homininSettlementPersistence: localSocial?.settlementPersistence ?? 0,
+    homininSettlementLabel: localSocial?.settlementLabel ?? null,
+    homininBuiltEnvironmentIndex: localSocial?.builtEnvironmentIndex ?? 0,
+    homininStoredFoodPersonDays: localSocial?.storedFoodPersonDays ?? 0,
+    homininExchangeDegree: localSocial?.exchangeDegree ?? 0,
+    homininResidentialMovesPerYear: localSocial?.residentialMovesPerYear ?? 0,
     vigor,
     biomeCode: vegetationSample?.biomeCode ?? null,
     biomeLabel: vegetationSample?.biomeLabel ?? null
