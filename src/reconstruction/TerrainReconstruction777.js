@@ -5,12 +5,13 @@ import {
   RECONSTRUCTION_STREAMS
 } from "./ReconstructionAssimilation.js";
 import { shoreline777Sample } from "./ShorelineReconstruction777.js";
+import { EVIDENCE_RELATIONS, harvestEvidence } from "./EvidenceHarvester.js";
 
 const clampLatitude = (value) => Math.max(-90, Math.min(90, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 const positiveSigma = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
 
-export const TERRAIN_777_RECONSTRUCTION_POLICY = "modern-relief-explicit-hindcast-paleo-assimilation-v2";
+export const TERRAIN_777_RECONSTRUCTION_POLICY = "modern-relief-explicit-hindcast-paleo-assimilation-v3";
 
 /**
  * The default correction is intentionally zero-valued and uncertainty-incomplete.
@@ -82,6 +83,66 @@ export function terrain777BedrockSample(latitude, longitude, {
     shorelineConfidenceClass: shoreline.confidenceClass,
     shorelineLandProbability: shoreline.landProbability,
     epistemicStatus: "777 ka bedrock reconstruction plus uncertainty-aware global shoreline classification. Modern ETOPO supplies spatial detail only after an explicit hindcast transform; historical observations calibrate process models and paleo constraints may directly update the target epoch."
+  });
+}
+
+function harvestedConstraint(record) {
+  const transformed = record.relation === EVIDENCE_RELATIONS.TRANSFORMED_HINDCAST || Boolean(record.transformedToTarget);
+  return Object.freeze({
+    value: Number(record.value),
+    sigma: positiveSigma(record.sigma),
+    stream: transformed ? RECONSTRUCTION_STREAMS.PROCESS : RECONSTRUCTION_STREAMS.PALEO,
+    sourceId: record.sourceId ?? record.id ?? null,
+    method: record.method ?? record.relation,
+    transformed,
+    note: record.note ?? null
+  });
+}
+
+function harvestedCalibration(record) {
+  return Object.freeze({
+    parameter: record.parameter ?? record.field ?? null,
+    value: Number.isFinite(Number(record.value)) ? Number(record.value) : null,
+    sigma: positiveSigma(record.sigma),
+    sourceId: record.sourceId ?? record.id ?? null,
+    method: record.method ?? "harvested process calibration",
+    note: record.note ?? null
+  });
+}
+
+/**
+ * Convenience path for Evidence Harvester adapters.
+ *
+ * Raw nearby paleo records, modern anchors and untransformed historical rates are
+ * deliberately retained in evidenceHarvest but do not change the target elevation.
+ * Only target-overlapping observations and explicitly target-transformed hindcasts
+ * are forwarded as numerical 777 ka constraints.
+ */
+export function terrain777BedrockSampleFromEvidence(latitude, longitude, evidenceRecords = [], options = {}) {
+  const harvest = harvestEvidence(evidenceRecords, {
+    targetYearBP: 777_000,
+    latitude,
+    longitude,
+    field: "bedrockElevationMeters",
+    uncertaintyScale: options.uncertaintyScaleMeters ?? 100
+  });
+  const harvestedConstraints = harvest.targetConstraints.map(harvestedConstraint);
+  const harvestedCalibrationRecords = harvest.processCalibration.map(harvestedCalibration);
+  const sample = terrain777BedrockSample(latitude, longitude, {
+    modernAnchorSigmaMeters: options.modernAnchorSigmaMeters ?? null,
+    hindcastCorrection: options.hindcastCorrection ?? null,
+    paleoConstraints: [...(options.paleoConstraints ?? []), ...harvestedConstraints],
+    historicalCalibration: [...(options.historicalCalibration ?? []), ...harvestedCalibrationRecords],
+    modelCompletion: options.modelCompletion ?? null
+  });
+  return Object.freeze({
+    ...sample,
+    evidenceHarvest: harvest,
+    evidenceRecordCount: harvest.ranked.length,
+    assimilatedHarvestConstraintCount: harvest.targetConstraints.length,
+    calibrationRecordCount: harvest.processCalibration.length,
+    nearbyUnassimilatedEvidenceCount: harvest.nearbyPaleo.length,
+    modernAnchorEvidenceCount: harvest.modernAnchors.length
   });
 }
 
