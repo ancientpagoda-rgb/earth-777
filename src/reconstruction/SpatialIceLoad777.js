@@ -19,14 +19,6 @@ function normalizeSource(record) {
   });
 }
 
-/**
- * Normalize one spatial ice-load cell at the 777 ka target.
- *
- * Unknown ice is represented by absence of a record, never by an implicit 0 m cell.
- * A numeric thickness is eligible only when it is either a direct target-age
- * thickness constraint or the output of an explicitly documented transformation /
- * dynamic ice reconstruction to 777 ka.
- */
 export function normalizeIceLoad777Cell(record = {}) {
   const source = normalizeSource(record);
   const thickness = finite(record.iceThicknessMeters) ? Math.max(0, Number(record.iceThicknessMeters)) : null;
@@ -62,7 +54,7 @@ export function validateIceLoad777Grid(records = [], {
   const rejected = cells.filter((cell) => !eligible.includes(cell));
   const totalKnownIceVolumeM3 = eligible.reduce((sum, cell) => sum + (cell.iceVolumeM3 ?? 0), 0);
   const totalKnownIceMassKg = eligible.reduce((sum, cell) => sum + (cell.iceMassKg ?? 0), 0);
-  const areaComplete = eligible.every((cell) => cell.cellAreaM2 != null);
+  const areaComplete = eligible.length > 0 && eligible.every((cell) => cell.cellAreaM2 != null);
   return Object.freeze({
     policy: SPATIAL_ICE_LOAD_777_POLICY,
     targetYearBP,
@@ -73,7 +65,7 @@ export function validateIceLoad777Grid(records = [], {
     rejectedCellCount: rejected.length,
     totalKnownIceVolumeM3: areaComplete ? totalKnownIceVolumeM3 : null,
     totalKnownIceMassKg: areaComplete ? totalKnownIceMassKg : null,
-    volumeClosureAvailable: areaComplete && eligible.length > 0,
+    volumeClosureAvailable: areaComplete,
     rule: "Missing cells are unknown rather than ice-free. A complete global or regional ice-volume claim requires explicit spatial coverage metadata in addition to finite cell areas."
   });
 }
