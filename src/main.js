@@ -294,6 +294,7 @@ loadKrapp777Climate()
     earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
     try {
       const vegetationLayer = await loadKrapp777Vegetation();
+      hydroClimate.climate?.setCheckpointVegetation?.(vegetationLayer);
       spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers);
       earthView.setVegetation(spatialVegetation, surfaceDetail, true);
     } catch (error) {

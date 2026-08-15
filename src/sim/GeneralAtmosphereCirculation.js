@@ -8,7 +8,7 @@ const wrapLongitude = (longitude) => ((Number(longitude) + 540) % 360) - 180;
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 const CHECKPOINT_STATE = Object.freeze(checkpointState());
 
-export const GENERAL_ATMOSPHERE_POLICY = "orbital-energy-moisture-circulation-v1";
+export const GENERAL_ATMOSPHERE_POLICY = "orbital-energy-moisture-circulation-land-surface-v2";
 
 function seasonAngle(monthIndex) {
   return 2 * Math.PI * ((Number(monthIndex) + 0.5) / 12);
@@ -49,7 +49,7 @@ function isLand(state, latitude, longitude) {
   return dynamicSurfaceElevationMeters(state, latitude, longitude) > (Number(state?.seaLevel) || 0);
 }
 
-function surfaceThermalResponse(state, monthIndex, latitude, longitude) {
+function surfaceThermalResponse(state, monthIndex, latitude, longitude, landSurfaceFeedback = null) {
   const land = isLand(state, latitude, longitude);
   const insolation = dailyMeanInsolationIndex(state, monthIndex, latitude);
   const globalDelta = (Number(state?.temperatureAnomaly) || CHECKPOINT_777.boundary.globalTemperatureAnomaly.value)
@@ -58,15 +58,32 @@ function surfaceThermalResponse(state, monthIndex, latitude, longitude) {
     || CHECKPOINT_777.boundary.globalTemperatureAnomaly.value) - CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
   const elevation = dynamicSurfaceElevationMeters(state, latitude, longitude);
   const heatCapacityResponse = land ? 10.5 : 4.2;
+  const feedbackActive = Boolean(land && landSurfaceFeedback?.active);
+  const albedoDelta = feedbackActive ? clamp(landSurfaceFeedback.surfaceAlbedoDelta, -0.3, 0.3) : 0;
+  const evaporativeDelta = feedbackActive ? clamp(landSurfaceFeedback.evaporativeFractionDelta, -0.9, 0.9) : 0;
+  const surfaceTemperatureAdjustmentCelsius = feedbackActive
+    ? -albedoDelta * 7 - evaporativeDelta * 2.4
+    : 0;
   const thermal = insolation * heatCapacityResponse
     + (land ? globalDelta * 1.08 : oceanDelta * 0.78)
-    - Math.max(0, elevation) * 0.0048;
-  return { land, elevation, insolation, thermal };
+    - Math.max(0, elevation) * 0.0048
+    - albedoDelta * insolation * 14
+    - evaporativeDelta * 4.2;
+  return {
+    land,
+    elevation,
+    insolation,
+    thermal,
+    feedbackActive,
+    albedoDelta,
+    evaporativeDelta,
+    surfaceTemperatureAdjustmentCelsius
+  };
 }
 
-function circulationWind(state, monthIndex, latitude, longitude) {
+function circulationWind(state, monthIndex, latitude, longitude, landSurfaceFeedback = null) {
   const lat = clamp(latitude, -89.5, 89.5);
-  const local = surfaceThermalResponse(state, monthIndex, lat, longitude);
+  const local = surfaceThermalResponse(state, monthIndex, lat, longitude, landSurfaceFeedback);
   const declination = solarDeclinationRadians(state, monthIndex) / DEG;
   const hemisphericThermalEquator = clamp(declination * 0.82, -24, 24);
   const landHeatingDeparture = local.land ? (local.insolation - dailyMeanInsolationIndex(state, monthIndex, hemisphericThermalEquator)) : 0;
@@ -85,7 +102,7 @@ function circulationWind(state, monthIndex, latitude, longitude) {
 
   // Surface pressure gradients emerge from differential heating. Sampling the
   // neighboring surface makes monsoon-like onshore flow possible on any
-  // continent without naming a region or prescribing a historical outcome.
+  // landmass without naming a region or prescribing a historical outcome.
   const gradientStep = 5.5;
   const lonStep = gradientStep / Math.max(0.22, Math.cos(lat * DEG));
   const eastThermal = surfaceThermalResponse(state, monthIndex, lat, wrapLongitude(longitude + lonStep)).thermal;
@@ -96,6 +113,13 @@ function circulationWind(state, monthIndex, latitude, longitude) {
   const pressureGradientNorthMs = clamp((northThermal - southThermal) * 0.42, -7.5, 7.5);
   zonalMs += pressureGradientEastMs;
   meridionalMs += pressureGradientNorthMs;
+
+  if (local.feedbackActive) {
+    const roughnessLogRatio = clamp(landSurfaceFeedback?.roughnessLogRatio ?? 0, -1.5, 1.5);
+    const roughnessDrag = clamp(Math.exp(-roughnessLogRatio * 0.16), 0.78, 1.25);
+    zonalMs *= roughnessDrag;
+    meridionalMs *= roughnessDrag;
+  }
 
   return {
     eastMs: zonalMs,
@@ -117,7 +141,7 @@ function offsetUpwind(latitude, longitude, eastMs, northMs, degrees) {
   return { latitude: lat, longitude: lon };
 }
 
-function moistureFetch(state, monthIndex, latitude, longitude, wind, checkpointClimate = null) {
+function moistureFetch(state, monthIndex, latitude, longitude, wind, checkpointClimate = null, landSurfaceFeedback = null) {
   const sampleDistances = [1.5, 3.5, 6.5, 10.5, 15.5, 22.5];
   let oceanWeight = 0;
   let totalWeight = 0;
@@ -135,13 +159,18 @@ function moistureFetch(state, monthIndex, latitude, longitude, wind, checkpointC
   const baselineRain = Math.max(0, Number(checkpointClimate?.precipitationMmPerYear) || 0);
   const baselineLandRecycle = baselineRain / (baselineRain + 900);
   const productivity = Math.max(0.02, Number(state?.productivityIndex) || 1);
-  const landRecycle = (1 - oceanFetch) * baselineLandRecycle * (0.35 + 0.65 * Math.sqrt(productivity));
+  const recyclingRatio = wind.local.feedbackActive
+    ? clamp(landSurfaceFeedback?.moistureRecyclingRatio ?? 1, 0.25, 3.5)
+    : 1;
+  const landRecycle = (1 - oceanFetch) * baselineLandRecycle
+    * (0.35 + 0.65 * Math.sqrt(productivity)) * recyclingRatio;
   const oceanWarmth = Math.exp(((Number(state?.oceanTemperatureAnomaly) || -1.27) - CHECKPOINT_777.boundary.globalTemperatureAnomaly.value) * 0.055);
   const humidityCapacity = Math.exp(((Number(state?.temperatureAnomaly) || -1.27) - CHECKPOINT_777.boundary.globalTemperatureAnomaly.value) * 0.055);
   return {
     oceanFetch,
     landRecycle,
     elevatedLandWeight,
+    recyclingRatio,
     moistureSupply: Math.max(0.02, (0.12 + oceanFetch * oceanWarmth * 0.88 + landRecycle * 0.55) * humidityCapacity)
   };
 }
@@ -170,9 +199,9 @@ function verticalMotion(state, monthIndex, latitude, longitude, wind) {
   return { convectiveAscent, subtropicalSubsidence, frontalAscent, orographicLift, rainShadow };
 }
 
-export function atmosphericCirculationAt(state, monthIndex, latitude, longitude, checkpointClimate = null) {
-  const wind = circulationWind(state, monthIndex, latitude, longitude);
-  const moisture = moistureFetch(state, monthIndex, latitude, longitude, wind, checkpointClimate);
+export function atmosphericCirculationAt(state, monthIndex, latitude, longitude, checkpointClimate = null, landSurfaceFeedback = null) {
+  const wind = circulationWind(state, monthIndex, latitude, longitude, landSurfaceFeedback);
+  const moisture = moistureFetch(state, monthIndex, latitude, longitude, wind, checkpointClimate, landSurfaceFeedback);
   const vertical = verticalMotion(state, monthIndex, latitude, longitude, wind);
   const ascent = 0.18 + vertical.convectiveAscent * 1.65 + vertical.frontalAscent * 0.62 + vertical.orographicLift * 0.78;
   const drying = Math.exp(-vertical.subtropicalSubsidence * 1.05 - vertical.rainShadow * 0.68);
@@ -196,6 +225,7 @@ export function atmosphericCirculationAt(state, monthIndex, latitude, longitude,
     pressureGradientNorthMs: round(wind.pressureGradientNorthMs, 3),
     oceanMoistureFetch: round(moisture.oceanFetch, 4),
     landMoistureRecycling: round(moisture.landRecycle, 4),
+    landMoistureRecyclingRatio: round(moisture.recyclingRatio, 4),
     moistureSupplyIndex: round(moisture.moistureSupply, 5),
     convectiveAscent: round(vertical.convectiveAscent, 5),
     subtropicalSubsidence: round(vertical.subtropicalSubsidence, 5),
@@ -203,11 +233,19 @@ export function atmosphericCirculationAt(state, monthIndex, latitude, longitude,
     orographicLift: round(vertical.orographicLift, 5),
     rainShadow: round(vertical.rainShadow, 5),
     precipitationPotential: round(precipitationPotential, 7),
-    epistemicStatus: "general intermediate-complexity atmosphere: orbital insolation, land-ocean thermal contrast, zonal/meridional circulation, moisture fetch, ascent/subsidence and orographic response; no geographic outcome is hard-coded"
+    landSurfacePolicy: landSurfaceFeedback?.policy ?? null,
+    landSurfaceFeedbackActive: wind.local.feedbackActive,
+    vegetationCoverFraction: Number.isFinite(landSurfaceFeedback?.vegetationCover) ? landSurfaceFeedback.vegetationCover : null,
+    estimatedVegetationLai: Number.isFinite(landSurfaceFeedback?.estimatedLai) ? landSurfaceFeedback.estimatedLai : null,
+    surfaceAlbedoDelta: round(wind.local.albedoDelta, 5),
+    evaporativeFractionDelta: round(wind.local.evaporativeDelta, 5),
+    surfaceTemperatureAdjustmentCelsius: round(wind.local.surfaceTemperatureAdjustmentCelsius, 5),
+    roughnessLogRatio: Number.isFinite(landSurfaceFeedback?.roughnessLogRatio) ? landSurfaceFeedback.roughnessLogRatio : 0,
+    epistemicStatus: "general intermediate-complexity atmosphere: orbital insolation, land-ocean thermal contrast, zonal/meridional circulation, moisture fetch, ascent/subsidence, orographic response and optional deterministic land-surface albedo/evapotranspiration/roughness feedback; no geographic outcome is hard-coded"
   });
 }
 
-export function branchAtmosphereResponseAt(state, monthIndex, latitude, longitude, checkpointClimate = null) {
+export function branchAtmosphereResponseAt(state, monthIndex, latitude, longitude, checkpointClimate = null, landSurfaceFeedback = null) {
   if ((Number(state?.elapsedYears) || 0) <= 0) {
     const checkpoint = atmosphericCirculationAt(CHECKPOINT_STATE, monthIndex, latitude, longitude, checkpointClimate);
     return Object.freeze({
@@ -218,7 +256,7 @@ export function branchAtmosphereResponseAt(state, monthIndex, latitude, longitud
       cloudDeltaPercent: 0
     });
   }
-  const current = atmosphericCirculationAt(state, monthIndex, latitude, longitude, checkpointClimate);
+  const current = atmosphericCirculationAt(state, monthIndex, latitude, longitude, checkpointClimate, landSurfaceFeedback);
   const checkpoint = atmosphericCirculationAt(CHECKPOINT_STATE, monthIndex, latitude, longitude, checkpointClimate);
   const globalDelta = (Number(state?.temperatureAnomaly) || CHECKPOINT_777.boundary.globalTemperatureAnomaly.value)
     - CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
@@ -226,7 +264,8 @@ export function branchAtmosphereResponseAt(state, monthIndex, latitude, longitud
   const insolationDelta = current.insolationIndex - checkpoint.insolationIndex;
   const surfaceContrast = current.land ? 1.45 : 0.72;
   const temperatureDeltaCelsius = globalDelta * (0.82 + polarWeight * 0.62)
-    + insolationDelta * 8.5 * surfaceContrast;
+    + insolationDelta * 8.5 * surfaceContrast
+    + current.surfaceTemperatureAdjustmentCelsius;
   const rawPrecipitationScale = current.precipitationPotential / Math.max(1e-7, checkpoint.precipitationPotential);
   const precipitationScale = Math.max(0.015, rawPrecipitationScale);
   const cloudDeltaPercent = Math.log(precipitationScale) * 16 - temperatureDeltaCelsius * 0.38
@@ -234,8 +273,15 @@ export function branchAtmosphereResponseAt(state, monthIndex, latitude, longitud
   return Object.freeze({ current, checkpoint, temperatureDeltaCelsius, precipitationScale, cloudDeltaPercent });
 }
 
-export function annualAtmosphereResponseAt(state, latitude, longitude, checkpointClimate = null) {
-  const months = [1, 4, 7, 10].map((month) => branchAtmosphereResponseAt(state, month, latitude, longitude, checkpointClimate));
+export function annualAtmosphereResponseAt(state, latitude, longitude, checkpointClimate = null, landSurfaceFeedback = null) {
+  const months = [1, 4, 7, 10].map((month) => branchAtmosphereResponseAt(
+    state,
+    month,
+    latitude,
+    longitude,
+    checkpointClimate,
+    landSurfaceFeedback
+  ));
   const geometricPrecipitationScale = Math.exp(months.reduce((sum, month) => sum + Math.log(Math.max(1e-8, month.precipitationScale)), 0) / months.length);
   return Object.freeze({
     policy: GENERAL_ATMOSPHERE_POLICY,

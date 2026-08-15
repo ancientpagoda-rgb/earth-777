@@ -68,6 +68,14 @@ export function regionalState(
     windSpeed: Number.isFinite(hydro.windSpeedMs) ? hydro.windSpeedMs : null,
     oceanMoistureFetch: Number.isFinite(hydro.oceanMoistureFetch) ? hydro.oceanMoistureFetch : null,
     landMoistureRecycling: Number.isFinite(hydro.landMoistureRecycling) ? hydro.landMoistureRecycling : null,
+    landSurfacePolicy: hydro.landSurfacePolicy ?? null,
+    landSurfaceFeedbackActive: Boolean(hydro.landSurfaceFeedbackActive),
+    estimatedVegetationLai: Number.isFinite(hydro.estimatedVegetationLai) ? hydro.estimatedVegetationLai : null,
+    vegetationCoverFraction: Number.isFinite(hydro.vegetationCoverFraction) ? hydro.vegetationCoverFraction : null,
+    surfaceAlbedoDelta: Number.isFinite(hydro.surfaceAlbedoDelta) ? hydro.surfaceAlbedoDelta : null,
+    evaporativeFractionDelta: Number.isFinite(hydro.evaporativeFractionDelta) ? hydro.evaporativeFractionDelta : null,
+    moistureRecyclingRatio: Number.isFinite(hydro.moistureRecyclingRatio) ? hydro.moistureRecyclingRatio : null,
+    roughnessLogRatio: Number.isFinite(hydro.roughnessLogRatio) ? hydro.roughnessLogRatio : null,
     convectiveAscent: Number.isFinite(hydro.convectiveAscent) ? hydro.convectiveAscent : null,
     subtropicalSubsidence: Number.isFinite(hydro.subtropicalSubsidence) ? hydro.subtropicalSubsidence : null,
     orographicLift: Number.isFinite(hydro.orographicLift) ? hydro.orographicLift : null,
@@ -114,9 +122,9 @@ export function regionalState(
     hydroClimatePolicy: hydro.policy,
     waterBalancePolicy: hydro.waterBalancePolicy ?? null,
     confidence: closedBudget
-      ? `Krapp 777 ka calibrated climate + general orbital/land-ocean circulation at ${hydro.gridSpacingDegrees}°; moisture transport includes ITCZ/Hadley migration, thermal pressure-gradient winds, ocean fetch, recycling, subsidence and orography; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; lightweight vegetation retains the published checkpoint category for fast sampling while selected-region BIOME4 competition supplies lagged categorical succession" : ""}`
+      ? `Krapp 777 ka calibrated climate + general orbital/land-ocean circulation at ${hydro.gridSpacingDegrees}°; moisture transport includes ITCZ/Hadley migration, thermal pressure-gradient winds, ocean fetch, recycling, subsidence and orography${hydro.landSurfaceFeedbackActive ? "; vegetation-water feedback modifies albedo, evaporative cooling, aerodynamic roughness and terrestrial moisture recycling through a deterministic two-pass solve" : ""}; Priestley–Taylor/FAO solar PET and a closed ${soilProfileApplied ? "BIOME4 two-layer" : "fallback single-layer"} water budget conserve precipitation into AET, routed runoff, and storage change${soilProfileApplied ? "; deep drainage currently joins routed runoff pending groundwater/baseflow" : ""}${vegetationState ? "; lightweight vegetation retains the published checkpoint category for fast sampling while selected-region BIOME4 competition supplies lagged categorical succession" : ""}`
       : globalState.elapsedYears > 0
-        ? `Krapp 777 ka checkpoint + general intermediate-complexity atmospheric circulation at ${hydro.gridSpacingDegrees}°; moisture/runoff remain lower-fidelity diagnostics where the closed water budget is unavailable`
+        ? `Krapp 777 ka checkpoint + general intermediate-complexity atmospheric circulation at ${hydro.gridSpacingDegrees}°${hydro.landSurfaceFeedbackActive ? " + deterministic vegetation-water land-surface feedback" : ""}; moisture/runoff remain lower-fidelity diagnostics where the closed water budget is unavailable`
         : `Krapp 777 ka checkpoint on ${hydro.gridSpacingDegrees}° materialization; general atmosphere branch anomaly is zero at initialization`
   });
 }

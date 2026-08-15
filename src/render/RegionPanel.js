@@ -39,6 +39,15 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
   const itcz = latitudeLabel(region.itczLatitude);
   if (itcz) details.push(`wet-season ITCZ ${itcz}`);
   if (Number.isFinite(region.oceanMoistureFetch)) details.push(`ocean moisture fetch ${Math.round(region.oceanMoistureFetch * 100)}%`);
+  if (region.landSurfaceFeedbackActive) {
+    const surfaceBits = [];
+    if (Number.isFinite(region.vegetationCoverFraction)) surfaceBits.push(`cover ${Math.round(region.vegetationCoverFraction * 100)}%`);
+    if (Number.isFinite(region.estimatedVegetationLai)) surfaceBits.push(`est. LAI ${region.estimatedVegetationLai.toFixed(2)}`);
+    if (Number.isFinite(region.moistureRecyclingRatio)) surfaceBits.push(`recycling ${region.moistureRecyclingRatio.toFixed(2)}×`);
+    if (Number.isFinite(region.surfaceAlbedoDelta)) surfaceBits.push(`albedo Δ ${signed(region.surfaceAlbedoDelta, 3)}`);
+    if (Number.isFinite(region.evaporativeFractionDelta)) surfaceBits.push(`ET fraction Δ ${signed(region.evaporativeFractionDelta, 3)}`);
+    if (surfaceBits.length) details.push(`land feedback ${surfaceBits.join(" · ")}`);
+  }
   if (Number.isFinite(region.subtropicalSubsidence) && region.subtropicalSubsidence > 0.12) details.push(`subsidence ${Math.round(region.subtropicalSubsidence * 100)}%`);
   if (Number.isFinite(region.orographicLift) && region.orographicLift > 0.08) details.push(`orographic lift ${Math.round(region.orographicLift * 100)}%`);
   if (Number.isFinite(region.rainShadow) && region.rainShadow > 0.08) details.push(`rain shadow ${Math.round(region.rainShadow * 100)}%`);
@@ -88,5 +97,6 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
     : "";
   const oceanNote = ocean.isOcean ? ` · ${ocean.policy}` : "";
   const atmosphereNote = region.atmospherePolicy ? ` · ${region.atmospherePolicy}` : "";
-  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}`;
+  const landSurfaceNote = region.landSurfacePolicy ? ` · ${region.landSurfacePolicy}` : "";
+  ui.locationCoordinates.textContent = `${latLabel}  ${lonLabel} · ${region.confidence}${routingNote}${oceanNote}${atmosphereNote}${landSurfaceNote}`;
 }

@@ -3,12 +3,16 @@ import {
   GENERAL_ATMOSPHERE_POLICY,
   branchAtmosphereResponseAt
 } from "./GeneralAtmosphereCirculation.js";
+import {
+  LAND_SURFACE_FEEDBACK_POLICY,
+  landSurfaceFeedbackAt
+} from "./LandSurfaceFeedback.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mod = (value, divisor) => ((value % divisor) + divisor) % divisor;
 const round = (value, digits = 3) => Number(value.toFixed(digits));
 
-export const HYDROCLIMATE_POLICY = "krapp-777-general-circulation-branch-v3";
+export const HYDROCLIMATE_POLICY = "krapp-777-general-circulation-land-surface-branch-v4";
 
 export function gridSpacingForSpatialDetail(spatialDetail = 0.35) {
   const detail = clamp(Number(spatialDetail) || 0, 0, 1);
@@ -56,9 +60,21 @@ export class SpatialHydroClimate {
       throw new TypeError("SpatialHydroClimate requires a Krapp climate layer with annualAt() and monthlyAt().");
     }
     this.baseline = krappClimate;
+    this.checkpointVegetation = null;
     this.cache = new Map();
     this.monthlyCache = new Map();
     this.cacheSignature = null;
+  }
+
+  setCheckpointVegetation(vegetationLayer) {
+    if (vegetationLayer != null && !vegetationLayer?.annualAt) {
+      throw new TypeError("Checkpoint vegetation coupling requires an annualAt() source.");
+    }
+    this.checkpointVegetation = vegetationLayer ?? null;
+    this.cache.clear();
+    this.monthlyCache.clear();
+    this.cacheSignature = null;
+    return Boolean(this.checkpointVegetation);
   }
 
   _stateSignature(globalState, spacing) {
@@ -73,7 +89,8 @@ export class SpatialHydroClimate {
       round(globalState.seaLevel ?? 0, 1),
       round(globalState.tectonicTimeMyr ?? 0, 5),
       round(globalState.tectonicBoundaryActivity ?? 1, 3),
-      round(globalState.productivityIndex ?? 1, 3)
+      round(globalState.productivityIndex ?? 1, 3),
+      this.checkpointVegetation ? LAND_SURFACE_FEEDBACK_POLICY : "no-land-surface-vegetation"
     ].join("|");
   }
 
@@ -96,7 +113,35 @@ export class SpatialHydroClimate {
       return null;
     }
 
-    const response = branchAtmosphereResponseAt(globalState, monthIndex, cell.latitude, cell.longitude, checkpoint);
+    const firstPass = branchAtmosphereResponseAt(globalState, monthIndex, cell.latitude, cell.longitude, checkpoint);
+    let response = firstPass;
+    let landSurface = null;
+    if ((globalState.elapsedYears ?? 0) > 0 && this.checkpointVegetation) {
+      const checkpointVegetation = this.checkpointVegetation.annualAt(cell.latitude, cell.longitude);
+      if (checkpointVegetation) {
+        const firstPassClimate = {
+          temperatureCelsius: checkpoint.temperatureCelsius + firstPass.temperatureDeltaCelsius,
+          precipitationMmPerYear: Number.isFinite(checkpoint.precipitationMmPerYear)
+            ? checkpoint.precipitationMmPerYear * firstPass.precipitationScale
+            : null,
+          cloudCoverPercent: Number.isFinite(checkpoint.cloudCoverPercent)
+            ? clamp(checkpoint.cloudCoverPercent + firstPass.cloudDeltaPercent, 0, 100)
+            : null
+        };
+        landSurface = landSurfaceFeedbackAt(globalState, checkpointVegetation, checkpoint, firstPassClimate);
+        if (landSurface?.active) {
+          response = branchAtmosphereResponseAt(
+            globalState,
+            monthIndex,
+            cell.latitude,
+            cell.longitude,
+            checkpoint,
+            landSurface
+          );
+        }
+      }
+    }
+
     const temperatureCelsius = checkpoint.temperatureCelsius + response.temperatureDeltaCelsius;
     const precipitationMmPerYear = Number.isFinite(checkpoint.precipitationMmPerYear)
       ? checkpoint.precipitationMmPerYear * response.precipitationScale
@@ -128,9 +173,17 @@ export class SpatialHydroClimate {
       subtropicalSubsidence: response.current.subtropicalSubsidence,
       orographicLift: response.current.orographicLift,
       rainShadow: response.current.rainShadow,
+      landSurfacePolicy: landSurface?.policy ?? null,
+      landSurfaceFeedbackActive: Boolean(landSurface?.active),
+      estimatedVegetationLai: landSurface?.estimatedLai ?? null,
+      vegetationCoverFraction: landSurface?.vegetationCover ?? null,
+      surfaceAlbedoDelta: landSurface?.surfaceAlbedoDelta ?? 0,
+      evaporativeFractionDelta: landSurface?.evaporativeFractionDelta ?? 0,
+      moistureRecyclingRatio: landSurface?.moistureRecyclingRatio ?? 1,
+      roughnessLogRatio: landSurface?.roughnessLogRatio ?? 0,
       policy: HYDROCLIMATE_POLICY,
       epistemicStatus: (globalState.elapsedYears ?? 0) > 0
-        ? "study-constrained Krapp checkpoint evolved by a general atmosphere response: orbital-seasonal insolation, land-ocean thermal contrast, winds, moisture transport, ascent/subsidence and orography"
+        ? `study-constrained Krapp checkpoint evolved by a general atmosphere response${landSurface?.active ? " with deterministic two-pass vegetation-water land-surface feedback" : ""}: orbital-seasonal insolation, land-ocean thermal contrast, winds, moisture transport, ascent/subsidence and orography`
         : "study-constrained Krapp checkpoint climate; general atmosphere diagnostics are initialized but contribute zero branch anomaly"
     });
     this.monthlyCache.set(key, result);
@@ -177,6 +230,8 @@ export class SpatialHydroClimate {
         subtropicalSubsidence: january?.subtropicalSubsidence ?? null,
         orographicLift: january?.orographicLift ?? null,
         rainShadow: january?.rainShadow ?? null,
+        landSurfacePolicy: null,
+        landSurfaceFeedbackActive: false,
         policy: HYDROCLIMATE_POLICY,
         epistemicStatus: "study-constrained Krapp checkpoint climate; general atmosphere diagnostics are initialized but contribute zero branch anomaly"
       });
@@ -222,8 +277,16 @@ export class SpatialHydroClimate {
       orographicLift: wettest?.orographicLift ?? null,
       rainShadow: wettest?.rainShadow ?? null,
       wettestMonthIndex: wettest?.monthIndex ?? null,
+      landSurfacePolicy: wettest?.landSurfacePolicy ?? null,
+      landSurfaceFeedbackActive: months.some((month) => month.landSurfaceFeedbackActive),
+      estimatedVegetationLai: wettest?.estimatedVegetationLai ?? null,
+      vegetationCoverFraction: wettest?.vegetationCoverFraction ?? null,
+      surfaceAlbedoDelta: wettest?.surfaceAlbedoDelta ?? 0,
+      evaporativeFractionDelta: wettest?.evaporativeFractionDelta ?? 0,
+      moistureRecyclingRatio: wettest?.moistureRecyclingRatio ?? 1,
+      roughnessLogRatio: wettest?.roughnessLogRatio ?? 0,
       policy: HYDROCLIMATE_POLICY,
-      epistemicStatus: "study-constrained Krapp checkpoint evolved by a general atmosphere response: orbital-seasonal insolation, land-ocean thermal contrast, winds, moisture transport, ascent/subsidence and orography"
+      epistemicStatus: `study-constrained Krapp checkpoint evolved by a general atmosphere response${months.some((month) => month.landSurfaceFeedbackActive) ? " with deterministic two-pass vegetation-water land-surface feedback" : ""}: orbital-seasonal insolation, land-ocean thermal contrast, winds, moisture transport, ascent/subsidence and orography`
     });
     this.cache.set(key, result);
     return result;
@@ -240,6 +303,9 @@ export class SpatialHydroClimate {
     return Object.freeze({
       policy: HYDROCLIMATE_POLICY,
       atmospherePolicy: GENERAL_ATMOSPHERE_POLICY,
+      landSurfacePolicy: this.checkpointVegetation ? LAND_SURFACE_FEEDBACK_POLICY : null,
+      landSurfaceFeedbackEnabled: Boolean(this.checkpointVegetation),
+      landSurfaceSolvePasses: this.checkpointVegetation ? 2 : 1,
       gridSpacingDegrees: gridSpacingForSpatialDetail(spatialDetail),
       spatialDetail: clamp(Number(spatialDetail) || 0, 0, 1),
       cachedCells: this.cache.size,
@@ -251,14 +317,15 @@ export class SpatialHydroClimate {
         "Hadley/ITCZ migration",
         "trade/westerly/polar wind regimes",
         "upwind ocean moisture fetch",
-        "land moisture recycling proxy",
+        this.checkpointVegetation ? "vegetation-water evapotranspiration and moisture recycling" : "land moisture recycling proxy",
+        this.checkpointVegetation ? "vegetation-dependent albedo and aerodynamic roughness" : "baseline surface thermal response",
         "subtropical subsidence",
         "frontal ascent",
         "orographic lift and rain shadow",
         "dynamic tectonic elevation"
       ]),
       geographicSpecialCases: 0,
-      epistemicStatus: "runtime materialization policy and general intermediate-complexity atmospheric response; not a primitive-equation GCM or an observation"
+      epistemicStatus: `runtime materialization policy and general intermediate-complexity atmospheric response${this.checkpointVegetation ? " with deterministic two-pass land-surface coupling" : ""}; not a primitive-equation GCM or an observation`
     });
   }
 }
