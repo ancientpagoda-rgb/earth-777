@@ -127,5 +127,6 @@ test("GMRT ingestion remains build-time, uncapped by default, and follows NCEI e
   assert.match(source, /gmrt-modern-anchors\.generated\.js/);
   const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.scripts["data:evidence:gmrt"], "node scripts/ingest-gmrt-modern-anchors.mjs");
-  assert.equal(pkg.scripts["data:evidence"], "npm run data:evidence:ncei && npm run data:evidence:gmrt");
+  assert.equal(pkg.scripts["data:evidence:gmrt-patches"], "node scripts/ingest-gmrt-terrain-patches.mjs");
+  assert.equal(pkg.scripts["data:evidence"], "npm run data:evidence:ncei && npm run data:evidence:gmrt && npm run data:evidence:gmrt-patches");
 });

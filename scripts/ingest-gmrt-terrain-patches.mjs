@@ -1,0 +1,156 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { NCEI_PALEO_EVIDENCE_RECORDS } from "../src/data/generated/ncei-paleo-evidence.generated.js";
+import {
+  buildGmrtMaskedPatchUrl,
+  GMRT_PATCH_RESOLUTION_METERS,
+  GMRT_PATCH_SOURCE_ID,
+  GMRT_PATCH_TILE_DEGREES,
+  packTerrainPatchInt16,
+  parseEsriAsciiGrid,
+  uniqueGmrtPatchTiles
+} from "./gmrt-terrain-patch-utils.mjs";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const RAW_DIR = resolve(ROOT, "data/raw/gmrt-terrain-patches");
+const GENERATED_DIR = resolve(ROOT, "src/data/generated");
+const OUTPUT_PATH = resolve(GENERATED_DIR, "gmrt-terrain-patches.generated.js");
+const MANIFEST_PATH = resolve(ROOT, "data/gmrt-terrain-patch-manifest.json");
+const REFRESH = process.argv.includes("--refresh");
+const MAX_PATCHES_ARG = process.argv.find((arg) => arg.startsWith("--max-patches="));
+const MAX_PATCHES = MAX_PATCHES_ARG ? Math.max(1, Number(MAX_PATCHES_ARG.split("=")[1]) || 1) : Number.POSITIVE_INFINITY;
+const CONCURRENCY = 2;
+
+const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const sha256Path = async (path) => sha256Bytes(await readFile(path));
+
+async function fetchText(url) {
+  const response = await fetch(url, {
+    headers: { "User-Agent": "earth-777-gmrt-patch-ingestion/1.0 (scientific reconstruction modern-anchor cache)" }
+  });
+  if (!response.ok) throw new Error(`GMRT GridServer request failed (${response.status}) ${url}`);
+  return response.text();
+}
+
+async function mapConcurrent(items, mapper, concurrency = CONCURRENCY) {
+  const output = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      output[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length || 1) }, worker));
+  return output;
+}
+
+async function retrievePatch(tile) {
+  const rawPath = resolve(RAW_DIR, `${tile.id}.asc`);
+  let text = null;
+  if (!REFRESH) {
+    try {
+      text = await readFile(rawPath, "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const url = buildGmrtMaskedPatchUrl(tile);
+  if (text == null) {
+    text = await fetchText(url);
+    await writeFile(rawPath, text);
+  }
+  const grid = parseEsriAsciiGrid(text);
+  const packed = packTerrainPatchInt16(grid);
+  if (packed.finiteCount === 0) return null;
+  const north = packed.south + packed.nrows * packed.cellsizeDegrees;
+  const east = packed.west + packed.ncols * packed.cellsizeDegrees;
+  return Object.freeze({
+    id: tile.id,
+    sourceId: GMRT_PATCH_SOURCE_ID,
+    sourceQuality: 0.95,
+    west: packed.west,
+    east,
+    south: packed.south,
+    north,
+    ncols: packed.ncols,
+    nrows: packed.nrows,
+    cellsizeDegrees: packed.cellsizeDegrees,
+    resolutionMeters: GMRT_PATCH_RESOLUTION_METERS,
+    nodata: packed.nodata,
+    finiteCount: packed.finiteCount,
+    coverageFraction: packed.coverageFraction,
+    evidenceSourceIds: tile.evidenceSourceIds,
+    dataBase64: packed.dataBase64,
+    requestUrl: url,
+    rawSha256: await sha256Path(rawPath),
+    epistemicRole: "masked present-day high-resolution terrain anchor only; high-resolution coverage is not automatically direct multibeam; explicit 777 ka hindcast required"
+  });
+}
+
+await mkdir(RAW_DIR, { recursive: true });
+await mkdir(GENERATED_DIR, { recursive: true });
+const allTiles = uniqueGmrtPatchTiles(NCEI_PALEO_EVIDENCE_RECORDS);
+const requestedTiles = allTiles.slice(0, Number.isFinite(MAX_PATCHES) ? MAX_PATCHES : undefined);
+const patches = (await mapConcurrent(requestedTiles, async (tile) => {
+  try {
+    return await retrievePatch(tile);
+  } catch (error) {
+    console.warn(`Skipping GMRT patch ${tile.id}: ${error?.message ?? error}`);
+    return null;
+  }
+})).filter(Boolean);
+const finiteCellCount = patches.reduce((sum, patch) => sum + patch.finiteCount, 0);
+const meta = {
+  schemaVersion: 1,
+  generatedBy: "scripts/ingest-gmrt-terrain-patches.mjs",
+  sourceId: GMRT_PATCH_SOURCE_ID,
+  generated: true,
+  retrievedAt: new Date().toISOString(),
+  inputEvidenceRecordCount: NCEI_PALEO_EVIDENCE_RECORDS.length,
+  uniqueCandidateTileCount: allTiles.length,
+  requestedTileCount: requestedTiles.length,
+  patchCount: patches.length,
+  finiteCellCount,
+  resolutionMeters: GMRT_PATCH_RESOLUTION_METERS,
+  tileDegrees: GMRT_PATCH_TILE_DEGREES,
+  truncated: Number.isFinite(MAX_PATCHES) && requestedTiles.length < allTiles.length,
+  scientificRole: "masked high-resolution present-day terrain patches; explicit 777 ka hindcast still required"
+};
+
+const serializable = patches.map(({ rawSha256, requestUrl, ...patch }) => patch);
+const moduleText = `// Generated by scripts/ingest-gmrt-terrain-patches.mjs. Do not edit by hand.\nexport const GMRT_TERRAIN_PATCH_META = Object.freeze(${JSON.stringify(meta, null, 2)});\n\nexport const GMRT_TERRAIN_PATCHES = Object.freeze(${JSON.stringify(serializable)}.map((patch) => Object.freeze(patch)));\n`;
+await writeFile(OUTPUT_PATH, moduleText);
+
+const manifest = {
+  schemaVersion: 1,
+  generatedBy: "scripts/ingest-gmrt-terrain-patches.mjs",
+  source: {
+    id: GMRT_PATCH_SOURCE_ID,
+    service: "https://www.gmrt.org/services/GridServer",
+    documentation: "https://www.gmrt.org/services/gridserverinfo.php",
+    layer: "topo-mask",
+    format: "esriascii",
+    mresolution: GMRT_PATCH_RESOLUTION_METERS
+  },
+  input: {
+    file: "src/data/generated/ncei-paleo-evidence.generated.js",
+    evidenceRecords: NCEI_PALEO_EVIDENCE_RECORDS.length,
+    uniqueCandidateTiles: allTiles.length,
+    tileDegrees: GMRT_PATCH_TILE_DEGREES
+  },
+  patches: patches.map(({ dataBase64, ...patch }) => patch),
+  output: {
+    file: "src/data/generated/gmrt-terrain-patches.generated.js",
+    sha256: await sha256Path(OUTPUT_PATH),
+    patches: patches.length,
+    finiteCells: finiteCellCount
+  },
+  epistemicRule: "Only finite GMRT topo-mask cells are cached as high-resolution modern spatial anchors. NaN/unmeasured cells do not replace the fallback, topo-mask coverage is not automatically direct multibeam attribution, and no cached patch is interpreted as 777 ka terrain until transformed by the reconstruction hindcast."
+};
+await writeFile(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+
+console.log(`Wrote ${patches.length} masked GMRT patches from ${allTiles.length} evidence-targeted ${GMRT_PATCH_TILE_DEGREES}° tiles (${finiteCellCount} finite high-resolution cells).`);
+if (meta.truncated) console.warn("Warning: patch ingestion was truncated by --max-patches and should not be treated as complete evidence-targeted coverage.");
