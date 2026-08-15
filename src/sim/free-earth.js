@@ -179,7 +179,6 @@ export class FreeEarthEngine {
 
     this.fidelity.execute("evolution", dt, (subDt) => advanceEvolutionaryEcology(state, subDt, this.evolutionRandom));
     this.fidelity.execute("hominins", dt, (subDt) => advanceHomininLineages(state, subDt, this.homininRandom));
-    this.fidelity.recordExecution("culture", 1);
 
     this.fidelity.execute("magnetism", dt, (subDt) => {
       if (state.yearBP <= 773_000 && state.magneticPolarity < 0) {
