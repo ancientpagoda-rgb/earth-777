@@ -166,9 +166,15 @@ export class FreeEarthEngine {
       state.carnivoreBiomass = positive(relax(state.carnivoreBiomass, preySupportedCapacity, subDt, 48), 0.001);
     });
 
+    const animalLineagesBefore = new Set((state.speciesLineages ?? [])
+      .filter((lineage) => lineage.extinctionYearBP == null && lineage.populationIndex > 0)
+      .map((lineage) => lineage.id));
+    const homininLineagesBefore = new Set((state.homininLineages ?? [])
+      .filter((lineage) => lineage.extinctionYearBP == null && lineage.populationIndex > 0)
+      .map((lineage) => lineage.id));
     this.fidelity.execute("evolution", dt, (subDt) => advanceEvolutionaryEcology(state, subDt, this.evolutionRandom));
     this.fidelity.execute("hominins", dt, (subDt) => advanceHomininLineages(state, subDt, this.homininRandom));
-    this._recordLineageEvents();
+    this._recordLineageEvents(animalLineagesBefore, homininLineagesBefore);
 
     this.fidelity.execute("magnetism", dt, (subDt) => {
       if (state.yearBP <= 773_000 && state.magneticPolarity < 0) {
@@ -184,19 +190,24 @@ export class FreeEarthEngine {
     });
   }
 
-  _recordLineageEvents() {
-    const yearBP = Math.round(this.state.yearBP);
+  _recordLineageEvents(animalLineagesBefore, homininLineagesBefore) {
     for (const lineage of this.state.speciesLineages ?? []) {
-      if (lineage.parentId != null && lineage.birthYearBP === yearBP) {
+      const living = lineage.extinctionYearBP == null && lineage.populationIndex > 0;
+      const wasLiving = animalLineagesBefore.has(lineage.id);
+      if (!wasLiving && living && lineage.parentId != null) {
         this._recordEvent(`Animal lineage ${lineage.id} branches from lineage ${lineage.parentId}.`);
+      } else if (wasLiving && !living) {
+        this._recordEvent(`Animal lineage ${lineage.id} becomes extinct.`);
       }
-      if (lineage.extinctionYearBP === yearBP) this._recordEvent(`Animal lineage ${lineage.id} becomes extinct.`);
     }
     for (const lineage of this.state.homininLineages ?? []) {
-      if (lineage.parentId != null && lineage.birthYearBP === yearBP) {
+      const living = lineage.extinctionYearBP == null && lineage.populationIndex > 0;
+      const wasLiving = homininLineagesBefore.has(lineage.id);
+      if (!wasLiving && living && lineage.parentId != null) {
         this._recordEvent(`Hominin lineage ${lineage.id} branches from ${lineage.parentId}.`);
+      } else if (wasLiving && !living) {
+        this._recordEvent(`Hominin lineage ${lineage.id} becomes extinct.`);
       }
-      if (lineage.extinctionYearBP === yearBP) this._recordEvent(`Hominin lineage ${lineage.id} becomes extinct.`);
     }
   }
 
