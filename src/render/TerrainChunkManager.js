@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
+import { reconstructedBedrockElevation777At } from "../reconstruction/TerrainReconstruction777.js";
 import { tectonicElevationOffsetMeters } from "../sim/DynamicLithosphere.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
@@ -182,9 +182,9 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.24, contourStrengt
   }
 
   _elevationAt(latitude, longitude) {
-    const bedrock = bedrockElevationAt(latitude, longitude);
-    if (!this.earthState) return bedrock + this._geomorphicOffsetAt(latitude, longitude);
-    return bedrock
+    const reconstructed = reconstructedBedrockElevation777At(latitude, longitude);
+    if (!this.earthState) return reconstructed + this._geomorphicOffsetAt(latitude, longitude);
+    return reconstructed
       + tectonicElevationOffsetMeters(this.earthState, latitude, longitude, this.branchSeed)
       + this._geomorphicOffsetAt(latitude, longitude);
   }
@@ -219,7 +219,7 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.24, contourStrengt
     const meanderAmplitudeKm = clamp(valleyHalfWidthKm * 0.7, 0.004, 0.055);
     const meanderKm = Math.sin(alongKm * 0.85 + phase) * meanderAmplitudeKm;
     const distanceKm = Math.abs(perpendicularKm - meanderKm);
-    const erosionRate = Math.max(0, Number(patch.erosionRateMmPerYear) || 0);
+    const erosionRate = Math.max(0, Number(patch?.erosionRateMmPerYear) || 0);
     const incisionDepthMeters = clamp(1.2 + Math.log1p(discharge) * 1.35 + erosionRate * 160, 1.2, 28);
     const profile = Math.exp(-((distanceKm / valleyHalfWidthKm) ** 2));
     return incisionDepthMeters * profile;
@@ -364,6 +364,7 @@ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.24, contourStrengt
       contourOpacity: this.contourOpacity,
       contourMajorEvery: 5,
       contoursFollowDisplayedTerrain: true,
+      reconstructedCheckpointTerrain: true,
       dynamicTopography: Boolean(this.earthState),
       geomorphologyProjected: Boolean(patch),
       geomorphicElevationOffsetMeters: patch?.geomorphicElevationOffsetMeters ?? null,
