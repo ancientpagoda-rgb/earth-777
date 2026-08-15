@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v4";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v5";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -35,27 +35,47 @@ function lineagesForRole(state, role) {
   return Object.freeze(matching);
 }
 
-function chooseLineage(lineages, seed) {
-  if (!lineages?.length) return null;
-  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
-  if (total <= 0) return lineages[Math.min(lineages.length - 1, Math.floor(random01(seed) * lineages.length))];
-  let cursor = random01(seed) * total;
-  for (const lineage of lineages) {
-    cursor -= Math.max(0, Number(lineage.populationIndex) || 0);
-    if (cursor <= 0) return lineage;
-  }
-  return lineages.at(-1);
-}
-
 function lineageTraits(lineage) {
-  if (!lineage) return Object.freeze({ mobility: 0.5, sociality: 0.5, dietBreadth: 0.5, cognition: 0.5, bodyMassLog10Kg: null });
+  if (!lineage) return Object.freeze({ mobility: 0.5, sociality: 0.5, dietBreadth: 0.5, cognition: 0.5, bodyMassLog10Kg: null, thermalOptimumK: null });
   return Object.freeze({
     mobility: clamp01(lineage.mobility ?? 0.5),
     sociality: clamp01(lineage.sociality ?? 0.5),
     dietBreadth: clamp01(lineage.dietBreadth ?? 0.5),
     cognition: clamp01(lineage.cognition ?? 0.5),
-    bodyMassLog10Kg: clamp(lineage.bodyMassLog10Kg ?? 0.4, -0.5, 3.5)
+    bodyMassLog10Kg: clamp(lineage.bodyMassLog10Kg ?? 0.4, -0.5, 3.5),
+    thermalOptimumK: Number.isFinite(Number(lineage.thermalOptimumK)) ? Number(lineage.thermalOptimumK) : null
   });
+}
+
+function lineageLocalSuitability(lineage, role, state, field) {
+  if (!lineage) return 1;
+  const traits = lineageTraits(lineage);
+  const temperature = Number(state?.temperatureAnomaly);
+  const thermalFitness = Number.isFinite(temperature) && traits.thermalOptimumK != null
+    ? clamp(Math.exp(-0.16 * (temperature - traits.thermalOptimumK) ** 2), 0.06, 1)
+    : 1;
+  const localSupport = role === "carnivore"
+    ? clamp01(field?.preyPressure ?? 0.5)
+    : Math.sqrt(clamp01(field?.productivity ?? 0.6) * clamp01(field?.waterAccess ?? 0.6));
+  const flexibility = 0.78 + traits.dietBreadth * 0.16 + traits.mobility * 0.06;
+  const marginalBuffer = 1 + (1 - localSupport) * (traits.dietBreadth * 0.18 + traits.mobility * 0.08);
+  return clamp(thermalFitness * (0.35 + localSupport * 0.65) * flexibility * marginalBuffer, 0.03, 1.25);
+}
+
+function lineageSelectionWeight(lineage, role, state, field) {
+  return Math.max(0, Number(lineage?.populationIndex) || 0) * lineageLocalSuitability(lineage, role, state, field);
+}
+
+function chooseLineage(lineages, seed, role, state, field) {
+  if (!lineages?.length) return null;
+  const total = lineages.reduce((sum, lineage) => sum + lineageSelectionWeight(lineage, role, state, field), 0);
+  if (total <= 0) return lineages[Math.min(lineages.length - 1, Math.floor(random01(seed) * lineages.length))];
+  let cursor = random01(seed) * total;
+  for (const lineage of lineages) {
+    cursor -= lineageSelectionWeight(lineage, role, state, field);
+    if (cursor <= 0) return lineage;
+  }
+  return lineages.at(-1);
 }
 
 function lineageVisualScale(lineage) {
@@ -73,11 +93,12 @@ function lineageGroupSizeScale(lineage, role) {
   return clamp(socialScale * massScale, 0.62, 1.55);
 }
 
-function meanGroupSizeScale(lineages, role) {
+function meanGroupSizeScale(lineages, role, state, field) {
   if (!lineages?.length) return 1;
-  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
+  const total = lineages.reduce((sum, lineage) => sum + lineageSelectionWeight(lineage, role, state, field), 0);
   if (total <= 0) return 1;
-  return lineages.reduce((sum, lineage) => sum + lineageGroupSizeScale(lineage, role) * Math.max(0, Number(lineage.populationIndex) || 0), 0) / total;
+  return lineages.reduce((sum, lineage) => sum
+    + lineageGroupSizeScale(lineage, role) * lineageSelectionWeight(lineage, role, state, field), 0) / total;
 }
 
 export function approximateCellAreaKm2(cell) {
@@ -224,8 +245,8 @@ function visiblePopulation(density, radiusKm) {
   return Math.max(0, Math.round(Math.max(0, density) * Math.PI * radiusKm * radiusKm));
 }
 
-function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm, focusXKm, focusZKm, seed, field, elapsedYears, lineages }) {
-  const effectiveMeanSize = meanSize * meanGroupSizeScale(lineages, role);
+function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm, focusXKm, focusZKm, seed, field, elapsedYears, lineages, state }) {
+  const effectiveMeanSize = meanSize * meanGroupSizeScale(lineages, role, state, field);
   const count = population > 0 ? Math.max(1, Math.ceil(population / Math.max(1, effectiveMeanSize))) : 0;
   const groups = [];
   const individuals = [];
@@ -233,7 +254,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
 
   for (let index = 0; index < count; index += 1) {
     const groupsLeft = count - index;
-    const lineage = chooseLineage(lineages, seed + index * 73.1 + 23);
+    const lineage = chooseLineage(lineages, seed + index * 73.1 + 23, role, state, field);
     const groupSizeScale = lineageGroupSizeScale(lineage, role);
     const target = groupsLeft === 1 ? remaining : Math.max(1, Math.round(meanSize * groupSizeScale * (0.58 + random01(seed + index * 31.7) * 0.84)));
     const groupPopulation = Math.max(0, Math.min(remaining - Math.max(0, groupsLeft - 1), target));
@@ -246,6 +267,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
     const id = `${role}-${index}-${hashText(`${seed}:${index}`)}`;
     const traits = lineageTraits(lineage);
     const visualScale = lineageVisualScale(lineage);
+    const localSuitability = lineage ? lineageLocalSuitability(lineage, role, state, field) : null;
     const behavior = faunaGroupBehaviorAt({ role, id, elapsedYears, field, lineage });
     const x = baseX + Math.cos(behavior.heading) * behavior.distanceKm;
     const z = baseZ + Math.sin(behavior.heading) * behavior.distanceKm;
@@ -267,6 +289,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       representation: materialized ? "individuals" : role === "carnivore" ? "pack" : "herd",
       behavior: behavior.behavior,
       heading: behavior.heading,
+      localSuitability,
       groupSizeScale: lineage ? groupSizeScale : null,
       spacingScale: lineage ? spacingScale : null,
       mobility: lineage ? traits.mobility : null,
@@ -328,8 +351,8 @@ export function buildObservedFauna({
   const herbivorePopulation = visiblePopulation(field.herbivoreDensityAnimalsPerKm2, radiusKm);
   const carnivorePopulation = visiblePopulation(field.carnivoreDensityAnimalsPerKm2, radiusKm);
   const baseSeed = (Number(seed) >>> 0) ^ hashText(`${latitude.toFixed(4)}:${longitude.toFixed(4)}`);
-  const herbivores = buildGroups({ role: "herbivore", population: herbivorePopulation, meanSize: field.meanHerdSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed, field, elapsedYears, lineages: lineagesForRole(state, "herbivore") });
-  const carnivores = buildGroups({ role: "carnivore", population: carnivorePopulation, meanSize: field.meanPackSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed ^ 0x9e3779b9, field, elapsedYears, lineages: lineagesForRole(state, "carnivore") });
+  const herbivores = buildGroups({ role: "herbivore", population: herbivorePopulation, meanSize: field.meanHerdSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed, field, elapsedYears, lineages: lineagesForRole(state, "herbivore"), state });
+  const carnivores = buildGroups({ role: "carnivore", population: carnivorePopulation, meanSize: field.meanPackSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed ^ 0x9e3779b9, field, elapsedYears, lineages: lineagesForRole(state, "carnivore"), state });
   const individuals = Object.freeze([...herbivores.individuals, ...carnivores.individuals]);
   const groups = [...herbivores.groups, ...carnivores.groups];
   const behaviorCounts = {};
