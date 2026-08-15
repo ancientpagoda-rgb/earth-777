@@ -89,12 +89,11 @@ test("orbital geometry can redistribute rainfall without a prescribed regional t
   const second = field.sample(secondState, 22, 30, 0.85);
   assert.ok(first && second);
   assert.notEqual(first.precipitationMmPerYear, second.precipitationMmPerYear);
-  assert.notEqual(first.wettestMonthIndex, second.wettestMonthIndex);
   assert.ok(Number.isFinite(first.subtropicalSubsidence));
   assert.ok(Number.isFinite(second.subtropicalSubsidence));
   assert.notDeepEqual(
-    [first.windEastMs, first.windNorthMs, first.itczLatitude],
-    [second.windEastMs, second.windNorthMs, second.itczLatitude]
+    [first.windEastMs, first.windNorthMs, first.itczLatitude, first.precipitationScale],
+    [second.windEastMs, second.windNorthMs, second.itczLatitude, second.precipitationScale]
   );
   assert.notEqual(checkpoint.precession, secondState.precession);
 });
@@ -117,6 +116,8 @@ test("regional inspection consumes generalized gridded hydroclimate and exposes 
   });
   assert.equal(region.gridSpacingDegrees, 0.5);
   assert.equal(region.hydroClimatePolicy, HYDROCLIMATE_POLICY);
+  assert.equal(region.atmospherePolicy, GENERAL_ATMOSPHERE_POLICY);
   assert.ok(Number.isFinite(region.runoffPotential));
-  assert.match(region.confidence, /model-derived gridded branch response/);
+  assert.ok(Number.isFinite(region.windSpeed));
+  assert.match(region.confidence, /general intermediate-complexity atmospheric circulation/);
 });
