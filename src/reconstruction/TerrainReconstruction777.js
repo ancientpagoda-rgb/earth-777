@@ -18,13 +18,6 @@ const positiveSigma = (value) => Number.isFinite(Number(value)) && Number(value)
 
 export const TERRAIN_777_RECONSTRUCTION_POLICY = "best-modern-anchor-explicit-hindcast-paleo-assimilation-v4";
 
-/**
- * The default correction is intentionally zero-valued and uncertainty-incomplete.
- * It is a numerical bridge, not a scientific statement that present relief equals
- * 777 ka relief. Regional uplift/subsidence, erosion/deposition, GIA/ice loading,
- * dynamic topography and dated shoreline/terrace constraints must enter here as
- * explicit target-epoch estimates as they become available.
- */
 function unresolvedHindcastCorrection() {
   return Object.freeze({
     value: 0,
@@ -41,6 +34,7 @@ function etopoFallbackCandidate(latitude, longitude, sigmaMeters = null) {
   const value = bedrockElevationAt(latitude, longitude);
   return Object.freeze({
     sourceId: "etopo-2022",
+    catalogSourceId: "etopo-2022",
     value,
     sigmaMeters: positiveSigma(sigmaMeters),
     resolutionMeters: 450,
@@ -53,6 +47,8 @@ function etopoFallbackCandidate(latitude, longitude, sigmaMeters = null) {
 function normalizeModernAnchorCandidate(record) {
   return Object.freeze({
     sourceId: record.sourceId ?? record.catalogSourceId ?? record.archiveSourceId ?? null,
+    catalogSourceId: record.catalogSourceId ?? record.archiveSourceId ?? record.sourceId ?? null,
+    archiveSourceId: record.archiveSourceId ?? null,
     value: Number(record.value),
     sigmaMeters: positiveSigma(record.sigmaMeters ?? record.sigma),
     resolutionMeters: Number.isFinite(Number(record.resolutionMeters)) ? Number(record.resolutionMeters) : null,
@@ -114,6 +110,7 @@ export function terrain777BedrockSample(latitude, longitude, {
     etopoElevationMeters,
     modernElevationMeters,
     selectedModernAnchorSourceId: selectedModernAnchor.sourceId ?? "etopo-2022",
+    selectedModernAnchorCatalogSourceId: selectedModernAnchor.catalogSourceId ?? selectedModernAnchor.sourceId ?? "etopo-2022",
     selectedModernAnchorClass: selectedModernAnchor.sourceClass ?? null,
     modernAnchorResolution,
     reconstructedElevationMeters,
@@ -154,14 +151,6 @@ function harvestedCalibration(record) {
   });
 }
 
-/**
- * Convenience path for Evidence Harvester adapters.
- *
- * Raw nearby paleo records and untransformed historical rates are retained in
- * evidenceHarvest but do not change the target elevation. Modern anchors may replace
- * ETOPO as the spatial anchor when they contain a numeric field-compatible sample;
- * they still cannot become a 777 ka value until the hindcast transforms that anchor.
- */
 export function terrain777BedrockSampleFromEvidence(latitude, longitude, evidenceRecords = [], options = {}) {
   const harvest = harvestTopographyEvidenceAt(latitude, longitude, evidenceRecords, {
     targetYearBP: 777_000,
@@ -213,6 +202,7 @@ export function terrain777ProvenanceAt(latitude, longitude, options = undefined)
     etopoElevationMeters: sample.etopoElevationMeters,
     modernElevationMeters: sample.modernElevationMeters,
     selectedModernAnchorSourceId: sample.selectedModernAnchorSourceId,
+    selectedModernAnchorCatalogSourceId: sample.selectedModernAnchorCatalogSourceId,
     selectedModernAnchorClass: sample.selectedModernAnchorClass,
     modernAnchorResolution: sample.modernAnchorResolution,
     reconstructedElevationMeters: sample.reconstructedElevationMeters,
