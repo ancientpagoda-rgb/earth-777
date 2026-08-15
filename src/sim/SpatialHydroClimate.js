@@ -1,10 +1,14 @@
 import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
+import {
+  GENERAL_ATMOSPHERE_POLICY,
+  branchAtmosphereResponseAt
+} from "./GeneralAtmosphereCirculation.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const mod = (value, divisor) => ((value % divisor) + divisor) % divisor;
 const round = (value, digits = 3) => Number(value.toFixed(digits));
 
-export const HYDROCLIMATE_POLICY = "krapp-777-branch-response-v2";
+export const HYDROCLIMATE_POLICY = "krapp-777-general-circulation-branch-v3";
 
 export function gridSpacingForSpatialDetail(spatialDetail = 0.35) {
   const detail = clamp(Number(spatialDetail) || 0, 0, 1);
@@ -26,31 +30,6 @@ function gridCell(latitude, longitude, spacing) {
   return { row, col, rows, cols, latitude: 90 - (row + 0.5) * spacing, longitude: -180 + (col + 0.5) * spacing };
 }
 
-function responseState(globalState, latitude, longitude) {
-  const checkpointTemperature = CHECKPOINT_777.boundary.globalTemperatureAnomaly.value;
-  const checkpointIce = CHECKPOINT_777.boundary.iceVolumeIndex.value;
-  const latitudeRadians = latitude * Math.PI / 180;
-  const longitudeRadians = longitude * Math.PI / 180;
-  const polarWeight = Math.sin(latitudeRadians) ** 2;
-  const globalTemperatureDelta = (globalState.temperatureAnomaly ?? checkpointTemperature) - checkpointTemperature;
-  const temperatureDelta = globalTemperatureDelta * (0.85 + polarWeight * 0.65);
-  const iceDelta = (globalState.iceIndex ?? checkpointIce) - checkpointIce;
-
-  const eccentricity = globalState.eccentricity ?? CHECKPOINT_777.boundary.eccentricity.value;
-  const precession = (globalState.precession ?? CHECKPOINT_777.boundary.climaticPrecession.value) * Math.PI / 180;
-  const checkpointPrecession = CHECKPOINT_777.boundary.climaticPrecession.value * Math.PI / 180;
-  const orbitalMoistureNow = eccentricity * Math.cos(precession - longitudeRadians) * Math.cos(latitudeRadians);
-  const orbitalMoistureCheckpoint = CHECKPOINT_777.boundary.eccentricity.value
-    * Math.cos(checkpointPrecession - longitudeRadians) * Math.cos(latitudeRadians);
-  const orbitalMoistureDelta = orbitalMoistureNow - orbitalMoistureCheckpoint;
-
-  const precipitationLogScale = temperatureDelta * (0.018 + (1 - polarWeight) * 0.010)
-    - iceDelta * polarWeight * 0.55
-    + orbitalMoistureDelta * 4.0;
-  const precipitationScale = Math.exp(precipitationLogScale);
-  return { polarWeight, globalTemperatureDelta, temperatureDelta, iceDelta, orbitalMoistureDelta, precipitationScale };
-}
-
 function waterBalanceIndex(temperatureCelsius, precipitationMmPerYear, cloudCoverPercent) {
   if (!Number.isFinite(precipitationMmPerYear)) return null;
   const temperatureDemand = Math.exp(clamp(temperatureCelsius, -35, 50) * 0.032);
@@ -65,6 +44,12 @@ function runoffPotential(precipitationMmPerYear, soilMoistureIndex) {
   return precipitationMmPerYear * excessFraction * 0.58;
 }
 
+function meanFinite(values) {
+  const finite = values.filter(Number.isFinite);
+  if (!finite.length) return null;
+  return finite.reduce((sum, value) => sum + value, 0) / finite.length;
+}
+
 export class SpatialHydroClimate {
   constructor(krappClimate) {
     if (!krappClimate?.annualAt || !krappClimate?.monthlyAt) {
@@ -72,17 +57,84 @@ export class SpatialHydroClimate {
     }
     this.baseline = krappClimate;
     this.cache = new Map();
+    this.monthlyCache = new Map();
     this.cacheSignature = null;
   }
 
   _stateSignature(globalState, spacing) {
-    return [spacing, round(globalState.temperatureAnomaly ?? 0, 3), round(globalState.iceIndex ?? 0, 4),
-      round(globalState.eccentricity ?? 0, 5), round(globalState.precession ?? 0, 1), round(globalState.seaLevel ?? 0, 1)].join("|");
+    return [
+      spacing,
+      round(globalState.temperatureAnomaly ?? 0, 3),
+      round(globalState.oceanTemperatureAnomaly ?? globalState.temperatureAnomaly ?? 0, 3),
+      round(globalState.iceIndex ?? 0, 4),
+      round(globalState.eccentricity ?? 0, 6),
+      round(globalState.obliquity ?? 0, 4),
+      round(globalState.precession ?? 0, 2),
+      round(globalState.seaLevel ?? 0, 1),
+      round(globalState.tectonicTimeMyr ?? 0, 5),
+      round(globalState.tectonicBoundaryActivity ?? 1, 3),
+      round(globalState.productivityIndex ?? 1, 3)
+    ].join("|");
   }
 
   _prepareCache(globalState, spacing) {
     const signature = this._stateSignature(globalState, spacing);
-    if (signature !== this.cacheSignature) { this.cache.clear(); this.cacheSignature = signature; }
+    if (signature !== this.cacheSignature) {
+      this.cache.clear();
+      this.monthlyCache.clear();
+      this.cacheSignature = signature;
+    }
+  }
+
+  _monthly(globalState, month, cell, spacing) {
+    const monthIndex = mod(Math.floor(Number(month) || 0), 12);
+    const key = `${cell.row}:${cell.col}:${monthIndex}`;
+    if (this.monthlyCache.has(key)) return this.monthlyCache.get(key);
+    const checkpoint = this.baseline.monthlyAt(monthIndex, cell.latitude, cell.longitude);
+    if (!checkpoint || !Number.isFinite(checkpoint.temperatureCelsius)) {
+      this.monthlyCache.set(key, null);
+      return null;
+    }
+
+    const response = branchAtmosphereResponseAt(globalState, monthIndex, cell.latitude, cell.longitude, checkpoint);
+    const temperatureCelsius = checkpoint.temperatureCelsius + response.temperatureDeltaCelsius;
+    const precipitationMmPerYear = Number.isFinite(checkpoint.precipitationMmPerYear)
+      ? checkpoint.precipitationMmPerYear * response.precipitationScale
+      : null;
+    const cloudCoverPercent = Number.isFinite(checkpoint.cloudCoverPercent)
+      ? clamp(checkpoint.cloudCoverPercent + response.cloudDeltaPercent, 0, 100)
+      : null;
+    const result = Object.freeze({
+      month: checkpoint.month,
+      monthIndex,
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      gridSpacingDegrees: spacing,
+      temperatureCelsius: round(temperatureCelsius, 3),
+      precipitationMmPerYear: precipitationMmPerYear == null ? null : round(precipitationMmPerYear, 2),
+      precipitationMmThisMonth: precipitationMmPerYear == null ? null : round(precipitationMmPerYear / 12, 2),
+      cloudCoverPercent: cloudCoverPercent == null ? null : round(cloudCoverPercent, 2),
+      temperatureDelta: round(response.temperatureDeltaCelsius, 4),
+      precipitationScale: round(response.precipitationScale, 6),
+      atmospherePolicy: GENERAL_ATMOSPHERE_POLICY,
+      itczLatitude: response.current.itczLatitude,
+      windEastMs: response.current.windEastMs,
+      windNorthMs: response.current.windNorthMs,
+      windSpeedMs: response.current.windSpeedMs,
+      oceanMoistureFetch: response.current.oceanMoistureFetch,
+      landMoistureRecycling: response.current.landMoistureRecycling,
+      moistureSupplyIndex: response.current.moistureSupplyIndex,
+      convectiveAscent: response.current.convectiveAscent,
+      subtropicalSubsidence: response.current.subtropicalSubsidence,
+      orographicLift: response.current.orographicLift,
+      rainShadow: response.current.rainShadow,
+      policy: HYDROCLIMATE_POLICY,
+      epistemicStatus: (globalState.elapsedYears ?? 0) > 0
+        ? "study-constrained Krapp checkpoint evolved by a general atmosphere response: orbital-seasonal insolation, land-ocean thermal contrast, winds, moisture transport, ascent/subsidence and orography"
+        : "study-constrained Krapp checkpoint climate; general atmosphere diagnostics are initialized but contribute zero branch anomaly"
+    });
+    this.monthlyCache.set(key, result);
+    return result;
   }
 
   sample(globalState, latitude, longitude, spatialDetail = 0.35) {
@@ -92,20 +144,62 @@ export class SpatialHydroClimate {
     const key = `${cell.row}:${cell.col}`;
     if (this.cache.has(key)) return this.cache.get(key);
     const checkpoint = this.baseline.annualAt(cell.latitude, cell.longitude);
-    if (!checkpoint || !Number.isFinite(checkpoint.temperatureCelsius)) { this.cache.set(key, null); return null; }
+    if (!checkpoint || !Number.isFinite(checkpoint.temperatureCelsius)) {
+      this.cache.set(key, null);
+      return null;
+    }
 
-    const response = responseState(globalState, cell.latitude, cell.longitude);
-    const temperatureCelsius = checkpoint.temperatureCelsius + response.temperatureDelta;
-    const precipitationMmPerYear = Number.isFinite(checkpoint.precipitationMmPerYear)
-      ? checkpoint.precipitationMmPerYear * response.precipitationScale : null;
-    const cloudCoverPercent = Number.isFinite(checkpoint.cloudCoverPercent)
-      ? clamp(checkpoint.cloudCoverPercent + Math.log(response.precipitationScale) * 18 - response.temperatureDelta * 0.65, 0, 100) : null;
+    if ((globalState.elapsedYears ?? 0) <= 0) {
+      const moisture = waterBalanceIndex(checkpoint.temperatureCelsius, checkpoint.precipitationMmPerYear, checkpoint.cloudCoverPercent);
+      const runoff = runoffPotential(checkpoint.precipitationMmPerYear, moisture);
+      const january = this._monthly(globalState, 0, cell, spacing);
+      const result = Object.freeze({
+        latitude: cell.latitude,
+        longitude: cell.longitude,
+        gridSpacingDegrees: spacing,
+        temperatureCelsius: round(checkpoint.temperatureCelsius, 3),
+        precipitationMmPerYear: checkpoint.precipitationMmPerYear,
+        cloudCoverPercent: checkpoint.cloudCoverPercent,
+        soilMoistureIndex: moisture == null ? null : round(moisture, 4),
+        runoffPotentialMmPerYear: runoff == null ? null : round(runoff, 2),
+        checkpointTemperatureCelsius: round(checkpoint.temperatureCelsius, 3),
+        checkpointPrecipitationMmPerYear: checkpoint.precipitationMmPerYear,
+        checkpointCloudCoverPercent: checkpoint.cloudCoverPercent,
+        temperatureDelta: 0,
+        precipitationScale: 1,
+        atmospherePolicy: GENERAL_ATMOSPHERE_POLICY,
+        itczLatitude: january?.itczLatitude ?? null,
+        windEastMs: january?.windEastMs ?? null,
+        windNorthMs: january?.windNorthMs ?? null,
+        windSpeedMs: january?.windSpeedMs ?? null,
+        oceanMoistureFetch: january?.oceanMoistureFetch ?? null,
+        convectiveAscent: january?.convectiveAscent ?? null,
+        subtropicalSubsidence: january?.subtropicalSubsidence ?? null,
+        orographicLift: january?.orographicLift ?? null,
+        rainShadow: january?.rainShadow ?? null,
+        policy: HYDROCLIMATE_POLICY,
+        epistemicStatus: "study-constrained Krapp checkpoint climate; general atmosphere diagnostics are initialized but contribute zero branch anomaly"
+      });
+      this.cache.set(key, result);
+      return result;
+    }
+
+    const months = Array.from({ length: 12 }, (_, month) => this._monthly(globalState, month, cell, spacing)).filter(Boolean);
+    const temperatureCelsius = meanFinite(months.map((month) => month.temperatureCelsius));
+    const precipitationMmPerYear = meanFinite(months.map((month) => month.precipitationMmPerYear));
+    const cloudCoverPercent = meanFinite(months.map((month) => month.cloudCoverPercent));
     const soilMoistureIndex = waterBalanceIndex(temperatureCelsius, precipitationMmPerYear, cloudCoverPercent);
     const runoffPotentialMmPerYear = runoffPotential(precipitationMmPerYear, soilMoistureIndex);
+    const precipitationScale = Number.isFinite(checkpoint.precipitationMmPerYear) && checkpoint.precipitationMmPerYear > 0
+      ? precipitationMmPerYear / checkpoint.precipitationMmPerYear
+      : meanFinite(months.map((month) => month.precipitationScale));
+    const wettest = [...months].filter((month) => Number.isFinite(month.precipitationMmPerYear)).sort((a, b) => b.precipitationMmPerYear - a.precipitationMmPerYear)[0] ?? months[0];
 
     const result = Object.freeze({
-      latitude: cell.latitude, longitude: cell.longitude, gridSpacingDegrees: spacing,
-      temperatureCelsius: round(temperatureCelsius, 3),
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      gridSpacingDegrees: spacing,
+      temperatureCelsius: temperatureCelsius == null ? null : round(temperatureCelsius, 3),
       precipitationMmPerYear: precipitationMmPerYear == null ? null : round(precipitationMmPerYear, 2),
       cloudCoverPercent: cloudCoverPercent == null ? null : round(cloudCoverPercent, 2),
       soilMoistureIndex: soilMoistureIndex == null ? null : round(soilMoistureIndex, 4),
@@ -113,11 +207,23 @@ export class SpatialHydroClimate {
       checkpointTemperatureCelsius: round(checkpoint.temperatureCelsius, 3),
       checkpointPrecipitationMmPerYear: checkpoint.precipitationMmPerYear,
       checkpointCloudCoverPercent: checkpoint.cloudCoverPercent,
-      temperatureDelta: round(response.temperatureDelta, 4), precipitationScale: round(response.precipitationScale, 5),
-      orbitalMoistureDelta: round(response.orbitalMoistureDelta, 6), policy: HYDROCLIMATE_POLICY,
-      epistemicStatus: globalState.elapsedYears > 0
-        ? "model derived branch response from study-constrained Krapp checkpoint; temperature, precipitation and cloud respond to greenhouse climate, ice and orbital seasonality"
-        : "study-constrained Krapp checkpoint climate; moisture/runoff are model-derived diagnostic proxies"
+      temperatureDelta: temperatureCelsius == null ? null : round(temperatureCelsius - checkpoint.temperatureCelsius, 4),
+      precipitationScale: precipitationScale == null ? null : round(precipitationScale, 6),
+      atmospherePolicy: GENERAL_ATMOSPHERE_POLICY,
+      itczLatitude: wettest?.itczLatitude ?? null,
+      windEastMs: wettest?.windEastMs ?? null,
+      windNorthMs: wettest?.windNorthMs ?? null,
+      windSpeedMs: wettest?.windSpeedMs ?? null,
+      oceanMoistureFetch: wettest?.oceanMoistureFetch ?? null,
+      landMoistureRecycling: wettest?.landMoistureRecycling ?? null,
+      moistureSupplyIndex: wettest?.moistureSupplyIndex ?? null,
+      convectiveAscent: wettest?.convectiveAscent ?? null,
+      subtropicalSubsidence: wettest?.subtropicalSubsidence ?? null,
+      orographicLift: wettest?.orographicLift ?? null,
+      rainShadow: wettest?.rainShadow ?? null,
+      wettestMonthIndex: wettest?.monthIndex ?? null,
+      policy: HYDROCLIMATE_POLICY,
+      epistemicStatus: "study-constrained Krapp checkpoint evolved by a general atmosphere response: orbital-seasonal insolation, land-ocean thermal contrast, winds, moisture transport, ascent/subsidence and orography"
     });
     this.cache.set(key, result);
     return result;
@@ -125,33 +231,34 @@ export class SpatialHydroClimate {
 
   monthlyAt(globalState, month, latitude, longitude, spatialDetail = 0.35) {
     const spacing = gridSpacingForSpatialDetail(spatialDetail);
+    this._prepareCache(globalState, spacing);
     const cell = gridCell(latitude, longitude, spacing);
-    const checkpoint = this.baseline.monthlyAt(month, cell.latitude, cell.longitude);
-    if (!checkpoint || !Number.isFinite(checkpoint.temperatureCelsius)) return null;
-    const response = responseState(globalState, cell.latitude, cell.longitude);
-    const temperatureCelsius = checkpoint.temperatureCelsius + response.temperatureDelta;
-    const precipitationMmPerYear = Number.isFinite(checkpoint.precipitationMmPerYear)
-      ? checkpoint.precipitationMmPerYear * response.precipitationScale : null;
-    const cloudCoverPercent = Number.isFinite(checkpoint.cloudCoverPercent)
-      ? clamp(checkpoint.cloudCoverPercent + Math.log(response.precipitationScale) * 18 - response.temperatureDelta * 0.65, 0, 100) : null;
-    return Object.freeze({
-      month: checkpoint.month, monthIndex: checkpoint.monthIndex, latitude: cell.latitude, longitude: cell.longitude,
-      gridSpacingDegrees: spacing, temperatureCelsius: round(temperatureCelsius, 3),
-      precipitationMmPerYear: precipitationMmPerYear == null ? null : round(precipitationMmPerYear, 2),
-      precipitationMmThisMonth: precipitationMmPerYear == null ? null : round(precipitationMmPerYear / 12, 2),
-      cloudCoverPercent: cloudCoverPercent == null ? null : round(cloudCoverPercent, 2),
-      temperatureDelta: round(response.temperatureDelta, 4), precipitationScale: round(response.precipitationScale, 5),
-      orbitalMoistureDelta: round(response.orbitalMoistureDelta, 6), policy: HYDROCLIMATE_POLICY,
-      epistemicStatus: globalState.elapsedYears > 0 ? "model derived branch response from study-constrained Krapp checkpoint" : "study-constrained Krapp checkpoint climate"
-    });
+    return this._monthly(globalState, month, cell, spacing);
   }
 
   diagnostics(globalState, spatialDetail = 0.35) {
     return Object.freeze({
-      policy: HYDROCLIMATE_POLICY, gridSpacingDegrees: gridSpacingForSpatialDetail(spatialDetail),
-      spatialDetail: clamp(Number(spatialDetail) || 0, 0, 1), cachedCells: this.cache.size,
+      policy: HYDROCLIMATE_POLICY,
+      atmospherePolicy: GENERAL_ATMOSPHERE_POLICY,
+      gridSpacingDegrees: gridSpacingForSpatialDetail(spatialDetail),
+      spatialDetail: clamp(Number(spatialDetail) || 0, 0, 1),
+      cachedCells: this.cache.size,
+      cachedMonthlyCells: this.monthlyCache.size,
       stateSignature: this._stateSignature(globalState, gridSpacingForSpatialDetail(spatialDetail)),
-      epistemicStatus: "runtime materialization policy and model-derived hydroclimate response; not an observation"
+      mechanisms: Object.freeze([
+        "orbital-seasonal insolation",
+        "land-ocean heat-capacity contrast",
+        "Hadley/ITCZ migration",
+        "trade/westerly/polar wind regimes",
+        "upwind ocean moisture fetch",
+        "land moisture recycling proxy",
+        "subtropical subsidence",
+        "frontal ascent",
+        "orographic lift and rain shadow",
+        "dynamic tectonic elevation"
+      ]),
+      geographicSpecialCases: 0,
+      epistemicStatus: "runtime materialization policy and general intermediate-complexity atmospheric response; not a primitive-equation GCM or an observation"
     });
   }
 }
