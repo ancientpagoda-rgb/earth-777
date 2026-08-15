@@ -9,6 +9,7 @@ import {
   advanceOceanCirculation,
   initializeOceanCirculation
 } from "../src/sim/SpatialOceanCirculation.js";
+import { advanceEvolutionaryEcology } from "../src/sim/EvolutionaryEcology.js";
 
 function carbonState() {
   const state = initializeBiogeochemistry({
@@ -49,4 +50,26 @@ test("ocean circulation exclusively performs and reports surface-deep carbon exc
     state.carbonFluxes.surfaceToDeepPgCPerYear,
     state.oceanCirculationCarbonFluxPgCPerYear
   );
+});
+
+test("evolutionary lineages read aggregate animal biomass without rewriting it", () => {
+  const state = {
+    seed: 777001,
+    yearBP: 760_000,
+    temperatureAnomaly: -0.8,
+    greenhouseForcing: 0.2,
+    iceIndex: 0.22,
+    productivityIndex: 1.15,
+    herbivoreBiomass: 1.37,
+    carnivoreBiomass: 0.42
+  };
+  const herbivoreBefore = state.herbivoreBiomass;
+  const carnivoreBefore = state.carnivoreBiomass;
+
+  advanceEvolutionaryEcology(state, 250, () => 0.5);
+
+  assert.equal(state.herbivoreBiomass, herbivoreBefore);
+  assert.equal(state.carnivoreBiomass, carnivoreBefore);
+  assert.ok(Array.isArray(state.speciesLineages));
+  assert.ok(Number.isInteger(state.speciesRichness));
 });
