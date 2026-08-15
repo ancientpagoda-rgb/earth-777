@@ -1,4 +1,3 @@
-import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
 import {
   assimilateReconstructionScalar,
   reconstructionMethodSummary,
@@ -7,12 +6,14 @@ import {
 import { shoreline777Sample } from "./ShorelineReconstruction777.js";
 import { EVIDENCE_RELATIONS } from "./EvidenceHarvester.js";
 import { harvestTopographyEvidenceAt } from "./TopographyEvidenceHarvester.js";
+import { selectModernTerrainAnchor } from "./ModernTerrainAnchorSelector.js";
+import { cachedModernTerrainAnchorCandidatesAt } from "./ModernTerrainAnchorCache.js";
 
 const clampLatitude = (value) => Math.max(-90, Math.min(90, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 const positiveSigma = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
 
-export const TERRAIN_777_RECONSTRUCTION_POLICY = "modern-relief-explicit-hindcast-paleo-assimilation-v3";
+export const TERRAIN_777_RECONSTRUCTION_POLICY = "source-aware-modern-relief-explicit-hindcast-paleo-assimilation-v4";
 
 /**
  * The default correction is intentionally zero-valued and uncertainty-incomplete.
@@ -29,12 +30,15 @@ function unresolvedHindcastCorrection() {
     sourceId: "terrain-hindcast-unresolved-v1",
     method: "explicit zero correction pending resolved deep-time terrain hindcast",
     transformed: true,
-    note: "Numerical placeholder only. Modern ETOPO is not being claimed as observed 777 ka relief."
+    note: "Numerical placeholder only. The selected modern anchor is not being claimed as observed 777 ka relief."
   });
 }
 
 export function terrain777BedrockSample(latitude, longitude, {
   modernAnchorSigmaMeters = null,
+  modernAnchorCandidates = [],
+  useCachedHighResolutionAnchors = true,
+  cachedAnchorRadiusKm = 1,
   hindcastCorrection = null,
   paleoConstraints = [],
   historicalCalibration = [],
@@ -42,7 +46,14 @@ export function terrain777BedrockSample(latitude, longitude, {
 } = {}) {
   const lat = clampLatitude(latitude);
   const lon = wrapLongitude(longitude);
-  const modernElevationMeters = bedrockElevationAt(lat, lon);
+  const cachedCandidates = useCachedHighResolutionAnchors
+    ? cachedModernTerrainAnchorCandidatesAt(lat, lon, cachedAnchorRadiusKm)
+    : [];
+  const anchorSelection = selectModernTerrainAnchor(lat, lon, [...cachedCandidates, ...modernAnchorCandidates], {
+    etopoSigmaMeters: modernAnchorSigmaMeters
+  });
+  const selectedAnchor = anchorSelection.selected;
+  const modernElevationMeters = selectedAnchor.value;
   const correction = hindcastCorrection ?? unresolvedHindcastCorrection();
 
   const assimilation = assimilateReconstructionScalar({
@@ -50,11 +61,11 @@ export function terrain777BedrockSample(latitude, longitude, {
     targetYearBP: 777_000,
     modernAnchor: {
       value: modernElevationMeters,
-      sigma: positiveSigma(modernAnchorSigmaMeters),
+      sigma: selectedAnchor.sigma ?? positiveSigma(modernAnchorSigmaMeters),
       stream: RECONSTRUCTION_STREAMS.MODERN,
-      sourceId: "etopo-2022",
-      method: "modern ETOPO 2022 bedrock/bathymetry spatial anchor",
-      note: "Modern elevation is an anchor and must be transformed before interpretation at 777 ka."
+      sourceId: selectedAnchor.sourceId,
+      method: selectedAnchor.method ?? `selected modern terrain anchor (${selectedAnchor.sourceId})`,
+      note: `${selectedAnchor.note ?? "Modern terrain evidence selected for spatial detail."} It must still be transformed before interpretation at 777 ka.`
     },
     hindcastCorrection: correction,
     paleoConstraints,
@@ -73,6 +84,11 @@ export function terrain777BedrockSample(latitude, longitude, {
     latitude: lat,
     longitude: lon,
     modernElevationMeters,
+    modernAnchorSelection: anchorSelection,
+    modernAnchorSourceId: selectedAnchor.sourceId,
+    modernAnchorResolutionMeters: selectedAnchor.resolutionMeters,
+    modernAnchorMeasurementQuality: selectedAnchor.measurementQuality,
+    modernAnchorReplacementUsed: anchorSelection.replacementUsed,
     reconstructedElevationMeters,
     hindcastCorrectionMeters: assimilation.value == null ? null : assimilation.value - modernElevationMeters,
     reconstructionMethod: reconstructionMethodSummary(assimilation),
@@ -83,7 +99,7 @@ export function terrain777BedrockSample(latitude, longitude, {
     medianLandAt777ka: shoreline.medianLand,
     shorelineConfidenceClass: shoreline.confidenceClass,
     shorelineLandProbability: shoreline.landProbability,
-    epistemicStatus: "777 ka bedrock reconstruction plus uncertainty-aware global shoreline classification. Modern ETOPO supplies spatial detail only after an explicit hindcast transform; historical observations calibrate process models and paleo constraints may directly update the target epoch."
+    epistemicStatus: "777 ka bedrock reconstruction plus uncertainty-aware global shoreline classification. The best available modern solid-surface anchor supplies spatial detail, but it enters the target epoch only through an explicit hindcast transform; historical observations calibrate process models and paleo constraints may directly update the target epoch."
   });
 }
 
@@ -114,10 +130,10 @@ function harvestedCalibration(record) {
 /**
  * Convenience path for Evidence Harvester adapters.
  *
- * Raw nearby paleo records, modern anchors and untransformed historical rates are
- * deliberately retained in evidenceHarvest but do not change the target elevation.
- * Only target-overlapping observations and explicitly target-transformed hindcasts
- * are forwarded as numerical 777 ka constraints.
+ * Raw nearby paleo records and untransformed historical rates are retained without
+ * changing target elevation. Modern-anchor evidence is allowed to improve the
+ * present-day spatial skeleton, but only target-overlapping paleo observations and
+ * explicitly target-transformed hindcasts can change the 777 ka estimate itself.
  */
 export function terrain777BedrockSampleFromEvidence(latitude, longitude, evidenceRecords = [], options = {}) {
   const harvest = harvestTopographyEvidenceAt(latitude, longitude, evidenceRecords, {
@@ -127,8 +143,12 @@ export function terrain777BedrockSampleFromEvidence(latitude, longitude, evidenc
   });
   const harvestedConstraints = harvest.targetConstraints.map(harvestedConstraint);
   const harvestedCalibrationRecords = harvest.processCalibration.map(harvestedCalibration);
+  const harvestedModernAnchors = harvest.modernAnchors.filter((record) => Number.isFinite(Number(record.value)));
   const sample = terrain777BedrockSample(latitude, longitude, {
     modernAnchorSigmaMeters: options.modernAnchorSigmaMeters ?? null,
+    modernAnchorCandidates: [...(options.modernAnchorCandidates ?? []), ...harvestedModernAnchors],
+    useCachedHighResolutionAnchors: options.useCachedHighResolutionAnchors ?? true,
+    cachedAnchorRadiusKm: options.cachedAnchorRadiusKm ?? 1,
     hindcastCorrection: options.hindcastCorrection ?? null,
     paleoConstraints: [...(options.paleoConstraints ?? []), ...harvestedConstraints],
     historicalCalibration: [...(options.historicalCalibration ?? []), ...harvestedCalibrationRecords],
@@ -163,6 +183,9 @@ export function terrain777ProvenanceAt(latitude, longitude, options = undefined)
     lower95Meters: sample.lower95,
     upper95Meters: sample.upper95,
     modernElevationMeters: sample.modernElevationMeters,
+    modernAnchorSourceId: sample.modernAnchorSourceId,
+    modernAnchorResolutionMeters: sample.modernAnchorResolutionMeters,
+    modernAnchorReplacementUsed: sample.modernAnchorReplacementUsed,
     reconstructedElevationMeters: sample.reconstructedElevationMeters,
     hindcastCorrectionMeters: sample.hindcastCorrectionMeters,
     shoreline: sample.shoreline,

@@ -88,9 +88,10 @@ test("ingestion source has no default page cap and writes raw cache outside git 
   assert.match(source, /nextNceiPageUrl/);
 });
 
-test("package exposes evidence ingestion separately from the legacy full data ingest", () => {
+test("package keeps evidence ingestion separate from legacy ingest and chains modern anchors after discovery", () => {
   const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.scripts["data:evidence:ncei"], "node scripts/ingest-ncei-paleo-evidence.mjs");
-  assert.equal(pkg.scripts["data:evidence"], "npm run data:evidence:ncei");
+  assert.equal(pkg.scripts["data:evidence:gmrt"], "node scripts/ingest-gmrt-modern-anchors.mjs");
+  assert.equal(pkg.scripts["data:evidence"], "npm run data:evidence:ncei && npm run data:evidence:gmrt");
   assert.doesNotMatch(pkg.scripts["data:ingest"], /data:evidence/);
 });
