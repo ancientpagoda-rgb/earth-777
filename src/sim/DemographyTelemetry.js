@@ -2,6 +2,16 @@ export const HOMININ_DEMOGRAPHY_TELEMETRY_KEY = "__EARTH777_HOMININ_DEMOGRAPHY__
 
 export function publishHomininDemography(state) {
   if (typeof globalThis !== "object") return null;
+  const activeSites = (state?.homininSites ?? []).filter((site) => site.active && site.sitePopulationPersons > 0);
+  const highDefensePersistentSiteCount = activeSites.filter((site) =>
+    Number(site.defensiveWorksIndex) >= 0.62
+      && Number(site.persistence) >= 0.58
+      && Number(site.builtEnvironmentIndex) >= 0.48
+      && Number(site.sitePopulationPersons) >= 100
+  ).length;
+  const waterborneSeizureEdges = (state?.homininConflictEdges ?? []).filter((edge) =>
+    edge.medium === "water" && Number(edge.resourceTransferPersonDaysPerYear) > 0
+  );
   const snapshot = Object.freeze({
     populationPersons: Math.max(0, Math.round(Number(state?.homininPopulationPersons) || 0)),
     birthsPerYear: Math.max(0, Number(state?.homininBirthsPerYear) || 0),
@@ -20,8 +30,26 @@ export function publishHomininDemography(state) {
     exchangeEdgeCount: Math.max(0, Math.round(Number(state?.homininExchangeEdgeCount) || 0)),
     exchangePersonTripsPerYear: Math.max(0, Number(state?.homininExchangePersonTripsPerYear) || 0),
     storedFoodPersonDays: Math.max(0, Number(state?.homininStoredFoodPersonDays) || 0),
+    waterTransportSiteCount: Math.max(0, Math.round(Number(state?.homininWaterTransportSiteCount) || 0)),
+    waterRouteCount: Math.max(0, Math.round(Number(state?.homininWaterRouteCount) || 0)),
+    waterPersonTripsPerYear: Math.max(0, Number(state?.homininWaterPersonTripsPerYear) || 0),
+    maxWaterTransportRangeKm: Math.max(0, Number(state?.homininMaxWaterTransportRangeKm) || 0),
+    conflictEdgeCount: Math.max(0, Math.round(Number(state?.homininConflictEdgeCount) || 0)),
+    resourceSeizurePersonDaysPerYear: Math.max(0, Number(state?.homininResourceSeizurePersonDaysPerYear) || 0),
+    waterborneConflictShare: Math.max(0, Math.min(1, Number(state?.homininWaterborneConflictShare) || 0)),
+    defensiveSiteCount: Math.max(0, Math.round(Number(state?.homininDefensiveSiteCount) || 0)),
+    highDefenseSiteCount: Math.max(0, Math.round(Number(state?.homininHighDefenseSiteCount) || 0)),
+    highDefensePersistentSiteCount,
+    maxDefensiveWorksIndex: Math.max(0, Math.min(1, Number(state?.homininMaxDefensiveWorksIndex) || 0)),
+    waterborneSeizureEdgeCount: waterborneSeizureEdges.length,
+    waterborneSeizurePersonDaysPerYear: waterborneSeizureEdges.reduce(
+      (sum, edge) => sum + Math.max(0, Number(edge.resourceTransferPersonDaysPerYear) || 0),
+      0
+    ),
     policy: state?.homininDemographyPolicy ?? null,
-    socialPolicy: state?.homininSocialPolicy ?? null
+    socialPolicy: state?.homininSocialPolicy ?? null,
+    waterTransportPolicy: state?.homininWaterTransportPolicy ?? null,
+    conflictConstructionPolicy: state?.homininConflictConstructionPolicy ?? null
   });
   globalThis[HOMININ_DEMOGRAPHY_TELEMETRY_KEY] = snapshot;
   return snapshot;

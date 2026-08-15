@@ -1,5 +1,6 @@
 import { TerrainChunkManager } from "./TerrainChunkManager.js";
 import { SurfaceEcologyManager } from "./SurfaceEcologyManager.js";
+import { SurfaceBuiltEnvironmentManager } from "./SurfaceBuiltEnvironmentManager.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -31,6 +32,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   constructor(scene, options = {}) {
     super(scene, options);
     this.surfaceEcology = new SurfaceEcologyManager(scene, this);
+    this.surfaceBuiltEnvironment = new SurfaceBuiltEnvironmentManager(scene, this);
     this.hydrology = null;
     this.vegetation = null;
     this.spatialDetail = 0.82;
@@ -76,7 +78,9 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const context = this._surfaceContext(this.origin.latitude, this.origin.longitude, this.earthState);
     this.surfaceScienceStatus = context.scienceCoupled ? "science-coupled" : "provisional";
     this.setGeomorphologyPatch(context.geomorphologyPatch);
-    this.surfaceEcology.setContext({ latitude: this.origin.latitude, longitude: this.origin.longitude, ...context });
+    const localContext = { latitude: this.origin.latitude, longitude: this.origin.longitude, ...context };
+    this.surfaceEcology.setContext(localContext);
+    this.surfaceBuiltEnvironment.setContext(localContext);
   }
 
   setEarthSystemState(state, seed = state?.seed) {
@@ -93,7 +97,9 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     super.configure(options);
     const segments = Number(options.segments ?? this.segments);
     const radius = Number(options.radius ?? this.radius);
-    this.surfaceEcology.configure({ quality: clamp(segments / 22, 0.45, 1), radius: Math.min(2, Math.max(1, Math.round(radius))) });
+    const quality = clamp(segments / 22, 0.45, 1);
+    this.surfaceEcology.configure({ quality, radius: Math.min(2, Math.max(1, Math.round(radius))) });
+    this.surfaceBuiltEnvironment.configure({ quality });
   }
 
   update(cameraPosition) {
@@ -110,11 +116,13 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   diagnostics() {
     const terrain = super.diagnostics();
     const ecology = this.surfaceEcology.diagnostics();
+    const builtEnvironment = this.surfaceBuiltEnvironment.diagnostics();
     return Object.freeze({
       ...terrain,
       queuedChunks: terrain.queuedChunks + ecology.queuedChunks,
       terrainQueuedChunks: terrain.queuedChunks,
       ecology,
+      builtEnvironment,
       surfaceScienceStatus: this.surfaceScienceStatus,
       hydrologyProvider: Boolean(this.hydrology),
       vegetationProvider: Boolean(this.vegetation),
@@ -126,11 +134,14 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   clear() {
     super.clear();
     this.surfaceEcology?.clear();
+    this.surfaceBuiltEnvironment?.clear();
   }
 
   dispose() {
     this.surfaceEcology?.dispose();
     this.surfaceEcology = null;
+    this.surfaceBuiltEnvironment?.dispose();
+    this.surfaceBuiltEnvironment = null;
     super.dispose();
   }
 }

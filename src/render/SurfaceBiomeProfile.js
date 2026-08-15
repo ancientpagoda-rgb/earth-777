@@ -1,5 +1,7 @@
 import { homininPopulationAt } from "../sim/HomininDemography.js";
 import { homininSocialAt } from "../sim/HomininSocialOrganization.js";
+import { homininWaterTransportAt } from "../sim/HomininWaterTransport.js";
+import { homininConflictAt } from "../sim/HomininConflictConstruction.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -30,6 +32,8 @@ export function surfaceBiomeProfile(vegetationSample = null, state = {}, latitud
   const vigor = clamp(npp * 0.62 + lai * 0.28 + productivity * 0.10, 0.08, 1);
   const localHominins = homininPopulationAt(state, latitude, longitude, 100);
   const localSocial = homininSocialAt(state, latitude, longitude, 100);
+  const localWater = localSocial?.nearestSiteId ? homininWaterTransportAt(state, localSocial.nearestSiteId) : null;
+  const localConflict = localSocial?.nearestSiteId ? homininConflictAt(state, localSocial.nearestSiteId) : null;
   const localDensity = Math.max(0, Number(localHominins?.densityPersonsPerKm2) || 0);
   const homininDensity = localDensity > 0 ? localDensity / (localDensity + 0.018) : 0;
   return Object.freeze({
@@ -54,6 +58,16 @@ export function surfaceBiomeProfile(vegetationSample = null, state = {}, latitud
     homininStoredFoodPersonDays: localSocial?.storedFoodPersonDays ?? 0,
     homininExchangeDegree: localSocial?.exchangeDegree ?? 0,
     homininResidentialMovesPerYear: localSocial?.residentialMovesPerYear ?? 0,
+    homininWaterTransportIndex: localWater?.waterTransportIndex ?? 0,
+    homininNavigationIndex: localWater?.navigationIndex ?? 0,
+    homininWaterRouteCount: localWater?.routeCount ?? 0,
+    homininWaterTransportRangeKm: localWater?.rangeKm ?? 0,
+    homininThreatIndex: localConflict?.threatIndex ?? 0,
+    homininTerritorialityIndex: localConflict?.territorialityIndex ?? 0,
+    homininDefensiveWorksIndex: localConflict?.defensiveWorksIndex ?? 0,
+    homininDefensiveBarrierEquivalentMeters: localConflict?.defensiveBarrierEquivalentMeters ?? 0,
+    homininConflictIntensity: localConflict?.aggregateConflictIntensity ?? 0,
+    homininWaterborneConflictShare: localConflict?.waterborneConflictShare ?? 0,
     vigor,
     biomeCode: vegetationSample?.biomeCode ?? null,
     biomeLabel: vegetationSample?.biomeLabel ?? null
