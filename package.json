@@ -15,7 +15,8 @@
     "data:soil": "python3 scripts/ingest-biome4-soil.py",
     "data:evidence:ncei": "node scripts/ingest-ncei-paleo-evidence.mjs",
     "data:evidence:gmrt": "node scripts/ingest-gmrt-modern-anchors.mjs",
-    "data:evidence": "npm run data:evidence:ncei && npm run data:evidence:gmrt",
+    "data:evidence:gmrt-patches": "node scripts/ingest-gmrt-terrain-patches.mjs",
+    "data:evidence": "npm run data:evidence:ncei && npm run data:evidence:gmrt && npm run data:evidence:gmrt-patches",
     "data:ingest": "npm run data:paleo && npm run data:terrain && npm run data:climate && npm run data:vegetation && npm run data:soil && npm run data:pft-drivers",
     "test": "node --test test/*.test.js",
     "data:pft-drivers": "python3 scripts/ingest-biome4-pft-drivers.py"
