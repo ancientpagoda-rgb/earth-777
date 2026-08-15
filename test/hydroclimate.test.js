@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { checkpointState } from "../src/data/checkpoint-777.js";
 import { Krapp777ClimateLayer } from "../src/data/krapp-777-climate.js";
+import { GENERAL_ATMOSPHERE_POLICY } from "../src/sim/GeneralAtmosphereCirculation.js";
 import {
   HYDROCLIMATE_POLICY,
   SpatialHydroClimate,
@@ -19,6 +20,20 @@ function materializer() {
   return new SpatialHydroClimate(climate);
 }
 
+function branchState(overrides = {}) {
+  const checkpoint = checkpointState();
+  return {
+    ...checkpoint,
+    elapsedYears: 10_000,
+    yearBP: checkpoint.yearBP - 10_000,
+    oceanTemperatureAnomaly: checkpoint.temperatureAnomaly,
+    tectonicTimeMyr: 0.01,
+    tectonicBoundaryActivity: 1,
+    productivityIndex: 1,
+    ...overrides
+  };
+}
+
 test("CWF spatial detail maps to bounded hydroclimate grid spacing", () => {
   assert.equal(gridSpacingForSpatialDetail(0), 4);
   assert.equal(gridSpacingForSpatialDetail(0.35), 2);
@@ -26,62 +41,74 @@ test("CWF spatial detail maps to bounded hydroclimate grid spacing", () => {
   assert.equal(gridSpacingForSpatialDetail(1), 0.5);
 });
 
-test("checkpoint materialization preserves Krapp climate at its selected grid cell", () => {
+test("checkpoint materialization preserves Krapp climate exactly while atmosphere anomaly is zero", () => {
   const state = checkpointState();
   const field = materializer();
   const sample = field.sample(state, 0, 20, 0.35);
   assert.ok(sample);
   assert.equal(sample.policy, HYDROCLIMATE_POLICY);
+  assert.equal(sample.atmospherePolicy, GENERAL_ATMOSPHERE_POLICY);
   assert.equal(sample.gridSpacingDegrees, 2);
   const baseline = climate.annualAt(sample.latitude, sample.longitude);
   assert.ok(baseline);
   assert.ok(Math.abs(sample.temperatureCelsius - baseline.temperatureCelsius) < 0.002);
   assert.ok(Math.abs(sample.precipitationMmPerYear - baseline.precipitationMmPerYear) < 0.02);
   assert.ok(Math.abs(sample.cloudCoverPercent - baseline.cloudCoverPercent) < 0.02);
+  assert.equal(sample.precipitationScale, 1);
   assert.match(sample.epistemicStatus, /study-constrained Krapp checkpoint/);
 });
 
-test("Free Earth warming produces deterministic spatial hydroclimate divergence", () => {
+test("Free Earth branch hydroclimate diverges deterministically through general circulation", () => {
   const checkpoint = checkpointState();
-  const branch = {
-    ...checkpoint,
-    elapsedYears: 10_000,
-    yearBP: checkpoint.yearBP - 10_000,
-    temperatureAnomaly: checkpoint.temperatureAnomaly + 2
-  };
-  const first = materializer().sample(branch, 0, 20, 0.65);
-  const second = materializer().sample(branch, 0, 20, 0.65);
-  const baseline = materializer().sample(checkpoint, 0, 20, 0.65);
+  const branch = branchState({
+    temperatureAnomaly: checkpoint.temperatureAnomaly + 2,
+    oceanTemperatureAnomaly: checkpoint.temperatureAnomaly + 1,
+    eccentricity: Math.max(0.01, checkpoint.eccentricity * 1.25),
+    precession: checkpoint.precession + 95
+  });
+  const first = materializer().sample(branch, 18, 20, 0.65);
+  const second = materializer().sample(branch, 18, 20, 0.65);
+  const baseline = materializer().sample(checkpoint, 18, 20, 0.65);
   assert.deepEqual(first, second);
-  assert.ok(first.temperatureCelsius > baseline.temperatureCelsius + 1.5);
-  assert.ok(first.precipitationMmPerYear > baseline.precipitationMmPerYear);
-  assert.ok(first.precipitationScale > 1);
-  assert.match(first.epistemicStatus, /model derived branch response/);
+  assert.ok(first.temperatureCelsius > baseline.temperatureCelsius + 1);
+  assert.notEqual(first.precipitationMmPerYear, baseline.precipitationMmPerYear);
+  assert.notEqual(first.precipitationScale, 1);
+  assert.ok(Number.isFinite(first.windEastMs));
+  assert.ok(Number.isFinite(first.windNorthMs));
+  assert.ok(Number.isFinite(first.itczLatitude));
+  assert.ok(Number.isFinite(first.oceanMoistureFetch));
+  assert.match(first.epistemicStatus, /general atmosphere response/);
 });
 
-test("additional high-latitude ice suppresses modeled precipitation response", () => {
+test("orbital geometry can redistribute rainfall without a prescribed regional target", () => {
   const checkpoint = checkpointState();
-  const warm = {
-    ...checkpoint,
-    elapsedYears: 5_000,
-    temperatureAnomaly: checkpoint.temperatureAnomaly + 1.5
-  };
-  const icy = { ...warm, iceIndex: checkpoint.iceIndex + 0.35 };
+  const firstState = branchState({ eccentricity: 0.04, obliquity: 24.2, precession: 25 });
+  const secondState = { ...firstState, precession: 205 };
   const field = materializer();
-  const warmSample = field.sample(warm, 60, 20, 0.65);
-  const icySample = field.sample(icy, 60, 20, 0.65);
-  if (warmSample && icySample) {
-    assert.ok(icySample.precipitationScale < warmSample.precipitationScale);
-  }
+  const first = field.sample(firstState, 22, 30, 0.85);
+  const second = field.sample(secondState, 22, 30, 0.85);
+  assert.ok(first && second);
+  assert.notEqual(first.precipitationMmPerYear, second.precipitationMmPerYear);
+  assert.notEqual(first.wettestMonthIndex, second.wettestMonthIndex);
+  assert.ok(Number.isFinite(first.subtropicalSubsidence));
+  assert.ok(Number.isFinite(second.subtropicalSubsidence));
+  assert.notDeepEqual(
+    [first.windEastMs, first.windNorthMs, first.itczLatitude],
+    [second.windEastMs, second.windNorthMs, second.itczLatitude]
+  );
+  assert.notEqual(checkpoint.precession, secondState.precession);
 });
 
-test("regional inspection consumes gridded hydroclimate and exposes resolution", () => {
-  const checkpoint = checkpointState();
-  const branch = {
-    ...checkpoint,
-    elapsedYears: 2_500,
-    temperatureAnomaly: checkpoint.temperatureAnomaly + 0.8
-  };
+test("hydroclimate diagnostics declare mechanisms and no geographic special cases", () => {
+  const diagnostics = materializer().diagnostics(branchState(), 0.65);
+  assert.equal(diagnostics.atmospherePolicy, GENERAL_ATMOSPHERE_POLICY);
+  assert.equal(diagnostics.geographicSpecialCases, 0);
+  assert.ok(diagnostics.mechanisms.includes("Hadley/ITCZ migration"));
+  assert.ok(diagnostics.mechanisms.includes("orographic lift and rain shadow"));
+});
+
+test("regional inspection consumes generalized gridded hydroclimate and exposes resolution", () => {
+  const branch = branchState({ temperatureAnomaly: checkpointState().temperatureAnomaly + 0.8 });
   const field = materializer();
   const region = regionalState(branch, 0, 20, {
     climateLayer: climate,
