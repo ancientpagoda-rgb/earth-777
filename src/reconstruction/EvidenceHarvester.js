@@ -111,6 +111,10 @@ function calibrationEligible(record) {
   return record?.relation === EVIDENCE_RELATIONS.PROCESS_CALIBRATION;
 }
 
+function matchesQueryField(record, field) {
+  return field == null || record?.field == null || record.field === field;
+}
+
 export function rankEvidenceRecord(record, {
   targetYearBP = 777_000,
   latitude = null,
@@ -125,8 +129,8 @@ export function rankEvidenceRecord(record, {
   const spatial = spatialFactor(record, latitude, longitude);
   const uncertainty = uncertaintyFactor(record, uncertaintyScale);
   const sourceQuality = clamp01(record.sourceQuality ?? 0.72);
-  const relevance = clamp01(record.relevance ?? (field == null || record.field == null || record.field === field ? 1 : 0.35));
-  const fieldMatch = field == null || record.field == null || record.field === field ? 1 : 0.35;
+  const relevance = clamp01(record.relevance ?? (matchesQueryField(record, field) ? 1 : 0.35));
+  const fieldMatch = matchesQueryField(record, field) ? 1 : 0.35;
   const score = clamp01(relationPrior * temporal * spatial.factor * uncertainty * sourceQuality * relevance * fieldMatch);
   const ageDistanceYears = temporalDistanceYears(record, targetYearBP);
   return Object.freeze({
@@ -138,6 +142,7 @@ export function rankEvidenceRecord(record, {
     ageDistanceYears,
     targetEligible: targetEligible(record, targetYearBP),
     calibrationEligible: calibrationEligible(record),
+    queryFieldEligible: matchesQueryField(record, field),
     rankingPolicy: EVIDENCE_HARVEST_POLICY
   });
 }
@@ -149,7 +154,7 @@ export function harvestEvidence(records = [], options = {}) {
     .filter(Boolean)
     .sort((a, b) => b.evidenceScore - a.evidenceScore || String(a.sourceId ?? "").localeCompare(String(b.sourceId ?? "")));
 
-  const targetConstraints = ranked.filter((record) => record.targetEligible);
+  const targetConstraints = ranked.filter((record) => record.targetEligible && record.queryFieldEligible);
   const processCalibration = ranked.filter((record) => record.calibrationEligible);
   const nearbyPaleo = ranked.filter((record) => record.relation === EVIDENCE_RELATIONS.NEARBY_PALEO && !record.targetEligible);
   const modernAnchors = ranked.filter((record) => record.relation === EVIDENCE_RELATIONS.MODERN_ANCHOR);
@@ -167,7 +172,7 @@ export function harvestEvidence(records = [], options = {}) {
     nearbyPaleo: Object.freeze(nearbyPaleo),
     modernAnchors: Object.freeze(modernAnchors),
     modelCompletion: Object.freeze(modelCompletion),
-    rule: "Discovery rank is not assimilation weight. Only direct/target-overlapping observations or explicitly transformed hindcasts can become target-epoch estimates; nearby paleo, historical/process records and modern anchors remain non-target evidence until a physical or statistical transformation is supplied."
+    rule: "Discovery rank is not assimilation weight. Target assimilation is field-strict: only direct/target-overlapping observations or explicitly transformed hindcasts for the queried field can become target-epoch estimates; nearby paleo, historical/process records and modern anchors remain non-target evidence until a physical or statistical transformation is supplied."
   });
 }
 
