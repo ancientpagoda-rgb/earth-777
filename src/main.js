@@ -6,7 +6,7 @@ import { loadBiome4Soil } from "./data/biome4-soil.js";
 import { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
-import { MassConservingHydrology } from "./sim/MassConservingHydrology.js";
+import { EarthSystemHydrology } from "./sim/EarthSystemHydrology.js";
 import { SpatialVegetation } from "./sim/SpatialVegetation.js";
 import { EarthView } from "./render/earth-view.js";
 import { FrameProfiler } from "./render/FrameProfiler.js";
@@ -485,7 +485,7 @@ loadKrapp777Climate()
     catch (error) { console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error); }
     try { pftDrivers = await loadBiome4PftDrivers(); }
     catch (error) { console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", error); }
-    hydroClimate = new MassConservingHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
+    hydroClimate = new EarthSystemHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
     const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
     earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
     try {
