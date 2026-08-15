@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v8";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v9";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -397,26 +397,52 @@ function respondTargetedHerds(herds, packs) {
     const threats = threatsByHerd.get(herd.id);
     if (!threats?.length) return herd;
     let nearest = threats[0];
-    let threatDistanceKm = Math.hypot(herd.x - nearest.x, herd.z - nearest.z);
+    let threatDistanceBeforeKm = Math.hypot(herd.x - nearest.x, herd.z - nearest.z);
     for (let index = 1; index < threats.length; index += 1) {
       const candidate = threats[index];
       const distanceKm = Math.hypot(herd.x - candidate.x, herd.z - candidate.z);
-      if (distanceKm < threatDistanceKm) {
+      if (distanceKm < threatDistanceBeforeKm) {
         nearest = candidate;
-        threatDistanceKm = distanceKm;
+        threatDistanceBeforeKm = distanceKm;
       }
     }
     const dx = herd.x - nearest.x;
     const dz = herd.z - nearest.z;
-    const heading = threatDistanceKm > 1e-12 ? Math.atan2(dz, dx) : herd.heading + Math.PI;
+    const heading = threatDistanceBeforeKm > 1e-12 ? Math.atan2(dz, dx) : herd.heading + Math.PI;
+    const fleeDistanceKm = Math.max(0, Number(herd.movementDistanceKm) || 0);
+    const fleeXKm = Math.cos(heading) * fleeDistanceKm;
+    const fleeZKm = Math.sin(heading) * fleeDistanceKm;
+    const x = herd.x + fleeXKm;
+    const z = herd.z + fleeZKm;
+    const threatDistanceKm = Math.hypot(x - nearest.x, z - nearest.z);
     return Object.freeze({
       ...herd,
+      x,
+      z,
       behavior: "flee",
       heading,
       threatGroupId: nearest.id,
       threatLineageId: nearest.lineageId ?? null,
       threatDistanceKm,
-      threatenedByCount: threats.length
+      threatDistanceBeforeKm,
+      threatenedByCount: threats.length,
+      fleeDistanceKm,
+      fleeXKm,
+      fleeZKm
+    });
+  }));
+}
+
+function refreshPredatorTargetDistances(packs, herds) {
+  if (!packs?.length || !herds?.length) return Object.freeze(packs ?? []);
+  const herdById = new Map(herds.map((herd) => [herd.id, herd]));
+  return Object.freeze(packs.map((pack) => {
+    if (pack.targetGroupId == null) return pack;
+    const target = herdById.get(pack.targetGroupId);
+    if (!target) return pack;
+    return Object.freeze({
+      ...pack,
+      targetDistanceAfterHerdResponseKm: Math.hypot(target.x - pack.x, target.z - pack.z)
     });
   }));
 }
@@ -430,6 +456,8 @@ function alignHerbivoreIndividuals(individuals, herds) {
     return Object.freeze({
       ...animal,
       behavior: "flee",
+      x: animal.x + (Number(herd.fleeXKm) || 0),
+      z: animal.z + (Number(herd.fleeZKm) || 0),
       yaw: herd.heading,
       threatGroupId: herd.threatGroupId,
       threatLineageId: herd.threatLineageId ?? null
@@ -483,8 +511,9 @@ export function buildObservedFauna({
   const baseSeed = (Number(seed) >>> 0) ^ hashText(`${latitude.toFixed(4)}:${longitude.toFixed(4)}`);
   const herbivores = buildGroups({ role: "herbivore", population: herbivorePopulation, meanSize: field.meanHerdSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed, field, elapsedYears, lineages: lineagesForRole(state, "herbivore"), state });
   const carnivores = buildGroups({ role: "carnivore", population: carnivorePopulation, meanSize: field.meanPackSize, radiusKm, individualRadiusKm: nearRadiusKm, focusXKm, focusZKm, seed: baseSeed ^ 0x9e3779b9, field, elapsedYears, lineages: lineagesForRole(state, "carnivore"), state });
-  const packs = targetPredatorPacks(carnivores.groups, herbivores.groups);
-  const herds = respondTargetedHerds(herbivores.groups, packs);
+  const targetedPacks = targetPredatorPacks(carnivores.groups, herbivores.groups);
+  const herds = respondTargetedHerds(herbivores.groups, targetedPacks);
+  const packs = refreshPredatorTargetDistances(targetedPacks, herds);
   const herbivoreIndividuals = alignHerbivoreIndividuals(herbivores.individuals, herds);
   const carnivoreIndividuals = alignCarnivoreIndividuals(carnivores.individuals, packs);
   const individuals = Object.freeze([...herbivoreIndividuals, ...carnivoreIndividuals]);
