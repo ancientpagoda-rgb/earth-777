@@ -34,22 +34,22 @@ function syntheticPatch() {
   });
 }
 
-test("evidence coordinates collapse deterministically into one-degree GMRT patch tiles", () => {
+test("evidence coordinates collapse deterministically into compact quarter-degree GMRT patch tiles", () => {
   const records = [
-    { sourceId: "a", latitude: 41.2, longitude: -126.7 },
-    { sourceId: "b", latitude: 41.8, longitude: -126.2 },
-    { sourceId: "c", latitude: 42.1, longitude: -126.2 }
+    { sourceId: "a", latitude: 41.20, longitude: -126.70 },
+    { sourceId: "b", latitude: 41.22, longitude: -126.72 },
+    { sourceId: "c", latitude: 41.31, longitude: -126.70 }
   ];
   const tiles = uniqueGmrtPatchTiles(records);
   assert.equal(tiles.length, 2);
   assert.deepEqual(tiles[0].evidenceSourceIds, ["a", "b"]);
-  assert.deepEqual(gmrtPatchTileFor(41.2, -126.7), {
-    id: "gmrt-41p000-m127p000-1p000",
+  assert.deepEqual(gmrtPatchTileFor(41.20, -126.70), {
+    id: "gmrt-41p000-m126p750-0p250",
     south: 41,
-    north: 42,
-    west: -127,
-    east: -126,
-    tileDegrees: 1
+    north: 41.25,
+    west: -126.75,
+    east: -126.5,
+    tileDegrees: 0.25
   });
 });
 
@@ -77,6 +77,12 @@ test("ArcASCII parser and int16 packing preserve finite meters and masked NaN ce
   assert.equal(terrainPatchValueAt(patch, 20.5, 11.5), null);
 });
 
+test("ArcASCII center-origin headers are converted to cell-edge patch bounds", () => {
+  const centered = parseEsriAsciiGrid(`ncols 1\nnrows 1\nxllcenter 10.5\nyllcenter 20.5\ncellsize 1\nNODATA_value -9999\n123\n`);
+  assert.equal(centered.xll, 10);
+  assert.equal(centered.yll, 20);
+});
+
 test("masked high-resolution coverage is strong evidence but not mislabeled as direct multibeam", () => {
   const common = {
     field: "bedrockElevationMeters",
@@ -100,6 +106,7 @@ test("masked high-resolution coverage is strong evidence but not mislabeled as d
 
 test("generated GMRT terrain patch cache has a stable empty-before-ingestion contract", () => {
   assert.equal(GMRT_TERRAIN_PATCH_META.sourceId, "gmrt-4.5.0");
+  assert.equal(GMRT_TERRAIN_PATCH_META.tileDegrees, 0.25);
   assert.ok(Array.isArray(GMRT_TERRAIN_PATCHES));
 });
 
@@ -112,6 +119,7 @@ test("terrain patch ingestion is uncapped by default, evidence-targeted, and nev
   assert.doesNotMatch(source, /layer[^\n]*["']topo["']/);
   assert.match(source, /data\/raw\/gmrt-terrain-patches/);
   assert.match(source, /gmrt-terrain-patches\.generated\.js/);
+  assert.match(source, /GMRT_PATCH_TILE_DEGREES/);
 });
 
 test("package runs discovery, point anchors, then spatial patch ingestion", () => {
