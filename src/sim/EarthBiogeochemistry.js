@@ -119,9 +119,6 @@ export function advanceCarbonCycle(state, dtYears, { perturbation = 0 } = {}) {
   const oceanSurfaceTarget = b.carbon.oceanSurfacePgC * (co2 / b.co2Ppm) ** 0.78 * oceanSolubility;
   const airSeaFlux = (oceanSurfaceTarget - state.oceanSurfaceCarbonPgC) / 85;
 
-  const deepReferencedSurface = b.carbon.oceanSurfacePgC * (state.oceanDeepCarbonPgC / b.carbon.oceanDeepPgC);
-  const deepMixingFlux = (state.oceanSurfaceCarbonPgC - deepReferencedSurface) / 420;
-
   const co2Fertilization = ((co2 / (co2 + 180)) / (b.co2Ppm / (b.co2Ppm + 180))) ** 0.55;
   const thermalSuitability = Math.exp(
     -0.022 * ((temperature - 0.5) ** 2 - (b.temperatureAnomalyK - 0.5) ** 2)
@@ -139,14 +136,13 @@ export function advanceCarbonCycle(state, dtYears, { perturbation = 0 } = {}) {
 
   const movedLand = moveSigned(state, "atmosphericCarbonPgC", "terrestrialCarbonPgC", landFlux * dtYears);
   const movedAirSea = moveSigned(state, "atmosphericCarbonPgC", "oceanSurfaceCarbonPgC", airSeaFlux * dtYears);
-  const movedDeep = moveSigned(state, "oceanSurfaceCarbonPgC", "oceanDeepCarbonPgC", deepMixingFlux * dtYears);
   const movedWeathering = move(state, "atmosphericCarbonPgC", "oceanSurfaceCarbonPgC", weatheringFlux * dtYears);
   const movedBurial = move(state, "oceanSurfaceCarbonPgC", "sedimentCarbonPgC", burialFlux * dtYears);
   const movedVolcanic = move(state, "sedimentCarbonPgC", "atmosphericCarbonPgC", volcanicFlux * dtYears);
 
   state.carbonFluxes = Object.freeze({
     airSeaPgCPerYear: movedAirSea / dtYears,
-    surfaceToDeepPgCPerYear: movedDeep / dtYears,
+    surfaceToDeepPgCPerYear: Number(state.oceanCirculationCarbonFluxPgCPerYear) || 0,
     atmosphereToLandPgCPerYear: movedLand / dtYears,
     weatheringPgCPerYear: movedWeathering / dtYears,
     carbonateBurialPgCPerYear: movedBurial / dtYears,
