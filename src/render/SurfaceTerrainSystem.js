@@ -1,6 +1,7 @@
 import { TerrainChunkManager } from "./TerrainChunkManager.js";
 import { SurfaceEcologyManager } from "./SurfaceEcologyManager.js";
 import { SurfaceBuiltEnvironmentManager } from "./SurfaceBuiltEnvironmentManager.js";
+import { SurfaceFaunaManager } from "./SurfaceFaunaManager.js";
 import { WorldStreamScheduler } from "../sim/WorldStreamScheduler.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -34,6 +35,10 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     super(scene, options);
     this.surfaceEcology = new SurfaceEcologyManager(scene, this);
     this.surfaceBuiltEnvironment = new SurfaceBuiltEnvironmentManager(scene, this);
+    this.surfaceFauna = new SurfaceFaunaManager(scene, this);
+    // Legacy surface ecology animal scatter is retained for compatibility but hidden;
+    // fauna rendering now comes from the hierarchical materializer.
+    if (this.surfaceEcology?.pools?.animal) this.surfaceEcology.pools.animal.visible = false;
     this.hydrology = null;
     this.vegetation = null;
     this.spatialDetail = 0.82;
@@ -57,6 +62,32 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       maxSliceMs: 1.15,
       hasWork: () => (this.surfaceEcology?.queue?.length ?? 0) > 0,
       run: ({ sliceMs }) => this.surfaceEcology?.pump(sliceMs) ?? 0
+    });
+    this.worldScheduler.registerSystem({
+      id: "fauna-regional-fields",
+      scope: "regional",
+      priority: 72,
+      minIntervalMs: 800,
+      maxSliceMs: 0.30,
+      hasWork: () => this.surfaceFauna?.hasRegionalWork() === true,
+      run: ({ cells }) => this.surfaceFauna?.refreshRegional(cells) ?? 0
+    });
+    this.worldScheduler.registerSystem({
+      id: "fauna-local-herds",
+      scope: "local",
+      priority: 76,
+      minIntervalMs: 450,
+      maxSliceMs: 0.35,
+      hasWork: () => this.surfaceFauna?.hasLocalWork() === true,
+      run: ({ cells }) => this.surfaceFauna?.refreshLocal(cells) ?? 0
+    });
+    this.worldScheduler.registerSystem({
+      id: "fauna-observed-materialization",
+      scope: "observed",
+      priority: 86,
+      maxSliceMs: 0.85,
+      hasWork: () => this.surfaceFauna?.hasObservedWork() === true,
+      run: ({ sliceMs }) => this.surfaceFauna?.pumpObserved(sliceMs) ?? 0
     });
   }
 
@@ -118,6 +149,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const localContext = { latitude: this.origin.latitude, longitude: this.origin.longitude, ...context };
     this.surfaceEcology.setContext(localContext);
     this.surfaceBuiltEnvironment.setContext(localContext);
+    this.surfaceFauna.setContext(localContext);
     return true;
   }
 
@@ -145,13 +177,19 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     const segments = Number(options.segments ?? this.segments);
     const radius = Number(options.radius ?? this.radius);
     const quality = clamp(segments / 22, 0.45, 1);
-    this.surfaceEcology.configure({ quality, radius: Math.min(2, Math.max(1, Math.round(radius))) });
+    const boundedRadius = Math.min(2, Math.max(1, Math.round(radius)));
+    this.surfaceEcology.configure({ quality, radius: boundedRadius });
     this.surfaceBuiltEnvironment.configure({ quality });
+    this.surfaceFauna.configure({
+      windowRadiusKm: this.chunkSizeKm * (boundedRadius + 1.2),
+      individualRadiusKm: 0.42 + quality * 0.34
+    });
   }
 
   update(cameraPosition) {
     super.update(cameraPosition);
     this.surfaceEcology.update(cameraPosition);
+    this.surfaceFauna.updateCamera(cameraPosition);
     if (this.origin) {
       const focus = this._geographicAt(cameraPosition.x, cameraPosition.z);
       this.worldScheduler.setFocus({ latitude: focus.latitude, longitude: focus.longitude, mode: "surface" });
@@ -164,6 +202,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       context: Object.freeze({
         terrainQueuedChunks: this.queue.length,
         ecologyQueuedChunks: this.surfaceEcology?.queue?.length ?? 0,
+        faunaQueuedInstances: this.surfaceFauna?.diagnostics?.().renderQueueRemaining ?? 0,
         spatialDetail: this.spatialDetail
       })
     });
@@ -171,18 +210,24 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   }
 
   hasPendingWork() {
-    return this.queue.length > 0 || (this.surfaceEcology?.queue?.length ?? 0) > 0;
+    return this.queue.length > 0
+      || (this.surfaceEcology?.queue?.length ?? 0) > 0
+      || this.surfaceFauna?.hasRegionalWork() === true
+      || this.surfaceFauna?.hasLocalWork() === true
+      || this.surfaceFauna?.hasObservedWork() === true;
   }
 
   diagnostics() {
     const terrain = super.diagnostics();
     const ecology = this.surfaceEcology.diagnostics();
     const builtEnvironment = this.surfaceBuiltEnvironment.diagnostics();
+    const fauna = this.surfaceFauna.diagnostics();
     return Object.freeze({
       ...terrain,
       queuedChunks: terrain.queuedChunks + ecology.queuedChunks,
       terrainQueuedChunks: terrain.queuedChunks,
       ecology,
+      fauna,
       builtEnvironment,
       worldStreaming: this.worldScheduler.diagnostics(),
       surfaceScienceStatus: this.surfaceScienceStatus,
@@ -197,12 +242,15 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
   clear() {
     super.clear();
     this.surfaceEcology?.clear();
+    this.surfaceFauna?.clear();
     this.surfaceBuiltEnvironment?.clear();
   }
 
   dispose() {
     this.surfaceEcology?.dispose();
     this.surfaceEcology = null;
+    this.surfaceFauna?.dispose();
+    this.surfaceFauna = null;
     this.surfaceBuiltEnvironment?.dispose();
     this.surfaceBuiltEnvironment = null;
     this.lastSurfaceContext = null;
