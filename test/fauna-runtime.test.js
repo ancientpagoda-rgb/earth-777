@@ -182,7 +182,7 @@ test("body mass affects observed scale and spacing without changing aggregate po
   assert.ok(large.herds[0].spacingScale > small.herds[0].spacingScale);
 });
 
-test("hunting packs target actual observed herds and spend bounded movement approaching prey", () => {
+test("predator targeting produces bounded approach and direct herd threat response", () => {
   const predatorState = {
     ...state,
     herbivoreBiomass: 4,
@@ -196,6 +196,7 @@ test("hunting packs target actual observed herds and spend bounded movement appr
   const herdById = new Map(plan.herds.map((herd) => [herd.id, herd]));
   const packById = new Map(plan.packs.map((pack) => [pack.id, pack]));
   const targeted = plan.packs.filter((pack) => pack.targetGroupId != null);
+  const threatened = plan.herds.filter((herd) => herd.threatGroupId != null);
 
   assert.ok(targeted.length > 0);
   assert.equal(plan.predatorTargetCount, targeted.length);
@@ -215,6 +216,23 @@ test("hunting packs target actual observed herds and spend bounded movement appr
     const expectedHeading = Math.atan2(target.z - pack.z, target.x - pack.x);
     assert.ok(Math.abs(pack.heading - expectedHeading) < 1e-12);
   }
+
+  assert.ok(threatened.length > 0);
+  assert.equal(plan.threatenedHerdCount, threatened.length);
+  for (const herd of threatened) {
+    const threat = packById.get(herd.threatGroupId);
+    assert.ok(threat);
+    assert.equal(threat.targetGroupId, herd.id);
+    assert.equal(herd.threatLineageId, threat.lineageId);
+    assert.equal(herd.behavior, "flee");
+    assert.ok(herd.threatenedByCount >= 1);
+    const expectedAwayHeading = Math.atan2(herd.z - threat.z, herd.x - threat.x);
+    assert.ok(Math.abs(herd.heading - expectedAwayHeading) < 1e-12);
+    const targetingThreats = targeted.filter((pack) => pack.targetGroupId === herd.id);
+    const nearestDistance = Math.min(...targetingThreats.map((pack) => Math.hypot(herd.x - pack.x, herd.z - pack.z)));
+    assert.ok(Math.abs(herd.threatDistanceKm - nearestDistance) < 1e-12);
+  }
+
   const targetedIndividuals = plan.individuals.filter((animal) => animal.role === "carnivore" && animal.targetGroupId != null);
   assert.ok(targetedIndividuals.length > 0);
   for (const animal of targetedIndividuals) {
@@ -224,6 +242,18 @@ test("hunting packs target actual observed herds and spend bounded movement appr
     assert.equal(animal.targetLineageId, pack.targetLineageId);
     assert.ok(Math.abs(animal.yaw - pack.heading) < 1e-12);
   }
+
+  const threatenedIndividuals = plan.individuals.filter((animal) => animal.role === "herbivore" && animal.threatGroupId != null);
+  assert.ok(threatenedIndividuals.length > 0);
+  for (const animal of threatenedIndividuals) {
+    const herd = herdById.get(animal.groupId);
+    assert.ok(herd?.threatGroupId);
+    assert.equal(animal.behavior, "flee");
+    assert.equal(animal.threatGroupId, herd.threatGroupId);
+    assert.equal(animal.threatLineageId, herd.threatLineageId);
+    assert.ok(Math.abs(animal.yaw - herd.heading) < 1e-12);
+  }
+
   assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
   assert.equal(plan.packs.reduce((sum, pack) => sum + pack.population, 0), plan.visibleCarnivorePopulation);
 });
