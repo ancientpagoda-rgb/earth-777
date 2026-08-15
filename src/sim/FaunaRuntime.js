@@ -474,7 +474,7 @@ function spreadHerdAlarms(herds, packs) {
       alarmThreatLineageId: threat.lineageId ?? null,
       alarmDistanceKm,
       alarmRadiusKm,
-      alarmResponseStrength
+      alarmResponseStrength: responseStrength
     });
   }));
 }
