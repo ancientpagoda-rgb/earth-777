@@ -60,7 +60,8 @@ test("water access plus construction and navigation capability can generate a ph
   a.waterTransportIndex = 0.9; b.waterTransportIndex = 0.9;
   a.navigationIndex = 0.9; b.navigationIndex = 0.9;
   state.homininWaterTransportAccumulatorYears = 0;
-  advanceHomininWaterTransport(state, 250);
+  state.homininWaterRouteAccumulatorYears = 0;
+  advanceHomininWaterTransport(state, 1000);
 
   const route = state.homininWaterRoutes.find((candidate) => {
     const ids = new Set([candidate.aSiteId, candidate.bSiteId]);
@@ -91,6 +92,7 @@ test("low water access cannot create a route merely because tools are advanced",
   }
   a.waterTransportIndex = 0; b.waterTransportIndex = 0;
   state.homininWaterTransportAccumulatorYears = 0;
+  state.homininWaterRouteAccumulatorYears = 0;
   advanceHomininWaterTransport(state, 5000);
   assert.equal(a.waterTransportIndex, 0);
   assert.equal(b.waterTransportIndex, 0);
@@ -167,7 +169,8 @@ test("waterborne conflict requires a modeled water route rather than a coastal l
   a.waterTransportIndex = 0.95; b.waterTransportIndex = 0.95;
   a.navigationIndex = 0.95; b.navigationIndex = 0.95;
   state.homininWaterTransportAccumulatorYears = 0;
-  advanceHomininWaterTransport(state, 250);
+  state.homininWaterRouteAccumulatorYears = 0;
+  advanceHomininWaterTransport(state, 1000);
   assert.ok(state.homininWaterRoutes.some((route) => new Set([route.aSiteId, route.bSiteId]).has(a.id)));
   state.homininConflictEdges = [];
   state.homininConflictAccumulatorYears = 0;
@@ -189,7 +192,7 @@ test("waterborne conflict requires a modeled water route rather than a coastal l
   assert.ok(!withoutRoute || withoutRoute.medium === "land");
 });
 
-test("transport and conflict geography use 250-year temporal LOD", () => {
+test("capability and conflict use 250-year cadence while route topology uses 1000-year LOD", () => {
   const engine = new FreeEarthEngine(50505);
   const state = engine.state;
   const site = activeSites(state)[0];
@@ -197,11 +200,17 @@ test("transport and conflict geography use 250-year temporal LOD", () => {
   const defenseBefore = site.defensiveWorksIndex;
   engine.advance(25);
   assert.equal(state.homininWaterTransportAccumulatorYears, 25);
+  assert.equal(state.homininWaterRouteAccumulatorYears, 25);
   assert.equal(state.homininConflictAccumulatorYears, 25);
   assert.equal(site.waterTransportIndex, transportBefore);
   assert.equal(site.defensiveWorksIndex, defenseBefore);
   engine.advance(225);
   assert.equal(state.homininWaterTransportAccumulatorYears, 0);
+  assert.equal(state.homininWaterRouteAccumulatorYears, 250);
+  assert.equal(state.homininConflictAccumulatorYears, 0);
+  engine.advance(750);
+  assert.equal(state.homininWaterTransportAccumulatorYears, 0);
+  assert.equal(state.homininWaterRouteAccumulatorYears, 0);
   assert.equal(state.homininConflictAccumulatorYears, 0);
 });
 
@@ -222,14 +231,15 @@ test("mechanism source contains no named historical outcome or era switch", () =
   const source = `${waterSource}\n${conflictSource}`;
   assert.doesNotMatch(source, /pirate|castle|empire|kingdom|medieval|bronze age|iron age|viking|rome|greece|africa|europe|mesopotamia/i);
   assert.match(waterSource, /routeWaterFraction/);
-  assert.match(waterSource, /TRANSPORT_INTERVAL_YEARS = 250/);
+  assert.match(waterSource, /CAPABILITY_INTERVAL_YEARS = 250/);
+  assert.match(waterSource, /ROUTE_INTERVAL_YEARS = 1000/);
   assert.match(conflictSource, /CONFLICT_INTERVAL_YEARS = 250/);
   assert.match(conflictSource, /homininConflictResourceTransferClosureErrorPersonDays/);
   assert.match(conflictSource, /defensiveWorksIndex/);
 });
 
 test("local diagnostics expose the generic capabilities rather than a named social role", () => {
-  const state = new FreeEarthEngine(70707).advance(250);
+  const state = new FreeEarthEngine(70707).advance(1000);
   const site = activeSites(state)[0];
   const water = homininWaterTransportAt(state, site.id);
   const conflict = homininConflictAt(state, site.id);
