@@ -10,7 +10,10 @@ import { DYNAMIC_GEOMORPHOLOGY_POLICY } from "../src/sim/DynamicGeomorphology.js
 import { GROUNDWATER_POLICY, CLOSED_BASIN_LAKE_POLICY } from "../src/sim/GroundwaterLakes.js";
 import { MassConservingHydrology } from "../src/sim/MassConservingHydrology.js";
 import { SpatialHydroClimate } from "../src/sim/SpatialHydroClimate.js";
-import { installEarthSystemHydrologyCoupling } from "../src/sim/EarthSystemHydrology.js";
+import {
+  installEarthSystemHydrologyCoupling,
+  SURFACE_GEOMORPHOLOGY_PATCH_POLICY
+} from "../src/sim/EarthSystemHydrology.js";
 
 const compressed = readFileSync(new URL("../public/data/krapp-777-climate.bin.gz", import.meta.url));
 const climate = new Krapp777ClimateLayer(gunzipSync(compressed));
@@ -79,12 +82,14 @@ test("runtime river network closes groundwater, lakes, routed water and sediment
   assert.ok(network.geomorphology.maxAbsoluteElevationChangeMeters > 0);
   assert.ok(network.geomorphology.lakes.lakeCount >= 0);
   assert.match(network.topology.elevationPolicy, /dynamic tectonic surface plus runoff-driven erosion/);
+
   const regional = hydrology.networkSample(state, 0, 20, 0.1);
   assert.ok(regional);
   assert.equal(regional.geomorphologyPolicy, DYNAMIC_GEOMORPHOLOGY_POLICY);
   assert.equal(regional.routeAcyclic, true);
   assert.equal(regional.networkMassConserved, true);
   assert.equal(regional.sedimentMassConserved, true);
+
   const waterSystem = hydrology.groundwaterLakeSample(state, 0, 20, 0.1);
   assert.ok(waterSystem);
   assert.equal(waterSystem.groundwaterPolicy, GROUNDWATER_POLICY);
@@ -93,6 +98,29 @@ test("runtime river network closes groundwater, lakes, routed water and sediment
   assert.equal(waterSystem.waterSystemMassConserved, true);
   assert.ok(Number.isFinite(waterSystem.baseflowMmPerYear));
   assert.ok(Number.isFinite(waterSystem.groundwaterResidenceTimeYears));
+
+  const routedIndex = Array.from(network.topology.routingOrder).find((index) =>
+    network.topology.downstream[index] >= 0 && network.accumulation.meanDischargeM3s[index] > 0.08
+  );
+  assert.ok(Number.isInteger(routedIndex));
+  const row = Math.floor(routedIndex / network.topology.cols);
+  const col = routedIndex % network.topology.cols;
+  const latitude = 90 - (row + 0.5) * network.spacingDegrees;
+  const longitude = -180 + (col + 0.5) * network.spacingDegrees;
+  const patch = hydrology.surfaceGeomorphologyPatch(state, latitude, longitude, 0.1);
+  const repeated = hydrology.surfaceGeomorphologyPatch(state, latitude, longitude, 0.1);
+  assert.deepEqual(patch, repeated);
+  assert.equal(patch.policy, SURFACE_GEOMORPHOLOGY_PATCH_POLICY);
+  assert.equal(patch.geomorphologyPolicy, DYNAMIC_GEOMORPHOLOGY_POLICY);
+  assert.equal(patch.networkCellIndex, routedIndex);
+  assert.equal(patch.downstreamIndex, network.topology.downstream[routedIndex]);
+  assert.ok(Number.isFinite(patch.geomorphicElevationOffsetMeters));
+  assert.ok(Number.isFinite(patch.geomorphicGradientEastMetersPerKm));
+  assert.ok(Number.isFinite(patch.geomorphicGradientNorthMetersPerKm));
+  assert.ok(Number.isFinite(patch.channelBearingRadians));
+  assert.ok(patch.channelDistanceFromSelectionKm < 1e-6);
+  assert.ok(patch.channelReachLengthKm > 0);
+  assert.ok(patch.meanDischargeM3s > 0.08);
 });
 
 test("browser entrypoint installs Earth-system hydrology coupling before main", () => {

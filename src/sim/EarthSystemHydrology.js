@@ -11,8 +11,11 @@ import {
 import { gridSpacingForSpatialDetail } from "./SpatialHydroClimate.js";
 import { networkCellAt, networkSpacingForSpatialDetail } from "./RunoffRouting.js";
 
+const KM_PER_DEGREE = 111.32;
+const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const round = (value, digits = 4) => Number((Number(value) || 0).toFixed(digits));
 const quantize = (value, step) => Math.round((Number(value) || 0) / step) * step;
+const wrapLongitudeDelta = (value) => ((Number(value) + 540) % 360) - 180;
 const COUPLED_METHODS = Object.freeze([
   "_stateSignature",
   "_networkForcingState",
@@ -21,10 +24,48 @@ const COUPLED_METHODS = Object.freeze([
   "_routingTopologySignature",
   "_refineNetworkTopology",
   "_balanceFor",
-  "groundwaterLakeSample"
+  "groundwaterLakeSample",
+  "surfaceGeomorphologyPatch"
 ]);
 
 export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-atmosphere-groundwater-lakes-geomorphology-hydrology-v3";
+export const SURFACE_GEOMORPHOLOGY_PATCH_POLICY = "coarse-geomorphology-to-local-surface-gradient-v1";
+
+function topologyCell(topology, index) {
+  const row = Math.floor(index / topology.cols);
+  const col = index % topology.cols;
+  return Object.freeze({
+    index,
+    row,
+    col,
+    latitude: 90 - (row + 0.5) * topology.spacingDegrees,
+    longitude: -180 + (col + 0.5) * topology.spacingDegrees
+  });
+}
+
+function topologyNeighborIndex(topology, row, col) {
+  if (row < 0 || row >= topology.rows) return -1;
+  const wrappedCol = ((col % topology.cols) + topology.cols) % topology.cols;
+  return row * topology.cols + wrappedCol;
+}
+
+function localKmFrom(latitude, longitude, targetLatitude, targetLongitude) {
+  const northKm = (Number(targetLatitude) - Number(latitude)) * KM_PER_DEGREE;
+  const eastKm = wrapLongitudeDelta(Number(targetLongitude) - Number(longitude))
+    * KM_PER_DEGREE
+    * Math.max(0.12, Math.cos(Number(latitude) * Math.PI / 180));
+  return { x: eastKm, z: northKm };
+}
+
+function closestPointToOriginOnSegment(a, b) {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const lengthSquared = dx * dx + dz * dz;
+  const t = lengthSquared > 1e-12 ? clamp(-(a.x * dx + a.z * dz) / lengthSquared, 0, 1) : 0;
+  const x = a.x + dx * t;
+  const z = a.z + dz * t;
+  return { x, z, distanceKm: Math.hypot(x, z), t, dx, dz, lengthKm: Math.sqrt(lengthSquared) };
+}
 
 export class EarthSystemHydrology extends MassConservingHydrology {
   _stateSignature(globalState, spatialDetail) {
@@ -105,9 +146,6 @@ export class EarthSystemHydrology extends MassConservingHydrology {
     const soilWaterCapacityMm = new Float32Array(count);
     const networkClimateDetail = topology.spacingDegrees === 2 ? 0.35 : 0.1;
 
-    // These samples are already materialized by MassConservingHydrology.network()
-    // for the same forcing state, so this pass normally hits the deterministic
-    // water-balance cache rather than recomputing climate.
     for (const index of topology.routingOrder) {
       const row = Math.floor(index / topology.cols);
       const col = index % topology.cols;
@@ -132,8 +170,6 @@ export class EarthSystemHydrology extends MassConservingHydrology {
     });
     localRunoffMmPerYear.set(groundwater.effectiveRunoffMmPerYear);
 
-    // Groundwater-adjusted discharge drives the same erosion/sediment model,
-    // so slower subsurface routing can causally change landscape evolution.
     const geomorphology = evolveRunoffNetworkTopography(
       globalState,
       topology,
@@ -163,9 +199,6 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       lakes,
       waterSystemClosureErrorM3PerYear,
       waterSystemRelativeClosureError,
-      // Routed depths are intentionally Float32 at browser scale. A 2 ppm
-      // closure tolerance is tighter than the transport field's accumulated
-      // numerical precision while still exposing physically meaningful leaks.
       waterSystemMassConserved: Math.abs(waterSystemClosureErrorM3PerYear) <= Math.max(1e-3, groundwater.landWaterInputM3PerYear * 2e-6),
       epistemicStatus: `${geomorphology.epistemicStatus}; deep drainage is delayed through a coarse groundwater reservoir before contributing baseflow, and closed geomorphic basins resolve lake area/storage/evaporation plus spill-saddle capture without geographic special cases`
     });
@@ -216,6 +249,90 @@ export class EarthSystemHydrology extends MassConservingHydrology {
     });
   }
 
+  surfaceGeomorphologyPatch(globalState, latitude, longitude, spatialDetail = 0.35) {
+    const network = this.network(globalState, spatialDetail);
+    const geomorphology = network.geomorphology;
+    if (!geomorphology?.netElevationOffsetMeters) return null;
+    const topology = network.topology;
+    const cell = networkCellAt(topology, latitude, longitude);
+    if (!topology.landMask[cell.index]) return null;
+
+    const centerOffset = Number(geomorphology.netElevationOffsetMeters[cell.index]) || 0;
+    const center = topologyCell(topology, cell.index);
+    const offsetAt = (row, col) => {
+      const index = topologyNeighborIndex(topology, row, col);
+      return index >= 0 && topology.landMask[index]
+        ? Number(geomorphology.netElevationOffsetMeters[index]) || 0
+        : centerOffset;
+    };
+    const eastOffset = offsetAt(center.row, center.col + 1);
+    const westOffset = offsetAt(center.row, center.col - 1);
+    const northOffset = offsetAt(center.row - 1, center.col);
+    const southOffset = offsetAt(center.row + 1, center.col);
+    const eastWestDistanceKm = Math.max(
+      1,
+      2 * topology.spacingDegrees * KM_PER_DEGREE * Math.max(0.12, Math.cos(center.latitude * Math.PI / 180))
+    );
+    const northSouthDistanceKm = Math.max(1, 2 * topology.spacingDegrees * KM_PER_DEGREE);
+    const gradientEastMetersPerKm = (eastOffset - westOffset) / eastWestDistanceKm;
+    const gradientNorthMetersPerKm = (northOffset - southOffset) / northSouthDistanceKm;
+
+    const downstreamIndex = topology.downstream[cell.index];
+    let downstreamLatitude = null;
+    let downstreamLongitude = null;
+    let channelBearingRadians = null;
+    let channelDistanceFromSelectionKm = null;
+    let channelClosestXKm = null;
+    let channelClosestZKm = null;
+    let channelReachLengthKm = null;
+    let routedSlope = null;
+    if (downstreamIndex >= 0 && topology.landMask[downstreamIndex]) {
+      const downstream = topologyCell(topology, downstreamIndex);
+      downstreamLatitude = downstream.latitude;
+      downstreamLongitude = downstream.longitude;
+      const localCenter = localKmFrom(latitude, longitude, center.latitude, center.longitude);
+      const localDownstream = localKmFrom(latitude, longitude, downstream.latitude, downstream.longitude);
+      const closest = closestPointToOriginOnSegment(localCenter, localDownstream);
+      channelBearingRadians = Math.atan2(closest.dz, closest.dx);
+      channelDistanceFromSelectionKm = closest.distanceKm;
+      channelClosestXKm = closest.x;
+      channelClosestZKm = closest.z;
+      channelReachLengthKm = closest.lengthKm;
+      routedSlope = closest.lengthKm > 0
+        ? Math.max(0, (topology.elevationMeters[cell.index] - topology.elevationMeters[downstreamIndex]) / (closest.lengthKm * 1000))
+        : 0;
+    }
+
+    return Object.freeze({
+      policy: SURFACE_GEOMORPHOLOGY_PATCH_POLICY,
+      geomorphologyPolicy: geomorphology.policy,
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+      networkLatitude: center.latitude,
+      networkLongitude: center.longitude,
+      spacingDegrees: topology.spacingDegrees,
+      networkCellIndex: cell.index,
+      geomorphicElevationOffsetMeters: centerOffset,
+      geomorphicGradientEastMetersPerKm: gradientEastMetersPerKm,
+      geomorphicGradientNorthMetersPerKm: gradientNorthMetersPerKm,
+      erosionRateMmPerYear: Number(geomorphology.erosionRateMmPerYear[cell.index]) || 0,
+      depositionRateMmPerYear: Number(geomorphology.depositionRateMmPerYear[cell.index]) || 0,
+      meanDischargeM3s: Number(network.accumulation.meanDischargeM3s[cell.index]) || 0,
+      upstreamAreaKm2: Number(network.accumulation.upstreamAreaKm2[cell.index]) || 0,
+      downstreamIndex,
+      downstreamLatitude,
+      downstreamLongitude,
+      channelBearingRadians,
+      channelDistanceFromSelectionKm,
+      channelClosestXKm,
+      channelClosestZKm,
+      channelReachLengthKm,
+      routedSlope,
+      drainageReroutedCellCount: geomorphology.reroutedCellCount ?? 0,
+      epistemicStatus: "local presentation patch sampled from the same coarse conserved geomorphic river network: scientific elevation offset and finite-difference relief gradient are projected continuously; routed reach geometry identifies direction/proximity but any sub-grid channel cross-section remains presentation-only"
+    });
+  }
+
   _balanceFor(globalState, climate, spatialDetail, includeDailyTrace = false) {
     const monthlyClimate = Array.from({ length: 12 }, (_, monthIndex) =>
       this.climate.monthlyAt(globalState, monthIndex, climate.latitude, climate.longitude, spatialDetail)
@@ -244,8 +361,9 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       geomorphologyPolicy: DYNAMIC_GEOMORPHOLOGY_POLICY,
       groundwaterPolicy: GROUNDWATER_POLICY,
       lakePolicy: CLOSED_BASIN_LAKE_POLICY,
+      surfaceGeomorphologyPatchPolicy: SURFACE_GEOMORPHOLOGY_PATCH_POLICY,
       waterAndSedimentClosureTrackedSeparately: true,
-      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to atmosphere/orbit/tectonics, while coarse network hydrology now distinguishes surface runoff, aquifer storage/baseflow, lake retention/evaporation/spill, and runoff-driven geomorphology`
+      epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to atmosphere/orbit/tectonics, coarse network hydrology distinguishes surface runoff/aquifer/lake storage, and the conserved geomorphic field can now be projected continuously into local surface presentation`
     });
   }
 }
