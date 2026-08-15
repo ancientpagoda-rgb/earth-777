@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v11";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v12";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and simulated time; not yet fossil-calibrated";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -499,9 +499,17 @@ function refreshPredatorTargetDistances(packs, herds) {
     if (pack.targetGroupId == null) return pack;
     const target = herdById.get(pack.targetGroupId);
     if (!target) return pack;
+    const finalDistanceKm = Math.hypot(target.x - pack.x, target.z - pack.z);
+    const encounterClearanceKm = Math.max(0, Number(target.radiusKm) || 0) + Math.max(0, Number(pack.radiusKm) || 0);
+    const netClosingDistanceKm = (Number(pack.targetDistanceBeforeKm) || finalDistanceKm) - finalDistanceKm;
+    const encounterContactMarginKm = encounterClearanceKm - finalDistanceKm;
     return Object.freeze({
       ...pack,
-      targetDistanceAfterHerdResponseKm: Math.hypot(target.x - pack.x, target.z - pack.z)
+      targetDistanceAfterHerdResponseKm: finalDistanceKm,
+      encounterClearanceKm,
+      netClosingDistanceKm,
+      encounterContact: finalDistanceKm <= encounterClearanceKm + 1e-12,
+      encounterContactMarginKm
     });
   }));
 }
@@ -588,6 +596,8 @@ export function buildObservedFauna({
   const threatenedHerdCount = herds.filter((herd) => herd.threatGroupId != null).length;
   const alarmedHerdCount = herds.filter((herd) => herd.alarmThreatGroupId != null).length;
   const movedAlarmedHerdCount = herds.filter((herd) => Number(herd.alarmMoveDistanceKm) > 0).length;
+  const predatorContactCount = packs.filter((pack) => pack.encounterContact === true).length;
+  const predatorGainCount = packs.filter((pack) => pack.targetGroupId != null && Number(pack.netClosingDistanceKm) > 0).length;
 
   return Object.freeze({
     policy: FAUNA_POLICY,
@@ -606,6 +616,8 @@ export function buildObservedFauna({
     threatenedHerdCount,
     alarmedHerdCount,
     movedAlarmedHerdCount,
+    predatorContactCount,
+    predatorGainCount,
     behaviorCounts: Object.freeze(behaviorCounts),
     materializedHerbivores: herbivoreIndividuals.length,
     materializedCarnivores: carnivoreIndividuals.length,
