@@ -6,6 +6,7 @@ import { networkSpacingForSpatialDetail } from "./RunoffRouting.js";
 
 const round = (value, digits = 4) => Number((Number(value) || 0).toFixed(digits));
 const quantize = (value, step) => Math.round((Number(value) || 0) / step) * step;
+const COUPLED_METHODS = Object.freeze(["_stateSignature", "_networkForcingState", "_networkSignature", "_balanceFor"]);
 
 export const EARTH_SYSTEM_HYDROLOGY_POLICY = "dynamic-topography-general-atmosphere-hydrology-v1";
 
@@ -89,4 +90,21 @@ export class EarthSystemHydrology extends MassConservingHydrology {
       epistemicStatus: `${base.epistemicStatus}; local elevation and cache invalidation are branch-coupled to the general atmosphere, orbit and evolving tectonics`
     });
   }
+}
+
+export function installEarthSystemHydrologyCoupling() {
+  if (MassConservingHydrology.prototype.__earthSystemAtmosphereCoupled) return false;
+  for (const method of COUPLED_METHODS) {
+    Object.defineProperty(MassConservingHydrology.prototype, method, {
+      configurable: true,
+      writable: true,
+      value: EarthSystemHydrology.prototype[method]
+    });
+  }
+  Object.defineProperty(MassConservingHydrology.prototype, "__earthSystemAtmosphereCoupled", {
+    configurable: false,
+    writable: false,
+    value: true
+  });
+  return true;
 }
