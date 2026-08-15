@@ -12,6 +12,7 @@ const EARTH_INTERVAL_MS = 3_000;
 const CLOUD_INTERVAL_MS = 15_000;
 const EARTH_REFRESH_YEARS = 2_500;
 const CLOUD_REFRESH_YEARS = 10_000;
+const DIAGNOSTICS_INTERVAL_MS = 250;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 export class EarthView {
@@ -41,6 +42,9 @@ export class EarthView {
     this.continuousUntilMs = 0;
     this.lastRenderMs = 0;
     this.lastFrameDeltaMs = 16.7;
+    this.lastPerformanceSignature = "";
+    this.diagnosticsCache = null;
+    this.diagnosticsCacheAt = -Infinity;
     this.rasterWorker = new RasterTaskClient();
     this.performanceController = new AdaptivePerformanceController({ targetFps: 60, initialTier: "ultra" });
 
@@ -126,7 +130,8 @@ export class EarthView {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
     this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
-    this.terrain.setEarthSystemState?.(state, state.seed);
+    const needsSurfaceContext = this.mode !== "globe";
+    this.terrain.setEarthSystemState?.(state, state.seed, needsSurfaceContext);
     this.applyPerformanceSettings(false);
     const now = performance.now();
     if ((force || Math.abs(state.yearBP - this.lastTextureYear) >= EARTH_REFRESH_YEARS) && !this.interacting && (force || now - this.lastEarthRefreshMs >= EARTH_INTERVAL_MS)) this._requestEarthRaster(state);
@@ -141,7 +146,9 @@ export class EarthView {
   updateSurfaceWater() {
     if (!this.terrain.origin) return;
     const { latitude, longitude } = this.terrain.origin;
-    const waterSystem = this.hydroClimate?.groundwaterLakeSample?.(this.lastState, latitude, longitude, this.spatialDetail) ?? null;
+    const waterSystem = this.terrain.currentWaterSystem?.()
+      ?? this.hydroClimate?.groundwaterLakeSample?.(this.lastState, latitude, longitude, this.spatialDetail)
+      ?? null;
     const lakeSurface = Number(waterSystem?.lakeSurfaceElevationMeters);
     const lakeCoverage = Number(waterSystem?.lakeCoverageFraction) || 0;
     const lakeAreaKm2 = Number(waterSystem?.lakeAreaKm2) || 0;
@@ -164,10 +171,21 @@ export class EarthView {
   applyPerformanceSettings(force = false) {
     const settings = this.performanceController.settings(this.spatialDetail);
     const ratio = Math.min(devicePixelRatio || 1, 1, settings.pixelRatioCap);
+    const signature = [
+      settings.visualLod,
+      ratio.toFixed(3),
+      settings.effectiveTerrainRadius,
+      settings.effectiveTerrainSegments,
+      settings.quality >= 0.55 ? 1 : 0
+    ].join("|");
+    if (!force && signature === this.lastPerformanceSignature) return false;
+    this.lastPerformanceSignature = signature;
     if (force || Math.abs(this.renderer.getPixelRatio() - ratio) > 0.02) { this.renderer.setPixelRatio(ratio); this.resize(); }
     this.clouds.visible = settings.quality >= 0.55;
     this.atmosphere.visible = settings.quality >= 0.55;
     this.terrain.configure({ radius: settings.effectiveTerrainRadius, segments: settings.effectiveTerrainSegments });
+    this.diagnosticsCacheAt = -Infinity;
+    return true;
   }
 
   resize() {
@@ -178,6 +196,7 @@ export class EarthView {
     this.surfaceCamera.aspect = this.camera.aspect;
     this.camera.updateProjectionMatrix();
     this.surfaceCamera.updateProjectionMatrix();
+    this.diagnosticsCacheAt = -Infinity;
     this.invalidate();
   }
 
@@ -185,6 +204,8 @@ export class EarthView {
     this.lastFrameDeltaMs = Math.max(0.1, deltaSeconds * 1000);
     const started = performance.now();
     let continuous = false;
+    const needsSurfaceContext = this.mode !== "globe";
+    if (this.terrain.surfaceContextActive !== needsSurfaceContext) this.terrain.setSurfaceContextActive?.(needsSurfaceContext, true);
     if (this.mode === "descent") continuous = updateDescent(this, now) || continuous;
     if (this.mode === "globe" || this.mode === "descent") {
       if (this.mode === "globe") continuous = this.controls.update() === true || continuous;
@@ -197,7 +218,8 @@ export class EarthView {
       const floor = this.terrain.heightAt(this.surfaceCamera.position.x, this.surfaceCamera.position.z) + 0.18;
       if (this.surfaceCamera.position.y < floor) this.surfaceCamera.position.y = floor;
       this.terrain.update(this.surfaceCamera.position);
-      continuous = this.terrain.pump(2.3) > 0 || this.terrain.diagnostics().queuedChunks > 0 || this.simulationPlaying || continuous;
+      const pumped = this.terrain.pump(2.3);
+      continuous = pumped > 0 || this.terrain.hasPendingWork?.() === true || this.simulationPlaying || continuous;
       this.renderer.render(this.surfaceScene, this.surfaceCamera);
     }
     this.lastRenderMs = performance.now() - started;
@@ -205,15 +227,19 @@ export class EarthView {
     return continuous || now < this.continuousUntilMs;
   }
 
-  diagnostics() {
+  diagnostics(force = false) {
+    const now = performance.now();
+    if (!force && this.diagnosticsCache && now - this.diagnosticsCacheAt < DIAGNOSTICS_INTERVAL_MS) return this.diagnosticsCache;
     const info = this.renderer.info.render;
-    return Object.freeze({
+    this.diagnosticsCache = Object.freeze({
       mode: this.mode, renderMs: this.lastRenderMs, frameDeltaMs: this.lastFrameDeltaMs,
       pixelRatio: this.renderer.getPixelRatio(), drawCalls: info.calls, triangles: info.triangles,
       geometries: this.renderer.info.memory.geometries, textures: this.renderer.info.memory.textures,
       earthBuildInFlight: this.earthBuildInFlight, cloudBuildInFlight: this.cloudBuildInFlight,
       raster: this.rasterWorker.diagnostics(), performance: this.performanceController.diagnostics(), terrain: this.terrain.diagnostics()
     });
+    this.diagnosticsCacheAt = now;
+    return this.diagnosticsCache;
   }
 
   dispose() {
