@@ -75,6 +75,34 @@ test("evolutionary lineages read aggregate animal biomass without rewriting it",
   assert.ok(Number.isInteger(state.speciesRichness));
 });
 
+test("aggregate predation pressure selects lineage traits without becoming a second biomass writer", () => {
+  const state = {
+    seed: 777001,
+    yearBP: 760_000,
+    temperatureAnomaly: -0.8,
+    greenhouseForcing: 0,
+    iceIndex: 0.18,
+    productivityIndex: 1.15,
+    herbivoreBiomass: 1.37,
+    carnivoreBiomass: 0.42,
+    predationPressureIndex: 3,
+    speciesLineages: [
+      { id: 1, extinctionYearBP: null, populationIndex: 0.8, trophicLevel: 0.2, bodyMassLog10Kg: 1, thermalOptimumK: -0.8, mobility: 0.5, sociality: 0, cognition: 0, dietBreadth: 0.5, divergence: 0 },
+      { id: 2, extinctionYearBP: null, populationIndex: 0.8, trophicLevel: 0.2, bodyMassLog10Kg: 1, thermalOptimumK: -0.8, mobility: 0.5, sociality: 1, cognition: 1, dietBreadth: 0.5, divergence: 0 }
+    ]
+  };
+  const herbivoreBefore = state.herbivoreBiomass;
+  const carnivoreBefore = state.carnivoreBiomass;
+  const pressureBefore = state.predationPressureIndex;
+
+  advanceEvolutionaryEcology(state, 25, () => 1);
+
+  assert.ok(state.speciesLineages[1].populationIndex > state.speciesLineages[0].populationIndex);
+  assert.equal(state.herbivoreBiomass, herbivoreBefore);
+  assert.equal(state.carnivoreBiomass, carnivoreBefore);
+  assert.equal(state.predationPressureIndex, pressureBefore);
+});
+
 test("Free Earth keeps advanced hominin spatial systems parked", () => {
   const state = new FreeEarthEngine(777001).advance(1_000);
   assert.ok(Array.isArray(state.homininLineages));
