@@ -21,7 +21,7 @@ function lineage(overrides = {}) {
   };
 }
 
-test("targeted herds spend their existing movement budget fleeing without changing population", () => {
+test("targeted herds turn continuous threat demand into fleeing without changing population", () => {
   const state = {
     seed: 777001,
     elapsedYears: 12.5,
@@ -55,7 +55,10 @@ test("targeted herds spend their existing movement budget fleeing without changi
 
   for (const herd of threatened) {
     assert.ok(herd.fleeDistanceKm > 0);
-    assert.ok(herd.fleeDistanceKm <= herd.movementDistanceKm + 1e-12);
+    assert.ok(herd.fleeDistanceKm >= herd.movementDistanceKm - 1e-12);
+    assert.ok(herd.responseLocomotionDrive >= herd.locomotionDrive - 1e-12);
+    const expectedThreatResponseKm = (0.025 + herd.responseLocomotionDrive * 0.135) * (0.70 + herd.mobility * 0.70);
+    assert.ok(Math.abs(herd.fleeDistanceKm - Math.max(herd.movementDistanceKm, expectedThreatResponseKm)) < 1e-12);
     assert.ok(herd.threatDistanceKm >= herd.threatDistanceBeforeKm - 1e-12);
     assert.ok(Math.abs((herd.threatDistanceKm - herd.threatDistanceBeforeKm) - herd.fleeDistanceKm) < 1e-10);
   }
