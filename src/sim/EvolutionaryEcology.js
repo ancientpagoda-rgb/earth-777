@@ -113,12 +113,20 @@ function resourceSupport(state, lineage) {
 
 function nicheCompetition(lineage, lineages) {
   let overlap = 0;
+  const feeding = feedingProfileForLineage(lineage);
   for (const other of lineages) {
     if (other === lineage || other.extinctionYearBP != null || other.populationIndex <= 1e-8) continue;
-    const trophicDistance = Math.abs(other.trophicLevel - lineage.trophicLevel);
+    const otherFeeding = feedingProfileForLineage(other);
+    // Preserve roughly the old pure-plant ↔ pure-live-prey separation while
+    // allowing carrion specialization to create an independent niche axis.
+    const feedingDistance = clamp01(Math.hypot(
+      otherFeeding.plantMatterAffinity - feeding.plantMatterAffinity,
+      otherFeeding.livePreyAffinity - feeding.livePreyAffinity,
+      otherFeeding.carrionAffinity - feeding.carrionAffinity
+    ) / Math.SQRT2);
     const bodyDistance = Math.abs(other.bodyMassLog10Kg - lineage.bodyMassLog10Kg) / 2.5;
     const thermalDistance = Math.abs(other.thermalOptimumK - lineage.thermalOptimumK) / 6;
-    const similarity = Math.exp(-(trophicDistance * 4 + bodyDistance * 2 + thermalDistance * 1.5));
+    const similarity = Math.exp(-(feedingDistance * 4 + bodyDistance * 2 + thermalDistance * 1.5));
     overlap += similarity * positive(other.populationIndex, 0);
   }
   return overlap;
@@ -133,16 +141,20 @@ function predationSelectionFeedback(state, lineage) {
   const pressure = currentPressure + residualExposure * 0.35;
   if (pressure <= 0) return 1;
 
-  // Feeding ecology is continuous. Trophic level is retained only as the
-  // plant-vs-live-prey summary consumed by older callers; carrion is an
-  // independent resource affinity and does not imply active hunting.
   const feeding = feedingProfileForLineage(lineage);
-  const animalFoodDependence = feeding.trophicLevel;
-  const plantFoodDependence = 1 - animalFoodDependence;
+  const primaryFoodTotal = feeding.plantMatterAffinity + feeding.livePreyAffinity;
+  const plantFoodDependence = primaryFoodTotal > 1e-12
+    ? feeding.plantMatterAffinity / primaryFoodTotal
+    : 0;
+  const livePreyDependence = primaryFoodTotal > 1e-12
+    ? feeding.livePreyAffinity / primaryFoodTotal
+    : 0;
+  // Carrion affinity is independent: scavenging alone neither creates active
+  // hunting benefit nor makes a lineage prey-exposed in this aggregate term.
   const evasion = clamp01(0.18 + clamp01(lineage.mobility) * 0.35 + clamp01(lineage.sociality) * 0.27 + clamp01(lineage.cognition) * 0.20);
   const hunting = clamp01(0.20 + clamp01(lineage.mobility) * 0.45 + clamp01(lineage.cognition) * 0.35);
   const exposureCost = Math.exp(-pressure * 0.18 * (1 - evasion) * plantFoodDependence);
-  const huntingBenefit = 1 + pressure * 0.09 * hunting * animalFoodDependence;
+  const huntingBenefit = 1 + pressure * 0.09 * hunting * livePreyDependence;
   return exposureCost * huntingBenefit;
 }
 
