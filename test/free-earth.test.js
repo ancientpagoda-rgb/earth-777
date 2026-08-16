@@ -169,6 +169,20 @@ test("lineage thermal adaptation changes aggregate ecological carrying capacity"
   assert.ok(adapted.carnivoreBiomass > mismatched.carnivoreBiomass);
 });
 
+test("aggregate herbivory feeds back on vegetation productivity through its existing owner", () => {
+  const configure = (herbivoreBiomass) => {
+    const engine = new FreeEarthEngine(996);
+    engine.state.herbivoreBiomass = herbivoreBiomass;
+    engine.state.carnivoreBiomass = 0.001;
+    return engine.advance(25);
+  };
+  const lightGrazing = configure(0.01);
+  const heavyGrazing = configure(5);
+
+  assert.ok(heavyGrazing.grazingPressureIndex > lightGrazing.grazingPressureIndex);
+  assert.ok(heavyGrazing.productivityIndex < lightGrazing.productivityIndex);
+});
+
 test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
   const engine = new FreeEarthEngine(77);
   engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;
