@@ -109,6 +109,26 @@ test("aggregate predation prefers compatible predator and prey body masses", () 
   assert.ok(compatible.herbivoreBiomass < mismatched.herbivoreBiomass);
 });
 
+test("carnivore diet breadth buffers aggregate body-mass mismatch", () => {
+  const configure = (dietBreadth) => {
+    const engine = new FreeEarthEngine(993);
+    engine.state.herbivoreBiomass = 4;
+    engine.state.carnivoreBiomass = 2;
+    engine.state.speciesLineages = [
+      { id: 1, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, bodyMassLog10Kg: 3.3, mobility: 0.5, sociality: 0.5, cognition: 0.5 },
+      { id: 2, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.8, bodyMassLog10Kg: -0.3, mobility: 0.5, sociality: 0.5, cognition: 0.5, dietBreadth }
+    ];
+    return engine.advance(25);
+  };
+  const narrow = configure(0);
+  const broad = configure(1);
+
+  assert.ok(broad.predationMassCompatibilityIndex > narrow.predationMassCompatibilityIndex);
+  assert.ok(broad.predationPressureIndex > narrow.predationPressureIndex);
+  assert.ok(broad.predationHerbivoreLossPerYear > narrow.predationHerbivoreLossPerYear);
+  assert.ok(broad.herbivoreBiomass < narrow.herbivoreBiomass);
+});
+
 test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
   const engine = new FreeEarthEngine(77);
   engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;

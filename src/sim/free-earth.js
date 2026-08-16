@@ -39,6 +39,7 @@ function applyAggregatePredation(state, dtYears) {
   const carnivoreBiomass = positive(state.carnivoreBiomass, 0.001);
   const predatorMobility = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) >= 0.55, "mobility");
   const predatorCognition = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) >= 0.55, "cognition");
+  const predatorDietBreadth = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) >= 0.55, "dietBreadth");
   const preyMobility = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "mobility");
   const preySociality = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "sociality");
   const preyCognition = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "cognition");
@@ -46,7 +47,8 @@ function applyAggregatePredation(state, dtYears) {
   const preyBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, (lineage) => Number(lineage.trophicLevel) < 0.55);
   const huntingEffectiveness = clamp(0.22 + predatorMobility * 0.46 + predatorCognition * 0.32, 0.05, 1);
   const escapeEffectiveness = clamp(0.18 + preyMobility * 0.38 + preySociality * 0.28 + preyCognition * 0.16, 0.05, 1);
-  const massCompatibility = Math.exp(-0.55 * Math.abs((preyBodyMassLog10Kg - predatorBodyMassLog10Kg) - 0.45));
+  const massMismatch = Math.abs((preyBodyMassLog10Kg - predatorBodyMassLog10Kg) - 0.45);
+  const massCompatibility = Math.exp(-0.55 * massMismatch * (1 - predatorDietBreadth * 0.52));
   const preyAvailability = herbivoreBiomass / (herbivoreBiomass + 0.28);
   const pressure = carnivoreBiomass * preyAvailability * huntingEffectiveness * massCompatibility * (1 - escapeEffectiveness * 0.72);
   const lossRatePerYear = 0.003 + pressure * 0.012;
