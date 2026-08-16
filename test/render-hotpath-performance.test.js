@@ -57,3 +57,19 @@ test("completed raster jobs wait until globe motion settles before GPU upload", 
   assert.match(rasterRefresh, /performance\.now\(\) < \(Number\(view\.continuousUntilMs\) \|\| 0\)/);
   assert.match(rasterRefresh, /setTimeout\(tryApply, RASTER_APPLY_RETRY_MS\)/);
 });
+
+test("playback yields to globe manipulation through the post-drag settle window", () => {
+  assert.match(earthView, /INTERACTION_SETTLE_MS = 900/);
+  assert.match(earthView, /continuousUntilMs = performance\.now\(\) \+ INTERACTION_SETTLE_MS/);
+  assert.match(earthView, /isInteracting\(now = performance\.now\(\)\)/);
+  assert.match(earthView, /now < this\.continuousUntilMs/);
+});
+
+test("globe interaction reuses cached diagnostics instead of rebuilding terrain telemetry", () => {
+  assert.match(earthView, /this\.isInteracting\(now\) && this\.diagnosticsCache/);
+  assert.match(earthView, /return this\.diagnosticsCache/);
+});
+
+test("adaptive visual retuning cannot resize the globe during an active drag", () => {
+  assert.match(earthView, /this\.mode !== "globe" && \(this\.interacting \|\| this\.descent \|\| this\.surfaceEntry\)/);
+});
