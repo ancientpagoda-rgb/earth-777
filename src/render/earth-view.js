@@ -13,6 +13,7 @@ const CLOUD_INTERVAL_MS = 15_000;
 const EARTH_REFRESH_YEARS = 2_500;
 const CLOUD_REFRESH_YEARS = 10_000;
 const DIAGNOSTICS_INTERVAL_MS = 250;
+const INTERACTION_SETTLE_MS = 900;
 const SURFACE_PUMP_ACTIVE_MS = 0.9;
 const SURFACE_PUMP_IDLE_MS = 2.3;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -81,21 +82,21 @@ export class EarthView {
     controls.addEventListener("start", () => {
       if (this.mode !== mode) return;
       this.interacting = true;
-      this.continuousUntilMs = performance.now() + 700;
+      this.continuousUntilMs = performance.now() + INTERACTION_SETTLE_MS;
       this.invalidate();
     });
     controls.addEventListener("change", () => { if (this.mode === mode) this.invalidate(); });
     controls.addEventListener("end", () => {
       if (this.mode !== mode) return;
       this.interacting = false;
-      this.continuousUntilMs = performance.now() + 700;
+      this.continuousUntilMs = performance.now() + INTERACTION_SETTLE_MS;
       this.invalidate();
     });
   }
 
   invalidate() { this.onInvalidate?.(); }
   setInvalidateCallback(callback) { this.onInvalidate = callback; }
-  isInteracting() { return this.interacting || this.descent != null || this.surfaceEntry != null; }
+  isInteracting(now = performance.now()) { return this.interacting || now < this.continuousUntilMs || this.descent != null || this.surfaceEntry != null; }
   setSimulationPlaying(playing) { this.simulationPlaying = Boolean(playing); if (playing) this.invalidate(); }
   focusSelection() { return this.descendToSelection(); }
   toggleSurface() { return this.mode === "surface" ? this.ascendToGlobe() : this.mode === "globe" ? this.descendToSelection() : false; }
@@ -260,7 +261,7 @@ export class EarthView {
     if (this.mode === "descent") continuous = updateDescent(this, now) || continuous;
     if (this.mode === "globe" || this.mode === "descent") {
       if (this.mode === "globe") continuous = this.controls.update() === true || continuous;
-      if (this.simulationPlaying || this.interacting || this.mode === "descent") { this.clouds.rotation.y += deltaSeconds * 0.004; continuous = true; }
+      if ((this.simulationPlaying && !this.isInteracting(now)) || this.mode === "descent") { this.clouds.rotation.y += deltaSeconds * 0.004; continuous = true; }
       if (this.marker.visible && (this.interacting || now < this.continuousUntilMs || this.mode === "descent")) { this.marker.scale.setScalar(1 + Math.sin(now * 0.004) * 0.16); continuous = true; }
       this.renderer.render(this.scene, this.camera);
     } else {
@@ -276,12 +277,13 @@ export class EarthView {
       this.renderer.render(this.surfaceScene, this.surfaceCamera);
     }
     this.lastRenderMs = performance.now() - started;
-    if ((this.interacting || this.descent || this.surfaceEntry) && this.lastFrameDeltaMs < 80 && this.performanceController.sample(this.lastFrameDeltaMs, now)) { this.applyPerformanceSettings(false); continuous = true; }
+    if (this.mode !== "globe" && (this.interacting || this.descent || this.surfaceEntry) && this.lastFrameDeltaMs < 80 && this.performanceController.sample(this.lastFrameDeltaMs, now)) { this.applyPerformanceSettings(false); continuous = true; }
     return continuous || now < this.continuousUntilMs;
   }
 
   diagnostics(force = false) {
     const now = performance.now();
+    if (!force && this.isInteracting(now) && this.diagnosticsCache) return this.diagnosticsCache;
     if (!force && this.diagnosticsCache && now - this.diagnosticsCacheAt < DIAGNOSTICS_INTERVAL_MS) return this.diagnosticsCache;
     const info = this.renderer.info.render;
     this.diagnosticsCache = Object.freeze({
