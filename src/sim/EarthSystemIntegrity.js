@@ -11,7 +11,7 @@ export const EARTH_SYSTEM_STATUS = Object.freeze({
   seaLevel: Object.freeze({ mode: "branch-response", status: "dynamic", note: "Driven by simulated ice and ocean heat; reconstructed sea level is retained only as a comparison series." }),
   hydrology: Object.freeze({ mode: "spatial-materialization", status: "dynamic", note: "Closed water balance and routing respond to evolving hydroclimate." }),
   vegetation: Object.freeze({ mode: "competitive-spatial-materialization", status: "dynamic-partial", note: "NPP/LAI/PFT physiology respond to climate, water, CO2 and nitrogen; selected-region competition and the BIOME4 classifier drive lagged model-derived branch succession while shared PFT hydrology feedback remains incomplete." }),
-  fauna: Object.freeze({ mode: "open-lineage-evolution", status: "dynamic-partial", note: "Anonymous species lineages compete for energy, adapt traits, speciate and go extinct without an imposed richness ceiling; aggregate predation and herbivory feed back through their existing ecology and vegetation owners, while spatial individual demography remains future work." }),
+  fauna: Object.freeze({ mode: "aggregate-biomass-open-lineage-evolution", status: "dynamic-partial", note: "One authoritative aggregate animal biomass pool is partitioned into continuous feeding-affinity projections from anonymous evolving lineages; herbivory and predation are ecological flows rather than independently evolved population classes, while spatial individual demography remains future work." }),
   hominins: Object.freeze({ mode: "species-lineage-coevolution", status: "dynamic-partial", note: "Multiple hominin lineages undergo ecological selection, speciation/extinction and evolving cognition, mobility, communication and sociality." }),
   culture: Object.freeze({ mode: "population-culture-coevolution", status: "dynamic-partial", note: "Innovation, cultural loss, tools, communication and fire reliance emerge continuously from lineage traits and effective population; individual minds and institutions remain future work." }),
   magnetism: Object.freeze({ mode: "secular-field-emulator", status: "dynamic-partial", note: "Reversal chronology is constrained; post-reversal field strength evolves stochastically around modern-scale strength." }),
@@ -21,7 +21,7 @@ export const EARTH_SYSTEM_STATUS = Object.freeze({
 export const DYNAMIC_STATE_FIELDS = Object.freeze([
   "co2", "methane", "nitrousOxide", "greenhouseForcing", "temperatureAnomaly", "oceanTemperatureAnomaly",
   "oceanOverturningIndex", "oceanVentilationIndex", "iceIndex", "seaLevel", "geologicActivityIndex", "tectonicTimeMyr",
-  "tectonicBoundaryActivity", "productivityIndex", "grazingPressureIndex", "predationPressureIndex", "predationExposureIndex", "herbivoreBiomass", "carnivoreBiomass", "homininPopulationIndex",
+  "tectonicBoundaryActivity", "productivityIndex", "grazingPressureIndex", "predationPressureIndex", "predationExposureIndex", "animalBiomass", "animalPlantMatterBiomass", "animalLivePreyBiomass", "homininPopulationIndex",
   "cognitionIndex", "cultureIndex", "technologyIndex", "communicationIndex", "magneticStrength", "atmosphericCarbonPgC",
   "oceanSurfaceCarbonPgC", "oceanDeepCarbonPgC", "terrestrialCarbonPgC", "methaneCarbonPgC",
   "terrestrialReactiveNitrogenTgN", "oceanReactiveNitrogenTgN", "atmosphericN2ONitrogenTgN"
