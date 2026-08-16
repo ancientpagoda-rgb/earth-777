@@ -1,10 +1,12 @@
+import { feedingProfileForLineage } from "./EvolutionaryEcology.js";
+
 const TAU = Math.PI * 2;
 const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v14";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v15";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack channels remain descriptive compatibility scaffolding and are not lineage classes; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -28,12 +30,25 @@ function biomeFactor(code) {
   return 0.72;
 }
 
+function hasExplicitFeedingProfile(lineage) {
+  return Number.isFinite(Number(lineage?.plantMatterAffinity)) || Number.isFinite(Number(lineage?.livePreyAffinity));
+}
+
+function lineageChannelAffinity(lineage, role) {
+  if (!lineage) return 0;
+  if (!hasExplicitFeedingProfile(lineage)) {
+    // Backward-compatible fallback for old hand-authored/checkpoint records.
+    // Current EvolutionaryEcology initializes explicit continuous affinities.
+    const legacyTrophic = Number(lineage.trophicLevel) || 0;
+    return role === "carnivore" ? (legacyTrophic >= 0.55 ? 1 : 0) : (legacyTrophic < 0.55 ? 1 : 0);
+  }
+  const feeding = feedingProfileForLineage(lineage);
+  return role === "carnivore" ? feeding.livePreyAffinity : feeding.plantMatterAffinity;
+}
+
 function lineagesForRole(state, role) {
   const living = (state?.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null && Number(lineage.populationIndex) > 0);
-  const matching = living.filter((lineage) => role === "carnivore"
-    ? Number(lineage.trophicLevel) >= 0.55
-    : Number(lineage.trophicLevel) < 0.55);
-  return Object.freeze(matching);
+  return Object.freeze(living.filter((lineage) => lineageChannelAffinity(lineage, role) > 1e-9));
 }
 
 function lineageTraits(lineage) {
@@ -67,7 +82,9 @@ function lineageLocalSuitability(lineage, role, state, field) {
 }
 
 function lineageSelectionWeight(lineage, role, state, field) {
-  return Math.max(0, Number(lineage?.populationIndex) || 0) * lineageLocalSuitability(lineage, role, state, field);
+  return Math.max(0, Number(lineage?.populationIndex) || 0)
+    * lineageChannelAffinity(lineage, role)
+    * lineageLocalSuitability(lineage, role, state, field);
 }
 
 function chooseLineage(lineages, seed, role, state, field) {
@@ -282,6 +299,8 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
     const baseZ = focusZKm + Math.sin(angle) * baseDistance;
     const id = `${role}-${index}-${hashText(`${seed}:${index}`)}`;
     const traits = lineageTraits(lineage);
+    const feeding = lineage ? feedingProfileForLineage(lineage) : null;
+    const channelAffinity = lineage ? lineageChannelAffinity(lineage, role) : null;
     const visualScale = lineageVisualScale(lineage);
     const localSuitability = lineage ? lineageLocalSuitability(lineage, role, state, field) : null;
     const behavior = faunaGroupBehaviorAt({ role, id, elapsedYears, field, lineage });
@@ -307,6 +326,10 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       heading: behavior.heading,
       movementDistanceKm: behavior.distanceKm,
       localSuitability,
+      channelAffinity,
+      plantMatterAffinity: feeding?.plantMatterAffinity ?? null,
+      livePreyAffinity: feeding?.livePreyAffinity ?? null,
+      carrionAffinity: feeding?.carrionAffinity ?? null,
       groupSizeScale: lineage ? groupSizeScale : null,
       spacingScale: lineage ? spacingScale : null,
       mobility: lineage ? traits.mobility : null,
@@ -315,7 +338,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       cognition: lineage ? traits.cognition : null,
       threatPerceptionRadiusKm: role === "herbivore" ? herdThreatPerceptionRadiusKm({ mobility: traits.mobility, sociality: traits.sociality, cognition: traits.cognition }) : null,
       bodyMassLog10Kg: lineage?.bodyMassLog10Kg ?? null,
-      trophicLevel: lineage?.trophicLevel ?? null
+      trophicLevel: feeding?.trophicLevel ?? lineage?.trophicLevel ?? null
     }));
 
     if (!materialized) continue;
