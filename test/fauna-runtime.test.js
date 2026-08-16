@@ -235,6 +235,26 @@ test("body mass affects observed scale and spacing without changing aggregate po
   assert.ok(large.herds[0].spacingScale > small.herds[0].spacingScale);
 });
 
+test("predator cognition expands only the local targeting perception radius", () => {
+  const configure = (cognition) => ({
+    ...state,
+    herbivoreBiomass: 4,
+    carnivoreBiomass: 2,
+    speciesLineages: [
+      lineage({ id: 381, trophicLevel: 0.2, bodyMassLog10Kg: 1.4 }),
+      lineage({ id: 382, trophicLevel: 0.85, bodyMassLog10Kg: 0.9, mobility: 0.5, cognition, dietBreadth: 0.5 })
+    ]
+  });
+  const options = { vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 123, windowRadiusKm: 4, individualRadiusKm: 0.2 };
+  const low = buildObservedFauna({ ...options, state: configure(0) });
+  const high = buildObservedFauna({ ...options, state: configure(1) });
+
+  assert.ok(low.packs.length > 0 && high.packs.length > 0);
+  assert.ok(high.packs[0].perceptionRadiusKm > low.packs[0].perceptionRadiusKm);
+  assert.equal(low.visiblePopulation, high.visiblePopulation);
+  assert.equal(low.visibleCarnivorePopulation, high.visibleCarnivorePopulation);
+});
+
 test("predator targeting produces bounded approach and direct herd threat response", () => {
   const predatorState = {
     ...state,
@@ -260,6 +280,7 @@ test("predator targeting produces bounded approach and direct herd threat respon
     assert.equal(pack.targetLineageId, target.lineageId);
     assert.ok(Number.isFinite(pack.targetDistanceKm));
     assert.ok(Number.isFinite(pack.targetDistanceBeforeKm));
+    assert.ok(pack.targetDistanceBeforeKm <= pack.perceptionRadiusKm + 1e-12);
     assert.ok(pack.approachDistanceKm >= 0);
     assert.ok(pack.approachDistanceKm <= pack.movementDistanceKm + 1e-12);
     assert.ok(pack.targetDistanceKm <= pack.targetDistanceBeforeKm + 1e-12);
