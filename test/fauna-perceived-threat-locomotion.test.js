@@ -75,7 +75,8 @@ test("actual perceived predators feed continuous herd locomotion before flee is 
   const expectedDirectDrive = Math.max(0, Math.min(1, proximityDrive * 0.65 + pursuitDrive * 0.25 + multipleThreatDrive * 0.10));
   const expectedResponseDrive = Math.max(raised.locomotionDrive, expectedDirectDrive);
   const mobilityScale = 0.70 + raised.mobility * 0.70;
-  const expectedResponseDistance = (0.025 + expectedResponseDrive * 0.135) * mobilityScale;
+  const strideRangeKm = 0.135 - raised.predationAffinity * 0.05;
+  const expectedResponseDistance = (0.025 + expectedResponseDrive * strideRangeKm) * mobilityScale;
 
   assert.ok(Math.abs(raised.directThreatDrive - expectedDirectDrive) < 1e-12);
   assert.ok(Math.abs(raised.responseLocomotionDrive - expectedResponseDrive) < 1e-12);

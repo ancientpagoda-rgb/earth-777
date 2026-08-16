@@ -1,4 +1,6 @@
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
+const interpolateEndpoint = (plantValue, preyValue, predationAffinity) =>
+  plantValue * (1 - predationAffinity) + preyValue * predationAffinity;
 
 export function observedGroupViews(observed = {}) {
   const canonical = Array.isArray(observed?.groups) ? observed.groups : null;
@@ -33,8 +35,8 @@ export function faunaGroupRenderShape(group = {}) {
   const predationAffinity = renderPredationAffinity(group);
   return Object.freeze({
     predationAffinity,
-    longitudinalScale: 2.3 - predationAffinity * 0.7,
-    verticalScale: 0.72 - predationAffinity * 0.10,
+    longitudinalScale: interpolateEndpoint(2.3, 1.6, predationAffinity),
+    verticalScale: interpolateEndpoint(0.72, 0.62, predationAffinity),
     lateralScale: 1
   });
 }
@@ -43,7 +45,7 @@ export function faunaIndividualRenderShape(animal = {}, parentGroup = null) {
   const predationAffinity = renderPredationAffinity(animal, parentGroup);
   return Object.freeze({
     predationAffinity,
-    longitudinalScale: 1.8 - predationAffinity * 0.25,
+    longitudinalScale: interpolateEndpoint(1.8, 1.55, predationAffinity),
     verticalScale: 1,
     lateralScale: 0.8
   });
