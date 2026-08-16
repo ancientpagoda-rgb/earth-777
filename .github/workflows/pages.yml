@@ -39,6 +39,71 @@ jobs:
       - name: Build for GitHub Pages
         run: npm run build -- --base=/earth-777/
 
+      - name: Browser smoke test
+        shell: bash
+        run: |
+          PREVIEW_PID=""
+          CHROME_PID=""
+          cleanup() {
+            if [ -n "$CHROME_PID" ]; then kill "$CHROME_PID" 2>/dev/null || true; fi
+            if [ -n "$PREVIEW_PID" ]; then kill "$PREVIEW_PID" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
+
+          npx vite preview --host 127.0.0.1 --base=/earth-777/ > /tmp/earth-777-preview.log 2>&1 &
+          PREVIEW_PID=$!
+
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/earth-777/ > /dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              cat /tmp/earth-777-preview.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          google-chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --enable-unsafe-swiftshader \
+            --use-angle=swiftshader \
+            --remote-debugging-port=9222 \
+            --remote-debugging-address=127.0.0.1 \
+            --user-data-dir=/tmp/earth-777-chrome \
+            http://127.0.0.1:4173/earth-777/ \
+            > /tmp/earth-777-chrome.log 2>&1 &
+          CHROME_PID=$!
+
+          WS_ENDPOINT=""
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:9222/json/list > /tmp/earth-777-cdp-pages.json; then
+              WS_ENDPOINT=$(node -e '
+                const fs = require("node:fs");
+                const pages = JSON.parse(fs.readFileSync("/tmp/earth-777-cdp-pages.json", "utf8"));
+                const page = pages.find((entry) => entry.type === "page" && entry.url.includes("earth-777"));
+                process.stdout.write(page?.webSocketDebuggerUrl ?? "");
+              ')
+            fi
+            if [ -n "$WS_ENDPOINT" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              cat /tmp/earth-777-preview.log
+              cat /tmp/earth-777-chrome.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if ! node test/cdp-smoke.mjs "$WS_ENDPOINT"; then
+            cat /tmp/earth-777-preview.log
+            cat /tmp/earth-777-chrome.log
+            exit 1
+          fi
+
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v4
