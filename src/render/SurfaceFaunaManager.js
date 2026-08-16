@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { FAUNA_EPISTEMIC_STATUS, FAUNA_POLICY, buildObservedFauna, faunaForCells, faunaPopulationAt } from "../sim/FaunaRuntime.js";
-import { faunaGroupRenderShape, observedGroupViews } from "./FaunaRenderViews.js";
+import { faunaGroupRenderShape, faunaIndividualRenderShape, observedGroupViews } from "./FaunaRenderViews.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -113,8 +113,7 @@ export class SurfaceFaunaManager {
 
     this.pools = {
       group: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0040, 6, 4), new THREE.MeshStandardMaterial({ color: 0x55483a, roughness: 1, transparent: true, opacity: 0.74 }), 384),
-      herbivore: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0012, 5, 3), new THREE.MeshStandardMaterial({ color: 0x4b3c2d, roughness: 1 }), 512),
-      carnivore: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0010, 5, 3), new THREE.MeshStandardMaterial({ color: 0x342c29, roughness: 1 }), 256)
+      individual: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0011, 5, 3), new THREE.MeshStandardMaterial({ color: 0x40352e, roughness: 1 }), 512)
     };
     this.matrix = new THREE.Matrix4();
     this.position = new THREE.Vector3();
@@ -195,10 +194,14 @@ export class SurfaceFaunaManager {
 
     for (const pool of Object.values(this.pools)) pool.clear();
     this.queue = [];
-    for (const group of observedGroupViews(this.observed)) {
+    const groupViews = observedGroupViews(this.observed);
+    const groupById = new Map(groupViews.map((group) => [group.id ?? group.groupId, group]));
+    for (const group of groupViews) {
       if (group.representation !== "individuals") this.queue.push({ type: "group", value: group });
     }
-    for (const animal of this.observed.individuals) this.queue.push({ type: animal.role, value: animal });
+    for (const animal of this.observed.individuals) {
+      this.queue.push({ type: "individual", value: animal, parentGroup: groupById.get(animal.groupId) ?? null });
+    }
     this.cursor = 0;
     this.dirty = false;
   }
@@ -253,8 +256,17 @@ export class SurfaceFaunaManager {
           actor.heading
         )) counts.group += 1;
       } else {
-        const isCarnivore = item.type === "carnivore";
-        if (this._place(this.pools[item.type], counts[item.type], actor.x, actor.z, actor.scale * (isCarnivore ? 1.55 : 1.8), actor.scale, actor.scale * 0.8, actor.yaw)) counts[item.type] += 1;
+        const shape = faunaIndividualRenderShape(actor, item.parentGroup);
+        if (this._place(
+          this.pools.individual,
+          counts.individual,
+          actor.x,
+          actor.z,
+          actor.scale * shape.longitudinalScale,
+          actor.scale * shape.verticalScale,
+          actor.scale * shape.lateralScale,
+          actor.yaw
+        )) counts.individual += 1;
       }
       work += 1;
     }
