@@ -104,11 +104,24 @@ jobs:
             exit 1
           fi
 
-          if ! node test/cdp-playtest.mjs "$WS_ENDPOINT"; then
+          set +e
+          node test/cdp-playtest.mjs "$WS_ENDPOINT" 2>&1 | tee earth-777-playtest.log
+          PLAYTEST_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$PLAYTEST_STATUS" -ne 0 ]; then
             cat /tmp/earth-777-preview.log
             cat /tmp/earth-777-chrome.log
-            exit 1
+            exit "$PLAYTEST_STATUS"
           fi
+
+      - name: Upload interaction playtest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: earth-777-playtest-${{ github.run_id }}
+          path: earth-777-playtest.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
