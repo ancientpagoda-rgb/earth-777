@@ -37,7 +37,7 @@ export function createGlobePresentation(canvas) {
   controls.minDistance = 1.425;
   controls.maxDistance = 120;
   controls.rotateSpeed = 0.48;
-  controls.zoomSpeed = 1.0;
+  controls.zoomSpeed = -1.0;
 
   const earthMaterial = new THREE.MeshStandardMaterial({
     color: 0x36503c,
