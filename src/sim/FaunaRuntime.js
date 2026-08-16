@@ -356,20 +356,29 @@ function predatorPreyScore(pack, herd) {
   return populationSupport * sizeCompatibility / (0.08 + distanceKm);
 }
 
+function predatorPerceptionRadiusKm(pack) {
+  const cognition = clamp01(pack?.cognition ?? 0.5);
+  const mobility = clamp01(pack?.mobility ?? 0.5);
+  return clamp(0.38 + cognition * 2.85 + mobility * 0.42, 0.38, 3.65);
+}
+
 function targetPredatorPacks(packs, herds) {
   if (!packs?.length || !herds?.length) return Object.freeze(packs ?? []);
   return Object.freeze(packs.map((pack) => {
-    if (pack.behavior !== "hunt" && pack.behavior !== "stalk") return pack;
+    const perceptionRadiusKm = predatorPerceptionRadiusKm(pack);
+    if (pack.behavior !== "hunt" && pack.behavior !== "stalk") return Object.freeze({ ...pack, perceptionRadiusKm });
     let target = null;
     let bestScore = -Infinity;
     for (const herd of herds) {
+      const distanceKm = Math.hypot(herd.x - pack.x, herd.z - pack.z);
+      if (distanceKm > perceptionRadiusKm) continue;
       const score = predatorPreyScore(pack, herd);
       if (score > bestScore) {
         bestScore = score;
         target = herd;
       }
     }
-    if (!target) return pack;
+    if (!target) return Object.freeze({ ...pack, perceptionRadiusKm });
     const dx = target.x - pack.x;
     const dz = target.z - pack.z;
     const targetDistanceBeforeKm = Math.hypot(dx, dz);
@@ -387,6 +396,7 @@ function targetPredatorPacks(packs, herds) {
       x,
       z,
       heading,
+      perceptionRadiusKm,
       targetGroupId: target.id,
       targetLineageId: target.lineageId ?? null,
       targetDistanceKm,
