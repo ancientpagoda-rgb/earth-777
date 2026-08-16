@@ -36,7 +36,7 @@ function initialLineage(seed, index) {
   };
 }
 
-export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v3";
+export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v4";
 
 export function initializeEvolutionaryEcology(state, seed = 777001) {
   if (!Array.isArray(state.speciesLineages)) {
@@ -80,12 +80,18 @@ function predationSelectionFeedback(state, lineage) {
   // avoiding a second writer or a camera-dependent history.
   const pressure = currentPressure + residualExposure * 0.35;
   if (pressure <= 0) return 1;
-  if (Number(lineage.trophicLevel) < 0.55) {
-    const evasion = clamp01(0.18 + clamp01(lineage.mobility) * 0.35 + clamp01(lineage.sociality) * 0.27 + clamp01(lineage.cognition) * 0.20);
-    return Math.exp(-pressure * 0.18 * (1 - evasion));
-  }
+
+  // Trophic level is a continuous feeding phenotype, not a predator/prey class.
+  // Low-trophic lineages experience more exposure to predation, while higher-
+  // trophic lineages gain more from hunting capability. Intermediate feeders
+  // can experience both effects without crossing an arbitrary role threshold.
+  const animalFoodDependence = clamp01(lineage.trophicLevel);
+  const plantFoodDependence = 1 - animalFoodDependence;
+  const evasion = clamp01(0.18 + clamp01(lineage.mobility) * 0.35 + clamp01(lineage.sociality) * 0.27 + clamp01(lineage.cognition) * 0.20);
   const hunting = clamp01(0.20 + clamp01(lineage.mobility) * 0.45 + clamp01(lineage.cognition) * 0.35);
-  return 1 + pressure * 0.09 * hunting;
+  const exposureCost = Math.exp(-pressure * 0.18 * (1 - evasion) * plantFoodDependence);
+  const huntingBenefit = 1 + pressure * 0.09 * hunting * animalFoodDependence;
+  return exposureCost * huntingBenefit;
 }
 
 function mutate(parent, childId, state, random) {
