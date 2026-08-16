@@ -183,6 +183,24 @@ test("aggregate herbivory feeds back on vegetation productivity through its exis
   assert.ok(heavyGrazing.productivityIndex < lightGrazing.productivityIndex);
 });
 
+test("herbivore diet breadth buffers aggregate grazing pressure", () => {
+  const configure = (dietBreadth) => {
+    const engine = new FreeEarthEngine(997);
+    engine.state.herbivoreBiomass = 5;
+    engine.state.carnivoreBiomass = 0.001;
+    engine.state.speciesLineages = [
+      { id: 1, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, dietBreadth, thermalOptimumK: -1.27, mobility: 0.5, sociality: 0.5, cognition: 0.5 }
+    ];
+    return engine.advance(25);
+  };
+  const narrow = configure(0);
+  const broad = configure(1);
+
+  assert.ok(broad.herbivoreDietBreadthIndex > narrow.herbivoreDietBreadthIndex);
+  assert.ok(broad.grazingPressureIndex < narrow.grazingPressureIndex);
+  assert.ok(broad.productivityIndex > narrow.productivityIndex);
+});
+
 test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
   const engine = new FreeEarthEngine(77);
   engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;
