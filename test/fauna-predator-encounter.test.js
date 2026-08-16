@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildObservedFauna } from "../src/sim/FaunaRuntime.js";
+import { buildObservedFauna, deriveEncounterEcologyProposal } from "../src/sim/FaunaRuntime.js";
 
 const vegetation = Object.freeze({ biomeCode: 17, npp: 1400, lai: 3.2 });
 const hydrology = Object.freeze({ surfaceRunoffMmPerYear: 500 });
@@ -79,4 +79,59 @@ test("predator encounter outcomes are geometric diagnostics and conserve populat
 
   assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
   assert.equal(plan.packs.reduce((sum, pack) => sum + pack.population, 0), plan.visibleCarnivorePopulation);
+});
+
+test("geometric contacts produce bounded non-authoritative ecology proposals", () => {
+  const state = {
+    seed: 777001,
+    elapsedYears: 12.5,
+    temperatureAnomaly: -1,
+    productivityIndex: 1,
+    herbivoreBiomass: 4,
+    carnivoreBiomass: 2,
+    speciesLineages: [
+      lineage({ id: 701, trophicLevel: 0.2, bodyMassLog10Kg: 1.3, sociality: 0.5 }),
+      lineage({ id: 702, trophicLevel: 0.85, bodyMassLog10Kg: 0.9, mobility: 1, cognition: 1, dietBreadth: 0, sociality: 0.6 })
+    ]
+  };
+  let plan = null;
+  for (let seed = 1; seed <= 512; seed += 1) {
+    const candidate = buildObservedFauna({
+      state,
+      vegetationSample: vegetation,
+      hydrologySample: hydrology,
+      latitude: 39,
+      longitude: -95,
+      seed,
+      windowRadiusKm: 3.5,
+      individualRadiusKm: 3.5
+    });
+    if (candidate.predatorContactCount > 0) {
+      plan = candidate;
+      break;
+    }
+  }
+
+  assert.ok(plan, "expected a deterministic layout with a final geometric contact");
+  const proposal = plan.encounterEcology;
+  assert.equal(proposal.authoritative, false);
+  assert.equal(proposal.contactCount, plan.predatorContactCount);
+  assert.equal(proposal.contactedHerdCount, new Set(plan.packs.filter((pack) => pack.encounterContact).map((pack) => pack.targetGroupId)).size);
+  assert.ok(proposal.observedHerbivoreExposureIndex > 0);
+  assert.ok(proposal.observedHerbivoreExposureIndex <= 1);
+  assert.ok(proposal.observedCarnivoreEngagementIndex > 0);
+  assert.ok(proposal.observedCarnivoreEngagementIndex <= 1);
+  assert.ok(proposal.contactedHerds.every((herd) => herd.pressureIndex > 0 && herd.pressureIndex <= 1));
+  assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), plan.visiblePopulation);
+  assert.equal(plan.packs.reduce((sum, pack) => sum + pack.population, 0), plan.visibleCarnivorePopulation);
+
+  const noContact = deriveEncounterEcologyProposal({
+    packs: plan.packs.map((pack) => ({ ...pack, encounterContact: false })),
+    herds: plan.herds,
+    visiblePopulation: plan.visiblePopulation,
+    visibleCarnivorePopulation: plan.visibleCarnivorePopulation
+  });
+  assert.equal(noContact.contactCount, 0);
+  assert.equal(noContact.observedHerbivoreExposureIndex, 0);
+  assert.equal(noContact.observedCarnivoreEngagementIndex, 0);
 });
