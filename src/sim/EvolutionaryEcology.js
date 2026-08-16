@@ -36,7 +36,7 @@ function initialLineage(seed, index) {
   };
 }
 
-export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v2";
+export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v3";
 
 export function initializeEvolutionaryEcology(state, seed = 777001) {
   if (!Array.isArray(state.speciesLineages)) {
@@ -73,7 +73,12 @@ function nicheCompetition(lineage, lineages) {
 }
 
 function predationSelectionFeedback(state, lineage) {
-  const pressure = Math.max(0, Number(state.predationPressureIndex) || 0);
+  const currentPressure = Math.max(0, Number(state.predationPressureIndex) || 0);
+  const residualExposure = Math.max(0, (Number(state.predationExposureIndex) || 0) - currentPressure);
+  // FreeEarthEngine owns the lagged aggregate exposure. Evolution only reads
+  // the residual while it decays, preserving the instantaneous effect while
+  // avoiding a second writer or a camera-dependent history.
+  const pressure = currentPressure + residualExposure * 0.35;
   if (pressure <= 0) return 1;
   if (Number(lineage.trophicLevel) < 0.55) {
     const evasion = clamp01(0.18 + clamp01(lineage.mobility) * 0.35 + clamp01(lineage.sociality) * 0.27 + clamp01(lineage.cognition) * 0.20);
