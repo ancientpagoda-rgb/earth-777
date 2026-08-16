@@ -1,4 +1,5 @@
 import { feedingProfileForLineage } from "./EvolutionaryEcology.js";
+import { projectAnimalPopulation } from "./AnimalPopulationProjection.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
@@ -45,28 +46,14 @@ function meanLineageThermalAdaptation(state, weightForLineage, fallback = 1) {
 }
 
 export function aggregateFeedingShares(state = {}) {
-  const lineages = livingLineages(state);
-  let plant = 0;
-  let livePrey = 0;
-  let population = 0;
-
-  for (const lineage of lineages) {
-    const populationIndex = Math.max(0, Number(lineage.populationIndex) || 0);
-    const feeding = feedingProfileForLineage(lineage);
-    const primaryFoodTotal = feeding.plantMatterAffinity + feeding.livePreyAffinity;
-    const plantFraction = primaryFoodTotal > 1e-12 ? feeding.plantMatterAffinity / primaryFoodTotal : 0.5;
-    const livePreyFraction = primaryFoodTotal > 1e-12 ? feeding.livePreyAffinity / primaryFoodTotal : 0.5;
-    plant += populationIndex * plantFraction;
-    livePrey += populationIndex * livePreyFraction;
-    population += populationIndex;
+  const projection = projectAnimalPopulation(state);
+  if (projection.totalPopulationIndex <= 0) {
+    return Object.freeze({ plantMatterShare: 0.5, livePreyShare: 0.5 });
   }
-
-  if (population <= 0) return Object.freeze({ plantMatterShare: 0.5, livePreyShare: 0.5 });
-  const plantMatterShare = clamp01(plant / population);
-  const livePreyShare = clamp01(livePrey / population);
-  const total = plantMatterShare + livePreyShare;
-  if (total <= 1e-12) return Object.freeze({ plantMatterShare: 0.5, livePreyShare: 0.5 });
-  return Object.freeze({ plantMatterShare: plantMatterShare / total, livePreyShare: livePreyShare / total });
+  return Object.freeze({
+    plantMatterShare: projection.plantFeedingFraction,
+    livePreyShare: projection.livePreyFeedingFraction
+  });
 }
 
 function storedFeedingShares(state) {
