@@ -3,6 +3,30 @@ import { FAUNA_EPISTEMIC_STATUS, FAUNA_POLICY, buildObservedFauna, faunaForCells
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
+export function faunaStateSignature(state = {}) {
+  const animalBiomass = Number(state?.animalBiomass);
+  if (Number.isFinite(animalBiomass)) {
+    const plantShareValue = Number(state?.animalPlantMatterShare);
+    const liveShareValue = Number(state?.animalLivePreyShare);
+    let plantShare = Number.isFinite(plantShareValue) ? clamp(plantShareValue, 0, 1) : null;
+    let liveShare = Number.isFinite(liveShareValue) ? clamp(liveShareValue, 0, 1) : null;
+    if (plantShare == null || liveShare == null) {
+      const plantBiomass = Math.max(0, Number(state?.animalPlantMatterBiomass) || 0);
+      const liveBiomass = Math.max(0, Number(state?.animalLivePreyBiomass) || 0);
+      const total = plantBiomass + liveBiomass;
+      plantShare = total > 1e-12 ? plantBiomass / total : 0.5;
+      liveShare = total > 1e-12 ? liveBiomass / total : 0.5;
+    }
+    const shareTotal = plantShare + liveShare;
+    if (shareTotal > 1e-12) {
+      plantShare /= shareTotal;
+      liveShare /= shareTotal;
+    }
+    return `unified:${Math.max(0, animalBiomass).toFixed(3)}:${plantShare.toFixed(3)}:${liveShare.toFixed(3)}`;
+  }
+  return `legacy:${Number(state?.herbivoreBiomass ?? 0).toFixed(3)}:${Number(state?.carnivoreBiomass ?? 0).toFixed(3)}`;
+}
+
 class PagedInstancePool {
   constructor(scene, geometry, material, pageSize) {
     this.scene = scene;
@@ -79,8 +103,7 @@ export class SurfaceFaunaManager {
       Number(latitude).toFixed(4),
       Number(longitude).toFixed(4),
       Math.floor((Number(state?.elapsedYears) || 0) * 12),
-      Number(state?.herbivoreBiomass ?? 0).toFixed(3),
-      Number(state?.carnivoreBiomass ?? 0).toFixed(3),
+      faunaStateSignature(state),
       vegetationSample?.biomeCode ?? "x",
       Math.round(Number(vegetationSample?.npp) || 0),
       Math.round(Number(hydrologySample?.surfaceRunoffMmPerYear ?? hydrologySample?.runoffPotentialMmPerYear) || 0)
