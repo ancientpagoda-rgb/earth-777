@@ -119,5 +119,8 @@ test("regional inspection consumes generalized gridded hydroclimate and exposes 
   assert.equal(region.atmospherePolicy, GENERAL_ATMOSPHERE_POLICY);
   assert.ok(Number.isFinite(region.runoffPotential));
   assert.ok(Number.isFinite(region.windSpeed));
+  assert.ok(Number.isFinite(region.fauna.herbivoreDensityAnimalsPerKm2));
+  assert.ok(Number.isFinite(region.fauna.carnivoreDensityAnimalsPerKm2));
+  assert.ok(Number.isFinite(region.fauna.predationExposure));
   assert.match(region.confidence, /general intermediate-complexity atmospheric circulation/);
 });
