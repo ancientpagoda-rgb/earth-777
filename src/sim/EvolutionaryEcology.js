@@ -16,9 +16,47 @@ function unit(seed, index, salt) {
   return hash32((Number(seed) >>> 0) ^ Math.imul(index + 1, salt)) / 0x100000000;
 }
 
+function legacyFeedingAffinities(lineage = {}) {
+  const trophicLevel = clamp01(lineage.trophicLevel ?? 0.5);
+  const dietBreadth = clamp01(lineage.dietBreadth ?? 0.5);
+  return {
+    plantMatterAffinity: 1 - trophicLevel,
+    livePreyAffinity: trophicLevel,
+    carrionAffinity: trophicLevel * dietBreadth
+  };
+}
+
+export function feedingProfileForLineage(lineage = {}) {
+  const legacy = legacyFeedingAffinities(lineage);
+  const plantMatterAffinity = Number.isFinite(Number(lineage.plantMatterAffinity))
+    ? clamp01(lineage.plantMatterAffinity)
+    : legacy.plantMatterAffinity;
+  const livePreyAffinity = Number.isFinite(Number(lineage.livePreyAffinity))
+    ? clamp01(lineage.livePreyAffinity)
+    : legacy.livePreyAffinity;
+  const carrionAffinity = Number.isFinite(Number(lineage.carrionAffinity))
+    ? clamp01(lineage.carrionAffinity)
+    : legacy.carrionAffinity;
+  const primaryFoodTotal = plantMatterAffinity + livePreyAffinity;
+  const trophicLevel = primaryFoodTotal > 1e-12
+    ? livePreyAffinity / primaryFoodTotal
+    : clamp01(lineage.trophicLevel ?? 0.5);
+  return Object.freeze({ plantMatterAffinity, livePreyAffinity, carrionAffinity, trophicLevel });
+}
+
+function ensureFeedingProfile(lineage) {
+  const profile = feedingProfileForLineage(lineage);
+  lineage.plantMatterAffinity ??= profile.plantMatterAffinity;
+  lineage.livePreyAffinity ??= profile.livePreyAffinity;
+  lineage.carrionAffinity ??= profile.carrionAffinity;
+  lineage.trophicLevel = feedingProfileForLineage(lineage).trophicLevel;
+  return lineage;
+}
+
 function initialLineage(seed, index) {
   const trophicLevel = 0.08 + unit(seed, index, 0x9e3779b1) * 0.86;
   const bodyMassLog10Kg = -0.3 + unit(seed, index, 0x85ebca77) * 3.7;
+  const dietBreadth = 0.12 + unit(seed, index, 0xb55a4f09) * 0.74;
   return {
     id: index + 1,
     parentId: null,
@@ -26,22 +64,26 @@ function initialLineage(seed, index) {
     extinctionYearBP: null,
     populationIndex: 0.18 + unit(seed, index, 0xc2b2ae3d) * 0.72,
     trophicLevel,
+    plantMatterAffinity: 1 - trophicLevel,
+    livePreyAffinity: trophicLevel,
+    carrionAffinity: trophicLevel * dietBreadth,
     bodyMassLog10Kg,
     thermalOptimumK: -2.4 + unit(seed, index, 0x27d4eb2f) * 5.5,
     mobility: 0.18 + unit(seed, index, 0x165667b1) * 0.72,
     sociality: 0.08 + unit(seed, index, 0xd3a2646c) * 0.70,
     cognition: 0.04 + unit(seed, index, 0xfd7046c5) * 0.42,
-    dietBreadth: 0.12 + unit(seed, index, 0xb55a4f09) * 0.74,
+    dietBreadth,
     divergence: unit(seed, index, 0x94d049bb) * 0.25
   };
 }
 
-export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v4";
+export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v5";
 
 export function initializeEvolutionaryEcology(state, seed = 777001) {
   if (!Array.isArray(state.speciesLineages)) {
     state.speciesLineages = Array.from({ length: 12 }, (_, index) => initialLineage(seed, index));
   }
+  for (const lineage of state.speciesLineages) ensureFeedingProfile(lineage);
   state.nextSpeciesId ??= state.speciesLineages.reduce((max, lineage) => Math.max(max, Number(lineage.id) || 0), 0) + 1;
   state.speciesRichness ??= state.speciesLineages.length;
   state.evolutionaryNoveltyIndex ??= 0;
@@ -51,11 +93,10 @@ export function initializeEvolutionaryEcology(state, seed = 777001) {
 
 function resourceSupport(state, lineage) {
   const productivity = positive(state.productivityIndex ?? 1, 0.001);
-  const herbivory = 1 - lineage.trophicLevel;
-  const predation = lineage.trophicLevel;
-  const plantSupport = productivity ** (0.35 + herbivory * 0.65);
-  const preySupport = positive(state.herbivoreBiomass ?? 1, 0.001) ** (predation * 0.82);
-  const carrionSupport = positive(state.carnivoreBiomass ?? 1, 0.001) ** (predation * 0.12 * lineage.dietBreadth);
+  const feeding = feedingProfileForLineage(lineage);
+  const plantSupport = productivity ** (0.35 + feeding.plantMatterAffinity * 0.65);
+  const preySupport = positive(state.herbivoreBiomass ?? 1, 0.001) ** (feeding.livePreyAffinity * 0.82);
+  const carrionSupport = positive(state.carnivoreBiomass ?? 1, 0.001) ** (feeding.carrionAffinity * 0.12);
   return plantSupport * preySupport * carrionSupport;
 }
 
@@ -81,11 +122,11 @@ function predationSelectionFeedback(state, lineage) {
   const pressure = currentPressure + residualExposure * 0.35;
   if (pressure <= 0) return 1;
 
-  // Trophic level is a continuous feeding phenotype, not a predator/prey class.
-  // Low-trophic lineages experience more exposure to predation, while higher-
-  // trophic lineages gain more from hunting capability. Intermediate feeders
-  // can experience both effects without crossing an arbitrary role threshold.
-  const animalFoodDependence = clamp01(lineage.trophicLevel);
+  // Feeding ecology is continuous. Trophic level is retained only as the
+  // plant-vs-live-prey summary consumed by older callers; carrion is an
+  // independent resource affinity and does not imply active hunting.
+  const feeding = feedingProfileForLineage(lineage);
+  const animalFoodDependence = feeding.trophicLevel;
   const plantFoodDependence = 1 - animalFoodDependence;
   const evasion = clamp01(0.18 + clamp01(lineage.mobility) * 0.35 + clamp01(lineage.sociality) * 0.27 + clamp01(lineage.cognition) * 0.20);
   const hunting = clamp01(0.20 + clamp01(lineage.mobility) * 0.45 + clamp01(lineage.cognition) * 0.35);
@@ -96,19 +137,38 @@ function predationSelectionFeedback(state, lineage) {
 
 function mutate(parent, childId, state, random) {
   const centered = () => (random() + random() + random() - 1.5) / 1.5;
+  const feeding = feedingProfileForLineage(parent);
+  // Keep the existing trophic mutation random draw/order for deterministic
+  // compatibility of the older traits, then add carrion variation afterward.
+  const trophicShift = centered() * 0.09;
+  const bodyMassLog10Kg = parent.bodyMassLog10Kg + centered() * 0.24;
+  const thermalOptimumK = parent.thermalOptimumK + centered() * 0.55;
+  const mobility = clamp01(parent.mobility + centered() * 0.10);
+  const sociality = clamp01(parent.sociality + centered() * 0.08);
+  const cognition = clamp01(parent.cognition + centered() * 0.045);
+  const dietBreadth = clamp01(parent.dietBreadth + centered() * 0.11);
+  const carrionShift = centered() * 0.09;
+  const plantMatterAffinity = clamp01(feeding.plantMatterAffinity - trophicShift);
+  const livePreyAffinity = clamp01(feeding.livePreyAffinity + trophicShift);
+  const carrionAffinity = clamp01(feeding.carrionAffinity + carrionShift);
+  const primaryFoodTotal = plantMatterAffinity + livePreyAffinity;
+  const trophicLevel = primaryFoodTotal > 1e-12 ? livePreyAffinity / primaryFoodTotal : feeding.trophicLevel;
   return {
     id: childId,
     parentId: parent.id,
     birthYearBP: Math.round(state.yearBP),
     extinctionYearBP: null,
     populationIndex: parent.populationIndex * 0.34,
-    trophicLevel: clamp01(parent.trophicLevel + centered() * 0.09),
-    bodyMassLog10Kg: parent.bodyMassLog10Kg + centered() * 0.24,
-    thermalOptimumK: parent.thermalOptimumK + centered() * 0.55,
-    mobility: clamp01(parent.mobility + centered() * 0.10),
-    sociality: clamp01(parent.sociality + centered() * 0.08),
-    cognition: clamp01(parent.cognition + centered() * 0.045),
-    dietBreadth: clamp01(parent.dietBreadth + centered() * 0.11),
+    trophicLevel,
+    plantMatterAffinity,
+    livePreyAffinity,
+    carrionAffinity,
+    bodyMassLog10Kg,
+    thermalOptimumK,
+    mobility,
+    sociality,
+    cognition,
+    dietBreadth,
     divergence: 0
   };
 }
