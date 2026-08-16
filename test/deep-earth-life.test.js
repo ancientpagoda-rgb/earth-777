@@ -100,13 +100,12 @@ test("competitive PFT selection can mature into a branch biome instead of remain
       selectedPftId: 9,
       dominantWoodyLai: 0.8
     },
-    climateIndices: { warmestMonthCelsius: 26 },
-    annualPrecipitationMm: 780,
+    classifier: { policy: "test-classifier", biomeCode: 19, biomeLabel: "Tropical grassland" },
     transitionPressure: 0.8
   });
   assert.equal(succession.status, "resolved");
   assert.ok(succession.progress > 0.95);
-  assert.equal(succession.biomeLabel, "warm savanna / grassland");
+  assert.equal(succession.biomeLabel, "Tropical grassland");
 });
 
 test("Free Earth exposes evolving species, hominin cognition, culture and technology", () => {

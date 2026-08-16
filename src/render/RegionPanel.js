@@ -121,6 +121,7 @@ export function renderRegionPanel(ui, state, latitude, longitude, { climateLayer
     if (region.climateEligiblePftIds?.length) details.push(`PFT climate candidates ${region.climateEligiblePftIds.join("/")}`);
     if (region.climateUnresolvedPftIds?.length) details.push(`PFT unresolved ${region.climateUnresolvedPftIds.join("/")} · source-driver coverage`);
     if (pft?.competition) details.push(`competitive PFT ${pft.competition.selectedPftId}`);
+    if (pft?.classifier?.biomeCode > 0) details.push(`BIOME4 classifier ${pft.classifier.biomeCode} · ${pft.classifier.biomeLabel} (branch-derived)`);
     if (pft?.succession?.status === "resolved") details.push(`biome succession ${Math.round(pft.succession.progress * 100)}%`);
     if (pft?.status === "resolved") {
       details.push(`PFT daily phenology ${pft.resolvedCount}/${pft.candidateCount}`);
