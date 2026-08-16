@@ -5,8 +5,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v20";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, feeding-weighted local suitability, role-independent explicit-lineage threat/resource/pursuit locomotion drives, perceived-threat response, feeding-affinity-derived group geometry, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack, herbivore/carnivore role, and named behavior labels remain descriptive compatibility scaffolding rather than explicit-lineage physics commands; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v21";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from unified animal biomass projections, modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, feeding-weighted local suitability, role-independent explicit-lineage threat/resource/pursuit locomotion drives, perceived-threat response, feeding-affinity-derived group geometry, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; zero functional feeding biomass produces zero corresponding observed population, while legacy herd/pack, herbivore/carnivore role, and named behavior labels remain descriptive compatibility scaffolding rather than explicit-lineage physics commands; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -162,6 +162,39 @@ export function approximateCellAreaKm2(cell) {
   return latSpan * KM_PER_DEGREE_LATITUDE * lonSpan * eastWestKm;
 }
 
+function functionalFeedingBiomass(state = {}) {
+  const animalBiomass = Number(state.animalBiomass);
+  if (!Number.isFinite(animalBiomass)) {
+    return Object.freeze({
+      unified: false,
+      plantMatterBiomass: clamp(state.herbivoreBiomass ?? 1, 0.01, 8),
+      livePreyBiomass: clamp(state.carnivoreBiomass ?? 1, 0.005, 8)
+    });
+  }
+
+  const aggregateBiomass = clamp(animalBiomass, 0, 8);
+  const storedPlant = Number(state.animalPlantMatterBiomass);
+  const storedLive = Number(state.animalLivePreyBiomass);
+  if (Number.isFinite(storedPlant) && Number.isFinite(storedLive)) {
+    return Object.freeze({
+      unified: true,
+      plantMatterBiomass: clamp(storedPlant, 0, 8),
+      livePreyBiomass: clamp(storedLive, 0, 8)
+    });
+  }
+
+  const plantShare = clamp01(state.animalPlantMatterShare ?? 0.5);
+  const liveShare = clamp01(state.animalLivePreyShare ?? 0.5);
+  const totalShare = plantShare + liveShare;
+  const normalizedPlantShare = totalShare > 1e-12 ? plantShare / totalShare : 0.5;
+  const normalizedLiveShare = totalShare > 1e-12 ? liveShare / totalShare : 0.5;
+  return Object.freeze({
+    unified: true,
+    plantMatterBiomass: aggregateBiomass * normalizedPlantShare,
+    livePreyBiomass: aggregateBiomass * normalizedLiveShare
+  });
+}
+
 export function faunaPopulationAt({
   state = {},
   vegetationSample = null,
@@ -171,21 +204,28 @@ export function faunaPopulationAt({
   areaKm2 = 1,
   key = "fauna"
 } = {}) {
-  const herbivoreBiomass = clamp(state.herbivoreBiomass ?? 1, 0.01, 8);
-  const carnivoreBiomass = clamp(state.carnivoreBiomass ?? 1, 0.005, 8);
+  const feedingBiomass = functionalFeedingBiomass(state);
+  const plantMatterBiomass = feedingBiomass.plantMatterBiomass;
+  const livePreyBiomass = feedingBiomass.livePreyBiomass;
   const npp = Math.max(0, Number(vegetationSample?.npp) || 0);
   const productivity = npp > 0
     ? clamp(Math.log1p(npp) / Math.log1p(2400), 0.04, 1)
     : clamp((state.productivityIndex ?? 1) / 1.5, 0.04, 1);
   const runoff = Math.max(0, Number(hydrologySample?.surfaceRunoffMmPerYear ?? hydrologySample?.runoffPotentialMmPerYear) || 0);
   const waterAccess = runoff > 0 ? clamp(0.32 + Math.log1p(runoff) / Math.log1p(1600) * 0.68, 0.32, 1) : 0.58;
-  const herbivoreDensity = clamp(
-    0.035 + 3.4 * herbivoreBiomass ** 0.72 * (0.24 + productivity * 0.76) * (0.52 + waterAccess * 0.48) * biomeFactor(Number(vegetationSample?.biomeCode)),
-    0,
-    40
-  );
-  const predatorPressure = clamp(carnivoreBiomass / Math.max(0.05, herbivoreBiomass), 0, 3);
-  const carnivoreDensity = clamp(herbivoreDensity * (0.012 + predatorPressure * 0.018), 0, 1.6);
+  const herbivoreDensity = plantMatterBiomass > 0
+    ? clamp(
+      0.035 + 3.4 * plantMatterBiomass ** 0.72 * (0.24 + productivity * 0.76) * (0.52 + waterAccess * 0.48) * biomeFactor(Number(vegetationSample?.biomeCode)),
+      0,
+      40
+    )
+    : 0;
+  const predatorPressure = livePreyBiomass > 0
+    ? clamp(livePreyBiomass / Math.max(0.05, plantMatterBiomass), 0, 3)
+    : 0;
+  const carnivoreDensity = livePreyBiomass > 0 && herbivoreDensity > 0
+    ? clamp(herbivoreDensity * (0.012 + predatorPressure * 0.018), 0, 1.6)
+    : 0;
   const preyPressure = clamp01(herbivoreDensity / 8);
   // Read-only aggregate temporal context from FreeEarthEngine. Local prey
   // support refines its visible consequence without creating a local writer.
@@ -194,7 +234,7 @@ export function faunaPopulationAt({
   const area = Math.max(0, Number(areaKm2) || 0);
   const herbivorePopulation = Math.max(0, Math.round(herbivoreDensity * area));
   const carnivorePopulation = Math.max(0, Math.round(carnivoreDensity * area));
-  const meanHerdSize = clamp(5 + productivity * 13 + herbivoreBiomass * 2.5, 4, 36);
+  const meanHerdSize = clamp(5 + productivity * 13 + plantMatterBiomass * 2.5, 4, 36);
   const meanPackSize = clamp(1.5 + preyPressure * 3.5, 1.5, 6);
 
   return Object.freeze({
@@ -204,6 +244,9 @@ export function faunaPopulationAt({
     latitude: Number(latitude) || 0,
     longitude: Number(longitude) || 0,
     areaKm2: area,
+    unifiedAnimalBiomass: feedingBiomass.unified,
+    plantMatterBiomass,
+    livePreyBiomass,
     herbivoreDensityAnimalsPerKm2: herbivoreDensity,
     carnivoreDensityAnimalsPerKm2: carnivoreDensity,
     herbivorePopulation,
