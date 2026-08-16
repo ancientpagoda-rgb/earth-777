@@ -32,7 +32,7 @@ export const CHECKPOINT_777 = Object.freeze({
     orbital: Object.freeze({ status: "Vavrus-anchored La2004 series", target: "Direct 1 kyr astronomical forcing", sources: ["ruddiman-2018-mis19", "la2004"] }),
     seaLevel: Object.freeze({ status: "reconstruction with uncertainty", target: "Spratt–Lisiecki five-record stack", sources: ["spratt-lisiecki-2016"] }),
     vegetation: Object.freeze({ status: "published Krapp BIOME4 777 ka biome/NPP/LAI checkpoint + model-derived hydro-CO₂ response + independent BIOME4 4.1 PFT climate eligibility, physiology/rooting/phenology, source-equation candidate hydrology, selected-region LAI/NPP optimization and fire/dryness diagnostics", target: "woody/grass competition, empirical classification and categorical biome transitions", sources: ["krapp-2021", "biome4-4.1-soil"] }),
-    fauna: Object.freeze({ status: "functional guilds", target: "Neotoma/PBDB evidence envelopes", sources: ["neotoma", "madingley"] }),
+    fauna: Object.freeze({ status: "one aggregate animal biomass pool + open lineages with continuous feeding affinities", target: "Neotoma/PBDB evidence envelopes", sources: ["neotoma", "madingley"] }),
     hominins: Object.freeze({ status: "aggregate lineage/population-index model", target: "ROAD evidence envelopes before explicit demography, sites, transport or conflict are reactivated", sources: ["road"] })
   })
 });
@@ -59,8 +59,11 @@ export function checkpointState() {
     magneticStrength: b.magneticDipoleStrength.value,
     magneticPolarity: b.magneticPolarity.value,
     productivityIndex: 1,
-    herbivoreBiomass: 1,
-    carnivoreBiomass: 1,
+    animalBiomass: 1,
+    // Temporary compatibility projections. AggregateFaunaEcology replaces
+    // these with lineage-derived complementary views during initialization.
+    herbivoreBiomass: 0.5,
+    carnivoreBiomass: 0.5,
     homininPopulationIndex: 1,
     branch: 1
   };
