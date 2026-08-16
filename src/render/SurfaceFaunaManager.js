@@ -223,16 +223,17 @@ export class SurfaceFaunaManager {
     const sliceBudgetMs = Math.max(0.05, Number(sliceMs) || 0.85);
     if (this.dirty) {
       const rebuildIntervalMs = faunaAdaptiveRebuildIntervalMs(this.lastRebuildDurationMs);
-      if (this.observed && started - this.lastRebuildAtMs < rebuildIntervalMs) {
+      const deferRebuild = this.observed && started - this.lastRebuildAtMs < rebuildIntervalMs;
+      if (deferRebuild) {
         this.deferredRebuildCount += 1;
-        return 0;
+      } else {
+        const rebuildStarted = performance.now();
+        this._rebuild(cells);
+        this.lastRebuildDurationMs = Math.max(0, performance.now() - rebuildStarted);
+        this.lastRebuildAtMs = performance.now();
+        this.rebuildCount += 1;
+        if (performance.now() - started >= sliceBudgetMs) return 0;
       }
-      const rebuildStarted = performance.now();
-      this._rebuild(cells);
-      this.lastRebuildDurationMs = Math.max(0, performance.now() - rebuildStarted);
-      this.lastRebuildAtMs = performance.now();
-      this.rebuildCount += 1;
-      if (performance.now() - started >= sliceBudgetMs) return 0;
     }
     const counts = Object.fromEntries(Object.entries(this.pools).map(([key, pool]) => [key, pool.count]));
     let work = 0;
