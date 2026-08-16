@@ -34,6 +34,20 @@ function meanLineageBodyMassLog10Kg(state, predicate, fallback = 0.4) {
   return lineages.reduce((sum, lineage) => sum + clamp(Number(lineage.bodyMassLog10Kg) || 0, -0.5, 3.5) * Math.max(0, Number(lineage.populationIndex) || 0), 0) / total;
 }
 
+function meanLineageThermalAdaptation(state, predicate, fallback = 1) {
+  const temperature = Number(state.temperatureAnomaly);
+  if (!Number.isFinite(temperature)) return fallback;
+  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null
+    && predicate(lineage)
+    && Number.isFinite(Number(lineage.thermalOptimumK)));
+  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
+  if (total <= 0) return fallback;
+  return lineages.reduce((sum, lineage) => {
+    const fit = Math.exp(-0.12 * (temperature - Number(lineage.thermalOptimumK)) ** 2);
+    return sum + fit * Math.max(0, Number(lineage.populationIndex) || 0);
+  }, 0) / total;
+}
+
 function applyAggregatePredation(state, dtYears) {
   const herbivoreBiomass = positive(state.herbivoreBiomass, 0.001);
   const carnivoreBiomass = positive(state.carnivoreBiomass, 0.001);
@@ -205,13 +219,17 @@ export class FreeEarthEngine {
     this.fidelity.recordExecution("vegetation", 1);
 
     this.fidelity.execute("herbivores", dt, (subDt) => {
-      const carryingCapacity = positive(state.productivityIndex * Math.exp(-0.16 * (state.iceIndex - b.iceIndex)), 0.01);
+      const thermalAdaptation = meanLineageThermalAdaptation(state, (lineage) => Number(lineage.trophicLevel) < 0.55);
+      state.herbivoreThermalAdaptationIndex = thermalAdaptation;
+      const carryingCapacity = positive(state.productivityIndex * Math.exp(-0.16 * (state.iceIndex - b.iceIndex)) * (0.42 + thermalAdaptation * 0.58), 0.01);
       state.herbivoreBiomass = positive(relax(state.herbivoreBiomass, carryingCapacity, subDt, 34), 0.001);
     });
 
     this.fidelity.execute("carnivores", dt, (subDt) => {
       applyAggregatePredation(state, subDt);
-      const preySupportedCapacity = positive(state.herbivoreBiomass ** 0.92 * state.productivityIndex ** 0.08, 0.001);
+      const thermalAdaptation = meanLineageThermalAdaptation(state, (lineage) => Number(lineage.trophicLevel) >= 0.55);
+      state.carnivoreThermalAdaptationIndex = thermalAdaptation;
+      const preySupportedCapacity = positive(state.herbivoreBiomass ** 0.92 * state.productivityIndex ** 0.08 * (0.42 + thermalAdaptation * 0.58), 0.001);
       state.carnivoreBiomass = positive(relax(state.carnivoreBiomass, preySupportedCapacity, subDt, 48), 0.001);
     });
 
@@ -290,6 +308,8 @@ export class FreeEarthEngine {
       predationExposureIndex: round(this.state.predationExposureIndex ?? 0, 4),
       predationMassCompatibilityIndex: round(this.state.predationMassCompatibilityIndex ?? 0, 4),
       predationHerbivoreLossPerYear: round(this.state.predationHerbivoreLossPerYear ?? 0, 6),
+      herbivoreThermalAdaptationIndex: round(this.state.herbivoreThermalAdaptationIndex ?? 1, 4),
+      carnivoreThermalAdaptationIndex: round(this.state.carnivoreThermalAdaptationIndex ?? 1, 4),
       speciesRichness: this.state.speciesRichness, evolutionaryNoveltyIndex: round(this.state.evolutionaryNoveltyIndex, 4),
       meanSpeciesCognitionIndex: round(this.state.meanSpeciesCognitionIndex, 4),
       homininPopulationIndex: round(this.state.homininPopulationIndex, 4), homininSpeciesRichness: this.state.homininSpeciesRichness,
