@@ -135,11 +135,12 @@ export function faunaPopulationAt({
     40
   );
   const predatorPressure = clamp(carnivoreBiomass / Math.max(0.05, herbivoreBiomass), 0, 3);
-  // Read-only aggregate temporal context from FreeEarthEngine. Observing or
-  // materializing fauna can never create or modify this state.
-  const predationExposure = clamp(state.predationExposureIndex ?? 0, 0, 3);
   const carnivoreDensity = clamp(herbivoreDensity * (0.012 + predatorPressure * 0.018), 0, 1.6);
   const preyPressure = clamp01(herbivoreDensity / 8);
+  // Read-only aggregate temporal context from FreeEarthEngine. Local prey
+  // support refines its visible consequence without creating a local writer.
+  const aggregatePredationExposure = clamp(state.predationExposureIndex ?? 0, 0, 3);
+  const predationExposure = aggregatePredationExposure * (0.32 + preyPressure * 0.68);
   const area = Math.max(0, Number(areaKm2) || 0);
   const herbivorePopulation = Math.max(0, Math.round(herbivoreDensity * area));
   const carnivorePopulation = Math.max(0, Math.round(carnivoreDensity * area));
@@ -164,6 +165,7 @@ export function faunaPopulationAt({
     productivity,
     waterAccess,
     predatorPressure,
+    aggregatePredationExposure,
     predationExposure,
     preyPressure,
     biomeCode: vegetationSample?.biomeCode ?? null

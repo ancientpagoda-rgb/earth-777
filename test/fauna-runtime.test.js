@@ -108,7 +108,21 @@ test("aggregate predation exposure raises derived herd threat without letting ob
 
   assert.equal(lowHistory.predatorPressure, highHistory.predatorPressure);
   assert.ok(high.threatIndex > low.threatIndex);
-  assert.equal(highHistory.predationExposure, 3);
+  assert.equal(highHistory.aggregatePredationExposure, 3);
+});
+
+test("local prey support refines aggregate predation exposure without introducing a local history writer", () => {
+  const options = {
+    state: { ...state, predationExposureIndex: 3 },
+    hydrologySample: hydrology,
+    areaKm2: 10
+  };
+  const supported = faunaPopulationAt({ ...options, vegetationSample: { biomeCode: 17, npp: 1_600 } });
+  const unsupported = faunaPopulationAt({ ...options, vegetationSample: { biomeCode: 28, npp: 30 } });
+
+  assert.equal(supported.aggregatePredationExposure, unsupported.aggregatePredationExposure);
+  assert.ok(supported.preyPressure > unsupported.preyPressure);
+  assert.ok(supported.predationExposure > unsupported.predationExposure);
 });
 
 test("observed fauna is deterministic for seed, place, and time", () => {
