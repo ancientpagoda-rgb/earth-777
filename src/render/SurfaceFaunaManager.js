@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { FAUNA_EPISTEMIC_STATUS, FAUNA_POLICY, buildObservedFauna, faunaForCells, faunaPopulationAt } from "../sim/FaunaRuntime.js";
+import { observedGroupViews } from "./FaunaRenderViews.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -169,8 +170,10 @@ export class SurfaceFaunaManager {
 
     for (const pool of Object.values(this.pools)) pool.clear();
     this.queue = [];
-    for (const herd of this.observed.herds) if (herd.representation === "herd") this.queue.push({ type: "herd", value: herd });
-    for (const pack of this.observed.packs) if (pack.representation === "pack") this.queue.push({ type: "pack", value: pack });
+    for (const group of observedGroupViews(this.observed)) {
+      if (group.representation === "herd") this.queue.push({ type: "herd", value: group });
+      else if (group.representation === "pack") this.queue.push({ type: "pack", value: group });
+    }
     for (const animal of this.observed.individuals) this.queue.push({ type: animal.role, value: animal });
     this.cursor = 0;
     this.dirty = false;
@@ -223,6 +226,7 @@ export class SurfaceFaunaManager {
       localEstimatedPacks: this.localFields.reduce((sum, field) => sum + field.estimatedPacks, 0),
       observedVisiblePopulation: this.observed?.visiblePopulation ?? 0,
       observedVisibleCarnivores: this.observed?.visibleCarnivorePopulation ?? 0,
+      observedGroups: this.observed ? observedGroupViews(this.observed).length : 0,
       observedHerds: this.observed?.herds.length ?? 0,
       observedPacks: this.observed?.packs.length ?? 0,
       materializedIndividuals: this.observed?.totalMaterializedPopulation ?? 0,
