@@ -67,6 +67,12 @@ function faunaCellsAround(latitude, longitude) {
   ]);
 }
 
+export function faunaCellWindowKey(latitude, longitude) {
+  const latIndex = clamp(Math.floor(clamp(latitude, -89.999999, 89.999999) + 90), 0, 179);
+  const lonIndex = ((Math.floor(wrapLongitude(longitude) + 180) % 360) + 360) % 360;
+  return `${latIndex}:${lonIndex}`;
+}
+
 export class SurfaceTerrainSystem extends TerrainChunkManager {
   constructor(scene, options = {}) {
     super(scene, options);
@@ -79,6 +85,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceContextActive = false;
     this.lastSurfaceContext = null;
     this.activeFaunaCells = Object.freeze([]);
+    this.activeFaunaCellKey = "";
     this.workCursor = 0;
     this.lastSurfacePump = Object.freeze({
       policy: "surface-direct-work-v1",
@@ -150,6 +157,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
 
   setOrigin(latitude, longitude) {
     super.setOrigin(latitude, longitude);
+    this.activeFaunaCellKey = faunaCellWindowKey(this.origin.latitude, this.origin.longitude);
     this.activeFaunaCells = faunaCellsAround(this.origin.latitude, this.origin.longitude);
     if (this.surfaceContextActive) this._refreshSurfaceContext();
   }
@@ -170,7 +178,11 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceFauna.updateCamera(cameraPosition);
     if (this.origin) {
       const focus = this._geographicAt(cameraPosition.x, cameraPosition.z);
-      this.activeFaunaCells = faunaCellsAround(focus.latitude, focus.longitude);
+      const cellKey = faunaCellWindowKey(focus.latitude, focus.longitude);
+      if (cellKey !== this.activeFaunaCellKey) {
+        this.activeFaunaCellKey = cellKey;
+        this.activeFaunaCells = faunaCellsAround(focus.latitude, focus.longitude);
+      }
     }
   }
 
@@ -238,6 +250,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
       worldStreaming: Object.freeze({
         policy: "surface-direct-work-v1",
         activeCellCount: this.activeFaunaCells.length,
+        activeCellWindowKey: this.activeFaunaCellKey,
         activeByScope: Object.freeze({
           regional: this.activeFaunaCells.filter((cell) => cell.scope === "regional").length,
           local: this.activeFaunaCells.filter((cell) => cell.scope === "local").length
@@ -265,6 +278,7 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     this.surfaceFauna?.dispose();
     this.surfaceFauna = null;
     this.activeFaunaCells = Object.freeze([]);
+    this.activeFaunaCellKey = "";
     this.lastSurfaceContext = null;
     super.dispose();
   }
