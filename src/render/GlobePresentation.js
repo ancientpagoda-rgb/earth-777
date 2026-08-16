@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-function createStars(count = 700) {
+export const GLOBE_MIN_DISTANCE = 1.425;
+export const GLOBE_MAX_DISTANCE = 120;
+export const STARFIELD_INNER_RADIUS = 180;
+export const STARFIELD_OUTER_RADIUS = 420;
+
+function createStars(count = 1400) {
   const positions = new Float32Array(count * 3);
   let state = 0x777001;
   const random = () => {
@@ -9,7 +14,7 @@ function createStars(count = 700) {
     return state / 4294967296;
   };
   for (let i = 0; i < count; i += 1) {
-    const radius = 18 + random() * 22;
+    const radius = STARFIELD_INNER_RADIUS + random() * (STARFIELD_OUTER_RADIUS - STARFIELD_INNER_RADIUS);
     const theta = random() * Math.PI * 2;
     const phi = Math.acos(2 * random() - 1);
     positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
@@ -20,7 +25,14 @@ function createStars(count = 700) {
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   return new THREE.Points(
     geometry,
-    new THREE.PointsMaterial({ color: 0xb8c9c0, size: 0.035, transparent: true, opacity: 0.66, sizeAttenuation: true })
+    new THREE.PointsMaterial({
+      color: 0xb8c9c0,
+      size: 1.15,
+      transparent: true,
+      opacity: 0.7,
+      sizeAttenuation: false,
+      fog: false
+    })
   );
 }
 
@@ -28,14 +40,14 @@ export function createGlobePresentation(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x030907);
   scene.fog = new THREE.FogExp2(0x030907, 0.004);
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.001, 500);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.001, 700);
   camera.position.set(0, 0.7, 4.25);
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.055;
   controls.enablePan = false;
-  controls.minDistance = 1.425;
-  controls.maxDistance = 120;
+  controls.minDistance = GLOBE_MIN_DISTANCE;
+  controls.maxDistance = GLOBE_MAX_DISTANCE;
   controls.rotateSpeed = 0.48;
   controls.zoomSpeed = 1.0;
 
