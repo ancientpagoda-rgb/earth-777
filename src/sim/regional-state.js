@@ -1,4 +1,5 @@
 import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
+import { projectAnimalPopulation } from "./AnimalPopulationProjection.js";
 import { faunaPopulationAt } from "./FaunaRuntime.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -14,9 +15,11 @@ function regionalFaunaAggregate(globalState, vegetationState, hydro, latitude, l
     areaKm2: 1,
     key: "regional-aggregate"
   });
+  const lineagePopulationProjection = projectAnimalPopulation(globalState);
   return Object.freeze({
     policy: field.policy,
     epistemicStatus: field.epistemicStatus,
+    lineagePopulationProjection,
     herbivoreDensityAnimalsPerKm2: field.herbivoreDensityAnimalsPerKm2,
     carnivoreDensityAnimalsPerKm2: field.carnivoreDensityAnimalsPerKm2,
     meanHerdSize: field.meanHerdSize,
