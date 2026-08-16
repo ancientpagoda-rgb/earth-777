@@ -299,6 +299,7 @@ test("predator targeting produces bounded approach and direct herd threat respon
     assert.equal(threat.targetGroupId, herd.id);
     assert.equal(herd.threatLineageId, threat.lineageId);
     assert.equal(herd.behavior, "flee");
+    assert.ok(herd.threatDistanceBeforeKm <= herd.threatPerceptionRadiusKm + 1e-12);
     assert.ok(herd.threatenedByCount >= 1);
     const expectedAwayHeading = Math.atan2(herd.z - threat.z, herd.x - threat.x);
     assert.ok(Math.abs(herd.heading - expectedAwayHeading) < 1e-12);

@@ -313,6 +313,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       sociality: lineage ? traits.sociality : null,
       dietBreadth: lineage ? traits.dietBreadth : null,
       cognition: lineage ? traits.cognition : null,
+      threatPerceptionRadiusKm: role === "herbivore" ? herdThreatPerceptionRadiusKm({ mobility: traits.mobility, sociality: traits.sociality, cognition: traits.cognition }) : null,
       bodyMassLog10Kg: lineage?.bodyMassLog10Kg ?? null,
       trophicLevel: lineage?.trophicLevel ?? null
     }));
@@ -360,6 +361,13 @@ function predatorPerceptionRadiusKm(pack) {
   const cognition = clamp01(pack?.cognition ?? 0.5);
   const mobility = clamp01(pack?.mobility ?? 0.5);
   return clamp(0.38 + cognition * 2.85 + mobility * 0.42, 0.38, 3.65);
+}
+
+function herdThreatPerceptionRadiusKm(herd) {
+  const cognition = clamp01(herd?.cognition ?? 0.5);
+  const sociality = clamp01(herd?.sociality ?? 0.5);
+  const mobility = clamp01(herd?.mobility ?? 0.5);
+  return clamp(0.3 + cognition * 2.1 + sociality * 0.72 + mobility * 0.32, 0.3, 3.44);
 }
 
 function targetPredatorPacks(packs, herds) {
@@ -410,11 +418,17 @@ function targetPredatorPacks(packs, herds) {
 
 function respondTargetedHerds(herds, packs) {
   if (!herds?.length || !packs?.length) return Object.freeze(herds ?? []);
+  const herdById = new Map(herds.map((herd) => [herd.id, herd]));
   const threatsByHerd = new Map();
   for (const pack of packs) {
     if (pack.targetGroupId == null) continue;
+    const herd = herdById.get(pack.targetGroupId);
+    if (!herd) continue;
+    const threatPerceptionRadiusKm = herdThreatPerceptionRadiusKm(herd);
+    const distanceKm = Math.hypot(herd.x - pack.x, herd.z - pack.z);
+    if (distanceKm > threatPerceptionRadiusKm) continue;
     const threats = threatsByHerd.get(pack.targetGroupId) ?? [];
-    threats.push(pack);
+    threats.push(Object.freeze({ ...pack, herdThreatPerceptionRadiusKm: threatPerceptionRadiusKm }));
     threatsByHerd.set(pack.targetGroupId, threats);
   }
   if (!threatsByHerd.size) return Object.freeze(herds);
@@ -451,6 +465,7 @@ function respondTargetedHerds(herds, packs) {
       threatLineageId: nearest.lineageId ?? null,
       threatDistanceKm,
       threatDistanceBeforeKm,
+      threatPerceptionRadiusKm: nearest.herdThreatPerceptionRadiusKm,
       threatenedByCount: threats.length,
       fleeDistanceKm,
       fleeXKm,
