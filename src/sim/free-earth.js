@@ -27,6 +27,13 @@ function meanLineageTrait(state, predicate, key, fallback = 0.5) {
   return lineages.reduce((sum, lineage) => sum + clamp(Number(lineage[key]) || 0, 0, 1) * Math.max(0, Number(lineage.populationIndex) || 0), 0) / total;
 }
 
+function meanLineageBodyMassLog10Kg(state, predicate, fallback = 0.4) {
+  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null && predicate(lineage));
+  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
+  if (total <= 0) return fallback;
+  return lineages.reduce((sum, lineage) => sum + clamp(Number(lineage.bodyMassLog10Kg) || 0, -0.5, 3.5) * Math.max(0, Number(lineage.populationIndex) || 0), 0) / total;
+}
+
 function applyAggregatePredation(state, dtYears) {
   const herbivoreBiomass = positive(state.herbivoreBiomass, 0.001);
   const carnivoreBiomass = positive(state.carnivoreBiomass, 0.001);
@@ -35,14 +42,18 @@ function applyAggregatePredation(state, dtYears) {
   const preyMobility = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "mobility");
   const preySociality = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "sociality");
   const preyCognition = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "cognition");
+  const predatorBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, (lineage) => Number(lineage.trophicLevel) >= 0.55);
+  const preyBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, (lineage) => Number(lineage.trophicLevel) < 0.55);
   const huntingEffectiveness = clamp(0.22 + predatorMobility * 0.46 + predatorCognition * 0.32, 0.05, 1);
   const escapeEffectiveness = clamp(0.18 + preyMobility * 0.38 + preySociality * 0.28 + preyCognition * 0.16, 0.05, 1);
+  const massCompatibility = Math.exp(-0.55 * Math.abs((preyBodyMassLog10Kg - predatorBodyMassLog10Kg) - 0.45));
   const preyAvailability = herbivoreBiomass / (herbivoreBiomass + 0.28);
-  const pressure = carnivoreBiomass * preyAvailability * huntingEffectiveness * (1 - escapeEffectiveness * 0.72);
+  const pressure = carnivoreBiomass * preyAvailability * huntingEffectiveness * massCompatibility * (1 - escapeEffectiveness * 0.72);
   const lossRatePerYear = 0.003 + pressure * 0.012;
   const loss = herbivoreBiomass * (1 - Math.exp(-Math.max(0, dtYears) * lossRatePerYear));
   state.herbivoreBiomass = positive(herbivoreBiomass - loss, 0.001);
   state.predationPressureIndex = pressure;
+  state.predationMassCompatibilityIndex = massCompatibility;
   state.predationHerbivoreLossPerYear = loss / Math.max(1e-9, dtYears);
 }
 
@@ -265,6 +276,7 @@ export class FreeEarthEngine {
       productivityIndex: round(this.state.productivityIndex, 4),
       herbivoreBiomass: round(this.state.herbivoreBiomass, 4), carnivoreBiomass: round(this.state.carnivoreBiomass, 4),
       predationPressureIndex: round(this.state.predationPressureIndex ?? 0, 4),
+      predationMassCompatibilityIndex: round(this.state.predationMassCompatibilityIndex ?? 0, 4),
       predationHerbivoreLossPerYear: round(this.state.predationHerbivoreLossPerYear ?? 0, 6),
       speciesRichness: this.state.speciesRichness, evolutionaryNoveltyIndex: round(this.state.evolutionaryNoveltyIndex, 4),
       meanSpeciesCognitionIndex: round(this.state.meanSpeciesCognitionIndex, 4),
