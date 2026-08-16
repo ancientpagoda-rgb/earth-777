@@ -65,6 +65,30 @@ test("different branches diverge while concentrations remain physical rather tha
   }
 });
 
+test("aggregate ecology converts predator and prey lineage traits into bounded prey loss", () => {
+  const configure = (predatorTraits, preyTraits) => {
+    const engine = new FreeEarthEngine(991);
+    engine.state.herbivoreBiomass = 4;
+    engine.state.carnivoreBiomass = 2;
+    engine.state.speciesLineages = [
+      { id: 1, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, mobility: 0.5, sociality: 0.5, cognition: 0.5, ...preyTraits },
+      { id: 2, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.8, mobility: 0.5, sociality: 0.5, cognition: 0.5, ...predatorTraits }
+    ];
+    return engine.advance(25);
+  };
+  const effectivePredators = configure({ mobility: 1, cognition: 1 }, { mobility: 0, sociality: 0, cognition: 0 });
+  const defendedPrey = configure({ mobility: 0, cognition: 0 }, { mobility: 1, sociality: 1, cognition: 1 });
+
+  assert.ok(effectivePredators.predationPressureIndex > defendedPrey.predationPressureIndex);
+  assert.ok(effectivePredators.predationHerbivoreLossPerYear > defendedPrey.predationHerbivoreLossPerYear);
+  assert.ok(effectivePredators.herbivoreBiomass < defendedPrey.herbivoreBiomass);
+  for (const state of [effectivePredators, defendedPrey]) {
+    assert.ok(state.herbivoreBiomass > 0);
+    assert.ok(state.carnivoreBiomass > 0);
+    assert.ok(state.predationHerbivoreLossPerYear > 0);
+  }
+});
+
 test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
   const engine = new FreeEarthEngine(77);
   engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;
