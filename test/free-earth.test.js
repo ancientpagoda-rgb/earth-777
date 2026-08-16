@@ -89,6 +89,34 @@ test("aggregate ecology converts predator and prey lineage traits into bounded p
   }
 });
 
+test("same-step aggregate predation feeds defensive lineage selection", () => {
+  const advance = (predatorCapacity) => {
+    const engine = new FreeEarthEngine(991);
+    engine.evolutionRandom = () => 1;
+    engine.state.herbivoreBiomass = 4;
+    engine.state.carnivoreBiomass = 2;
+    engine.state.speciesLineages = [
+      { id: 1, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.1, plantMatterAffinity: 0.9, livePreyAffinity: 0.1, carrionAffinity: 0, bodyMassLog10Kg: 1, thermalOptimumK: -1, mobility: 0, sociality: 0, cognition: 0, dietBreadth: 0.5, divergence: 0 },
+      { id: 2, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.1, plantMatterAffinity: 0.9, livePreyAffinity: 0.1, carrionAffinity: 0, bodyMassLog10Kg: 1, thermalOptimumK: -1, mobility: 1, sociality: 1, cognition: 1, dietBreadth: 0.5, divergence: 0 },
+      { id: 3, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.9, plantMatterAffinity: 0.1, livePreyAffinity: 0.9, carrionAffinity: 0, bodyMassLog10Kg: 0.7, thermalOptimumK: -1, mobility: predatorCapacity, sociality: 0.5, cognition: predatorCapacity, dietBreadth: 0.2, divergence: 0 }
+    ];
+    engine.advance(25);
+    return {
+      pressure: engine.state.predationPressureIndex,
+      vulnerable: engine.state.speciesLineages[0].populationIndex,
+      defended: engine.state.speciesLineages[1].populationIndex
+    };
+  };
+
+  const lowPredation = advance(0);
+  const highPredation = advance(1);
+  const lowDefensiveAdvantage = lowPredation.defended - lowPredation.vulnerable;
+  const highDefensiveAdvantage = highPredation.defended - highPredation.vulnerable;
+
+  assert.ok(highPredation.pressure > lowPredation.pressure);
+  assert.ok(highDefensiveAdvantage > lowDefensiveAdvantage);
+});
+
 test("aggregate predation prefers compatible predator and prey body masses", () => {
   const configure = (predatorMass, preyMass) => {
     const engine = new FreeEarthEngine(992);
