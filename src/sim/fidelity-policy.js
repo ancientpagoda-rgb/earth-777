@@ -16,8 +16,7 @@ const BASE_NODES = Object.freeze([
   { id: "seaLevel", localUncertainty: 0.30, evidence: "simulated ice-volume + ocean-heat response; reconstruction retained only for validation" },
   { id: "hydrology", localUncertainty: 0.36, evidence: "study-constrained BIOME4 soil + model-derived closed water balance, branch hydroclimate and ETOPO river routing" },
   { id: "vegetation", localUncertainty: 0.40, evidence: "BIOME4 physiology + optimized PFT competition and lagged branch succession" },
-  { id: "herbivores", localUncertainty: 0.56, evidence: "energy-limited biomass coupled to species lineages" },
-  { id: "carnivores", localUncertainty: 0.60, evidence: "prey-supported biomass coupled to species lineages" },
+  { id: "fauna", localUncertainty: 0.60, evidence: "one energy-limited aggregate animal biomass coupled to continuous lineage feeding affinities and predation" },
   { id: "evolution", localUncertainty: 0.70, evidence: "open anonymous lineage adaptation, competition, speciation and extinction" },
   { id: "hominins", localUncertainty: 0.70, evidence: "species-resolved hominin lineage ecology with culture/tool traits internal to the lineage model" },
   { id: "magnetism", localUncertainty: 0.40, evidence: "reversal chronology constrained; secular field dynamics provisional" }
@@ -58,17 +57,15 @@ const EDGES = Object.freeze([
   { from: "vegetation", to: "carbon", strength: 0.28 },
   { from: "vegetation", to: "methane", strength: 0.22 },
   { from: "vegetation", to: "nitrogen", strength: 0.26 },
-  { from: "vegetation", to: "herbivores", strength: 0.86 },
-  { from: "herbivores", to: "vegetation", strength: 0.22 },
-  { from: "herbivores", to: "carnivores", strength: 0.84 },
+  { from: "vegetation", to: "fauna", strength: 0.86 },
+  { from: "climate", to: "fauna", strength: 0.55 },
+  { from: "fauna", to: "vegetation", strength: 0.22 },
   { from: "climate", to: "evolution", strength: 0.50 },
   { from: "vegetation", to: "evolution", strength: 0.52 },
-  { from: "herbivores", to: "evolution", strength: 0.58 },
-  { from: "carnivores", to: "evolution", strength: 0.44 },
-  { from: "evolution", to: "herbivores", strength: 0.34 },
-  { from: "evolution", to: "carnivores", strength: 0.34 },
+  { from: "fauna", to: "evolution", strength: 0.62 },
+  { from: "evolution", to: "fauna", strength: 0.34 },
   { from: "vegetation", to: "hominins", strength: 0.55 },
-  { from: "herbivores", to: "hominins", strength: 0.44 },
+  { from: "fauna", to: "hominins", strength: 0.44 },
   { from: "evolution", to: "hominins", strength: 0.24 },
   { from: "climate", to: "hominins", strength: 0.40 },
   { from: "magnetism", to: "hominins", strength: 0.05 }
@@ -77,22 +74,20 @@ const EDGES = Object.freeze([
 const SENSITIVITY = Object.freeze({
   orbit: 0.92, geology: 0.54, tectonics: 0.72, carbon: 0.94, methane: 0.82, nitrogen: 0.76,
   climate: 1.00, ocean: 0.92, ice: 0.95, seaLevel: 0.72, hydrology: 0.88,
-  vegetation: 0.84, herbivores: 0.64, carnivores: 0.52, evolution: 0.66,
-  hominins: 0.66, magnetism: 0.24
+  vegetation: 0.84, fauna: 0.64, evolution: 0.66, hominins: 0.66, magnetism: 0.24
 });
 
 const COMPUTE_COST = Object.freeze({
   orbit: 0.12, geology: 0.16, tectonics: 0.34, carbon: 0.36, methane: 0.24, nitrogen: 0.28,
   climate: 1.00, ocean: 0.48, ice: 0.82, seaLevel: 0.34, hydrology: 0.72,
-  vegetation: 0.64, herbivores: 0.62, carnivores: 0.68, evolution: 0.78,
-  hominins: 0.88, magnetism: 0.42
+  vegetation: 0.64, fauna: 0.72, evolution: 0.78, hominins: 0.88, magnetism: 0.42
 });
 
 function localUncertaintyFor(node, state) {
   if (node.id === "seaLevel" && Number.isFinite(state?.seaLevelUncertainty)) {
     return clamp01(0.18 + state.seaLevelUncertainty / 45);
   }
-  if (["climate", "hydrology", "vegetation", "ocean", "tectonics", "evolution", "hominins"].includes(node.id)) {
+  if (["climate", "hydrology", "vegetation", "ocean", "tectonics", "fauna", "evolution", "hominins"].includes(node.id)) {
     const elapsed = clamp01((state?.elapsedYears ?? 0) / 777_000);
     const divergencePenalty = node.id === "climate" ? 0.18
       : node.id === "hydrology" ? 0.24
@@ -118,8 +113,7 @@ function activityFor(id, state) {
     case "seaLevel": return clamp01(0.45 + Math.abs((state?.seaLevel ?? -12.76) + 12.76) / 140);
     case "hydrology": return clamp01(0.48 + Math.abs((state?.temperatureAnomaly ?? -1.27) + 1.27) / 7 + Math.abs((state?.iceIndex ?? 0.18) - 0.18) * 0.35);
     case "vegetation": return clamp01(0.50 + Math.abs(Math.log(Math.max(1e-6, state?.productivityIndex ?? 1))) * 0.8);
-    case "herbivores": return clamp01(0.45 + Math.abs(Math.log(Math.max(1e-6, state?.herbivoreBiomass ?? 1))) * 0.7);
-    case "carnivores": return clamp01(0.40 + Math.abs(Math.log(Math.max(1e-6, state?.carnivoreBiomass ?? 1))) * 0.7);
+    case "fauna": return clamp01(0.45 + Math.abs(Math.log(Math.max(1e-6, state?.animalBiomass ?? 1))) * 0.7 + Math.min(0.2, state?.predationPressureIndex ?? 0) * 0.25);
     case "evolution": return clamp01(0.42 + Math.min(0.45, (state?.speciesRichness ?? 12) / 80) + Math.min(0.25, state?.evolutionaryNoveltyIndex ?? 0));
     case "hominins": return clamp01(0.42 + Math.abs(Math.log(Math.max(1e-6, state?.homininPopulationIndex ?? 1))) * 0.55 + Math.min(0.2, (state?.homininSpeciesRichness ?? 2) / 20));
     case "magnetism": return clamp01(0.28 + Math.abs(1 - (state?.magneticStrength ?? 1)) * 0.72);
@@ -152,7 +146,7 @@ export function createFidelityPlan(state = {}, { budget = 1, observerRelevance =
   }));
 
   return Object.freeze({
-    policy: "consequence-weighted-fidelity-v2",
+    policy: "consequence-weighted-fidelity-v3",
     epistemicStatus: "simulation policy metadata; not a scientific measurement",
     graphConverged: analysis.converged,
     graphIterations: analysis.iterations,
