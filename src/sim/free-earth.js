@@ -216,8 +216,14 @@ export class FreeEarthEngine {
     const iceAvailability = Math.exp(-0.72 * (state.iceIndex - b.iceIndex));
     // Vegetation remains the sole productivity writer. Aggregate herbivore
     // biomass is a read-only consumer pressure, not a second vegetation model.
-    const grazingPressure = clamp(positive(state.herbivoreBiomass, 0) / (positive(state.herbivoreBiomass, 0) + 1.25), 0, 1);
+    const herbivoreDietBreadth = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "dietBreadth");
+    const grazingPressure = clamp(
+      positive(state.herbivoreBiomass, 0) / (positive(state.herbivoreBiomass, 0) + 1.25) * (1 - herbivoreDietBreadth * 0.26),
+      0,
+      1
+    );
     state.grazingPressureIndex = grazingPressure;
+    state.herbivoreDietBreadthIndex = herbivoreDietBreadth;
     const grazingImpact = 1 - grazingPressure * 0.14;
     const productivityTarget = positive(co2Saturation ** 0.48 * temperatureSuitability * nitrogenAvailability ** 0.16 * iceAvailability * grazingImpact, 0.01);
     state.productivityIndex = positive(relax(state.productivityIndex, productivityTarget, dt, 55), 0.01);
@@ -314,6 +320,7 @@ export class FreeEarthEngine {
       predationMassCompatibilityIndex: round(this.state.predationMassCompatibilityIndex ?? 0, 4),
       predationHerbivoreLossPerYear: round(this.state.predationHerbivoreLossPerYear ?? 0, 6),
       grazingPressureIndex: round(this.state.grazingPressureIndex ?? 0, 4),
+      herbivoreDietBreadthIndex: round(this.state.herbivoreDietBreadthIndex ?? 0.5, 4),
       herbivoreThermalAdaptationIndex: round(this.state.herbivoreThermalAdaptationIndex ?? 1, 4),
       carnivoreThermalAdaptationIndex: round(this.state.carnivoreThermalAdaptationIndex ?? 1, 4),
       speciesRichness: this.state.speciesRichness, evolutionaryNoveltyIndex: round(this.state.evolutionaryNoveltyIndex, 4),
