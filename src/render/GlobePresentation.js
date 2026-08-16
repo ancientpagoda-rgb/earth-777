@@ -32,12 +32,20 @@ export function createGlobePresentation(canvas) {
   camera.position.set(0, 0.7, 4.25);
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.055;
+  controls.dampingFactor = 0.09;
   controls.enablePan = false;
   controls.minDistance = 1.425;
   controls.maxDistance = 120;
-  controls.rotateSpeed = 0.48;
+  controls.rotateSpeed = 0.54;
   controls.zoomSpeed = -1.0;
+
+  // Direct manipulation should track the pointer immediately. OrbitControls'
+  // damping is useful after keyboard/gamepad motion, but applying it while a
+  // mouse or touch drag is active makes the globe visibly trail the pointer.
+  // Disable damping only for the active gesture, then restore a small amount
+  // of smoothing once the gesture ends.
+  controls.addEventListener("start", () => { controls.enableDamping = false; });
+  controls.addEventListener("end", () => { controls.enableDamping = true; });
 
   const earthMaterial = new THREE.MeshStandardMaterial({
     color: 0x36503c,
