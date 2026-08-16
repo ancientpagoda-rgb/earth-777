@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { FAUNA_EPISTEMIC_STATUS, FAUNA_POLICY, buildObservedFauna, faunaForCells, faunaPopulationAt } from "../sim/FaunaRuntime.js";
-import { observedGroupViews } from "./FaunaRenderViews.js";
+import { faunaGroupRenderShape, observedGroupViews } from "./FaunaRenderViews.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -112,8 +112,7 @@ export class SurfaceFaunaManager {
     this.deferredRebuildCount = 0;
 
     this.pools = {
-      herd: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0042, 6, 4), new THREE.MeshStandardMaterial({ color: 0x62503a, roughness: 1, transparent: true, opacity: 0.72 }), 256),
-      pack: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0034, 6, 4), new THREE.MeshStandardMaterial({ color: 0x493a34, roughness: 1, transparent: true, opacity: 0.76 }), 128),
+      group: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0040, 6, 4), new THREE.MeshStandardMaterial({ color: 0x55483a, roughness: 1, transparent: true, opacity: 0.74 }), 384),
       herbivore: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0012, 5, 3), new THREE.MeshStandardMaterial({ color: 0x4b3c2d, roughness: 1 }), 512),
       carnivore: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0010, 5, 3), new THREE.MeshStandardMaterial({ color: 0x342c29, roughness: 1 }), 256)
     };
@@ -197,8 +196,7 @@ export class SurfaceFaunaManager {
     for (const pool of Object.values(this.pools)) pool.clear();
     this.queue = [];
     for (const group of observedGroupViews(this.observed)) {
-      if (group.representation === "herd") this.queue.push({ type: "herd", value: group });
-      else if (group.representation === "pack") this.queue.push({ type: "pack", value: group });
+      if (group.representation !== "individuals") this.queue.push({ type: "group", value: group });
     }
     for (const animal of this.observed.individuals) this.queue.push({ type: animal.role, value: animal });
     this.cursor = 0;
@@ -241,10 +239,19 @@ export class SurfaceFaunaManager {
     while (this.cursor < this.queue.length && performance.now() - started < sliceBudgetMs) {
       const item = this.queue[this.cursor++];
       const actor = item.value;
-      if (item.type === "herd" || item.type === "pack") {
+      if (item.type === "group") {
         const scale = clamp(0.8 + Math.log1p(actor.population) * 0.36, 0.8, 2.8);
-        const isPack = item.type === "pack";
-        if (this._place(this.pools[item.type], counts[item.type], actor.x, actor.z, scale * (isPack ? 1.6 : 2.3), scale * (isPack ? 0.62 : 0.72), scale, actor.heading)) counts[item.type] += 1;
+        const shape = faunaGroupRenderShape(actor);
+        if (this._place(
+          this.pools.group,
+          counts.group,
+          actor.x,
+          actor.z,
+          scale * shape.longitudinalScale,
+          scale * shape.verticalScale,
+          scale * shape.lateralScale,
+          actor.heading
+        )) counts.group += 1;
       } else {
         const isCarnivore = item.type === "carnivore";
         if (this._place(this.pools[item.type], counts[item.type], actor.x, actor.z, actor.scale * (isCarnivore ? 1.55 : 1.8), actor.scale, actor.scale * 0.8, actor.yaw)) counts[item.type] += 1;
