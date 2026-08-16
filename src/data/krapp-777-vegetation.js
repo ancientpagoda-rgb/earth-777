@@ -34,6 +34,35 @@ async function gunzip(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+async function resolveVegetationPayload(received, verifyChecksum) {
+  let raw;
+  if (received.byteLength === KRAPP_777_VEGETATION_META.compressedBytes) {
+    if (verifyChecksum) {
+      const digest = await sha256Hex(received);
+      if (digest !== KRAPP_777_VEGETATION_META.assetSha256) throw new Error(`Krapp vegetation compressed SHA-256 mismatch: ${digest}`);
+    }
+    raw = await gunzip(received);
+  } else if (received.byteLength === KRAPP_777_VEGETATION_META.uncompressedBytes) {
+    // Browsers may transparently decode a gzip response according to its HTTP
+    // Content-Encoding header. Accept that transport form, but verify the raw
+    // bytes independently before exposing the scientific layer.
+    raw = received;
+  } else {
+    throw new Error(
+      `Krapp vegetation response length ${received.byteLength} matches neither compressed metadata ${KRAPP_777_VEGETATION_META.compressedBytes} nor uncompressed metadata ${KRAPP_777_VEGETATION_META.uncompressedBytes}.`
+    );
+  }
+
+  if (raw.byteLength !== KRAPP_777_VEGETATION_META.uncompressedBytes) {
+    throw new Error(`Krapp vegetation payload length ${raw.byteLength} does not match metadata ${KRAPP_777_VEGETATION_META.uncompressedBytes}.`);
+  }
+  if (verifyChecksum) {
+    const digest = await sha256Hex(raw);
+    if (digest !== KRAPP_777_VEGETATION_META.uncompressedSha256) throw new Error(`Krapp vegetation uncompressed SHA-256 mismatch: ${digest}`);
+  }
+  return raw;
+}
+
 export class Krapp777VegetationLayer {
   constructor(rawBytes, meta = KRAPP_777_VEGETATION_META) {
     const bytes = rawBytes instanceof Uint8Array
@@ -174,15 +203,8 @@ export async function loadKrapp777Vegetation({ fetchImpl = globalThis.fetch, url
   const assetUrl = url ?? `${base.replace(/\/?$/, "/")}${KRAPP_777_VEGETATION_META.asset.replace(/^\/+/, "")}`;
   const response = await fetchImpl(assetUrl);
   if (!response.ok) throw new Error(`Failed to load Krapp 777 ka vegetation asset: HTTP ${response.status}`);
-  const compressed = new Uint8Array(await response.arrayBuffer());
-  if (compressed.byteLength !== KRAPP_777_VEGETATION_META.compressedBytes) {
-    throw new Error(`Krapp vegetation compressed length ${compressed.byteLength} does not match metadata ${KRAPP_777_VEGETATION_META.compressedBytes}.`);
-  }
-  if (verifyChecksum) {
-    const digest = await sha256Hex(compressed);
-    if (digest !== KRAPP_777_VEGETATION_META.assetSha256) throw new Error(`Krapp vegetation SHA-256 mismatch: ${digest}`);
-  }
-  const raw = await gunzip(compressed);
+  const received = new Uint8Array(await response.arrayBuffer());
+  const raw = await resolveVegetationPayload(received, verifyChecksum);
   return new Krapp777VegetationLayer(raw, KRAPP_777_VEGETATION_META);
 }
 
