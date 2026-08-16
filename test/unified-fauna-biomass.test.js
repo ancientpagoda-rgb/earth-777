@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { FreeEarthEngine } from "../src/sim/free-earth.js";
 import {
+  advanceAggregateFauna,
   aggregateFeedingShares,
   syncAggregateFaunaProjections
 } from "../src/sim/AggregateFaunaEcology.js";
@@ -58,6 +59,21 @@ test("an omnivorous lineage partitions one biomass pool instead of appearing in 
   assert.ok(Math.abs(shares.livePreyShare - 0.4) < 1e-12);
   assert.ok(Math.abs(engine.state.herbivoreBiomass - engine.state.animalBiomass * 0.6) < 1e-12);
   assert.ok(Math.abs(engine.state.carnivoreBiomass - engine.state.animalBiomass * 0.4) < 1e-12);
+  assertPartition(engine.state);
+});
+
+test("zero live-prey demand produces zero aggregate predation mortality", () => {
+  const engine = new FreeEarthEngine(777005);
+  engine.state.speciesLineages = [lineage({ trophicLevel: 0, plantMatterAffinity: 1, livePreyAffinity: 0, carrionAffinity: 0 })];
+  syncAggregateFaunaProjections(engine.state);
+  const before = engine.state.animalBiomass;
+
+  advanceAggregateFauna(engine.state, 25, { baselineIceIndex: 0.18 });
+
+  assert.equal(engine.state.predationPressureIndex, 0);
+  assert.equal(engine.state.predationAnimalLossPerYear, 0);
+  assert.ok(engine.state.animalBiomass > 0);
+  assert.notEqual(engine.state.animalBiomass, before);
   assertPartition(engine.state);
 });
 
