@@ -147,6 +147,28 @@ test("aggregate predation exposure retains recent pressure after instantaneous p
   assert.ok(released.predationExposureIndex < pressured.predationExposureIndex);
 });
 
+test("lineage thermal adaptation changes aggregate ecological carrying capacity", () => {
+  const configure = (herbivoreThermalOptimumK, carnivoreThermalOptimumK) => {
+    const engine = new FreeEarthEngine(995);
+    engine.state.temperatureAnomaly = 3;
+    engine.state.oceanTemperatureAnomaly = 3;
+    engine.state.herbivoreBiomass = 0.25;
+    engine.state.carnivoreBiomass = 0.05;
+    engine.state.speciesLineages = [
+      { id: 1, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, thermalOptimumK: herbivoreThermalOptimumK, mobility: 0.5, sociality: 0.5, cognition: 0.5 },
+      { id: 2, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.8, thermalOptimumK: carnivoreThermalOptimumK, mobility: 0.5, sociality: 0.5, cognition: 0.5, dietBreadth: 0.5 }
+    ];
+    return engine.advance(25);
+  };
+  const adapted = configure(3, 3);
+  const mismatched = configure(-4, -4);
+
+  assert.ok(adapted.herbivoreThermalAdaptationIndex > mismatched.herbivoreThermalAdaptationIndex);
+  assert.ok(adapted.carnivoreThermalAdaptationIndex > mismatched.carnivoreThermalAdaptationIndex);
+  assert.ok(adapted.herbivoreBiomass > mismatched.herbivoreBiomass);
+  assert.ok(adapted.carnivoreBiomass > mismatched.carnivoreBiomass);
+});
+
 test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
   const engine = new FreeEarthEngine(77);
   engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;
