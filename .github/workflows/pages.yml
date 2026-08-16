@@ -39,7 +39,7 @@ jobs:
       - name: Build for GitHub Pages
         run: npm run build -- --base=/earth-777/
 
-      - name: Browser smoke test
+      - name: Browser smoke and interaction playtest
         shell: bash
         run: |
           PREVIEW_PID=""
@@ -99,6 +99,12 @@ jobs:
           done
 
           if ! node test/cdp-smoke.mjs "$WS_ENDPOINT"; then
+            cat /tmp/earth-777-preview.log
+            cat /tmp/earth-777-chrome.log
+            exit 1
+          fi
+
+          if ! node test/cdp-playtest.mjs "$WS_ENDPOINT"; then
             cat /tmp/earth-777-preview.log
             cat /tmp/earth-777-chrome.log
             exit 1
