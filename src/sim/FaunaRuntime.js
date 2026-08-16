@@ -5,8 +5,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v18";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous threat/resource/pursuit locomotion drives, perceived-threat response, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and named behavior labels remain descriptive compatibility scaffolding rather than lineage, targeting, or locomotion commands; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v19";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous threat/resource/pursuit locomotion drives, perceived-threat response, feeding-affinity-derived group geometry, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and named behavior labels remain descriptive compatibility scaffolding rather than lineage, targeting, locomotion, or geometry commands; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -44,6 +44,11 @@ function lineageChannelAffinity(lineage, role) {
   }
   const feeding = feedingProfileForLineage(lineage);
   return role === "carnivore" ? feeding.livePreyAffinity : feeding.plantMatterAffinity;
+}
+
+function lineagePredationAffinity(lineage, role) {
+  if (!lineage || !hasExplicitFeedingProfile(lineage)) return role === "carnivore" ? 1 : 0;
+  return feedingProfileForLineage(lineage).livePreyAffinity;
 }
 
 function lineagesForRole(state, role) {
@@ -109,8 +114,12 @@ function lineageGroupSizeScale(lineage, role) {
   if (!lineage) return 1;
   const traits = lineageTraits(lineage);
   const massNorm = clamp01((traits.bodyMassLog10Kg + 0.5) / 4);
-  const socialScale = 0.72 + traits.sociality * (role === "carnivore" ? 0.62 : 0.78);
-  const massScale = role === "carnivore" ? 1.08 - massNorm * 0.22 : 1.14 - massNorm * 0.28;
+  const predationAffinity = lineagePredationAffinity(lineage, role);
+  const socialCoefficient = 0.78 - predationAffinity * 0.16;
+  const socialScale = 0.72 + traits.sociality * socialCoefficient;
+  const plantWeightedMassScale = 1.14 - massNorm * 0.28;
+  const preyWeightedMassScale = 1.08 - massNorm * 0.22;
+  const massScale = plantWeightedMassScale * (1 - predationAffinity) + preyWeightedMassScale * predationAffinity;
   return clamp(socialScale * massScale, 0.62, 1.55);
 }
 
@@ -316,6 +325,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
     const traits = lineageTraits(lineage);
     const feeding = lineage ? feedingProfileForLineage(lineage) : null;
     const channelAffinity = lineage ? lineageChannelAffinity(lineage, role) : null;
+    const predationAffinity = lineagePredationAffinity(lineage, role);
     const visualScale = lineageVisualScale(lineage);
     const localSuitability = lineage ? lineageLocalSuitability(lineage, role, state, field) : null;
     const behavior = faunaGroupBehaviorAt({ role, id, elapsedYears, field, lineage });
@@ -323,9 +333,10 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
     const z = baseZ + Math.sin(behavior.heading) * behavior.distanceKm;
     const massNorm = traits.bodyMassLog10Kg == null ? 0.5 : clamp01((traits.bodyMassLog10Kg + 0.5) / 4);
     const spacingScale = 0.88 + massNorm * 0.24;
-    const groupRadiusKm = (role === "carnivore"
-      ? clamp(0.012 + Math.sqrt(Math.max(1, groupPopulation)) * 0.0045, 0.012, 0.08)
-      : clamp(0.018 + Math.sqrt(Math.max(1, groupPopulation)) * 0.0065, 0.018, 0.16)) * spacingScale;
+    const radiusBaseKm = 0.018 - predationAffinity * 0.006;
+    const radiusPerSqrtAnimalKm = 0.0065 - predationAffinity * 0.002;
+    const radiusMaxKm = 0.16 - predationAffinity * 0.08;
+    const groupRadiusKm = clamp(radiusBaseKm + Math.sqrt(Math.max(1, groupPopulation)) * radiusPerSqrtAnimalKm, radiusBaseKm, radiusMaxKm) * spacingScale;
     const materialized = baseDistance <= individualRadiusKm + groupRadiusKm;
 
     groups.push(Object.freeze({
@@ -347,6 +358,7 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       locomotionDrive: behavior.locomotionDrive,
       localSuitability,
       channelAffinity,
+      predationAffinity,
       plantMatterAffinity: feeding?.plantMatterAffinity ?? null,
       livePreyAffinity: feeding?.livePreyAffinity ?? null,
       carrionAffinity: feeding?.carrionAffinity ?? null,
@@ -367,7 +379,9 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       const animalAngle = random01(animalSeed + 71) * TAU;
       const animalDistance = groupRadiusKm * Math.sqrt(random01(animalSeed + 89));
       const wobble = 0.004 * (lineage ? 0.75 + traits.mobility * 0.5 : 1) * Math.sin((Number(elapsedYears) || 0) * 365.2425 * TAU + random01(animalSeed + 109) * TAU);
-      const baseScale = role === "carnivore" ? 0.62 + random01(animalSeed + 113) * 0.48 : 0.72 + random01(animalSeed + 113) * 0.72;
+      const baseScaleFloor = 0.72 - predationAffinity * 0.10;
+      const baseScaleRange = 0.72 - predationAffinity * 0.24;
+      const baseScale = baseScaleFloor + random01(animalSeed + 113) * baseScaleRange;
       individuals.push(Object.freeze({
         id: `${id}:${animalIndex}`,
         groupId: id,
