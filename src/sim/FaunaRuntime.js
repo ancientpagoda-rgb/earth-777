@@ -60,7 +60,10 @@ function lineageLocalSuitability(lineage, role, state, field) {
     : Math.sqrt(clamp01(field?.productivity ?? 0.6) * clamp01(field?.waterAccess ?? 0.6));
   const flexibility = 0.78 + traits.dietBreadth * 0.16 + traits.mobility * 0.06;
   const marginalBuffer = 1 + (1 - localSupport) * (traits.dietBreadth * 0.18 + traits.mobility * 0.08);
-  return clamp(thermalFitness * (0.35 + localSupport * 0.65) * flexibility * marginalBuffer, 0.03, 1.25);
+  const predationExposure = role === "carnivore" ? 0 : clamp01((field?.predationExposure ?? 0) / 3);
+  const defensiveCapacity = clamp01(0.15 + traits.mobility * 0.42 + traits.sociality * 0.28 + traits.cognition * 0.15);
+  const predationSuitability = 1 - predationExposure * (1 - defensiveCapacity) * 0.38;
+  return clamp(thermalFitness * (0.35 + localSupport * 0.65) * flexibility * marginalBuffer * predationSuitability, 0.03, 1.25);
 }
 
 function lineageSelectionWeight(lineage, role, state, field) {

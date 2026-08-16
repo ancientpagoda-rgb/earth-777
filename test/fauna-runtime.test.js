@@ -190,6 +190,24 @@ test("flexible lineages are favored in marginal local resources", () => {
   assert.equal([...represented.values()].reduce((sum, value) => sum + value, 0), plan.visiblePopulation);
 });
 
+test("predation exposure favors locally defensive herbivore lineages without changing represented population", () => {
+  const localState = {
+    ...state,
+    herbivoreBiomass: 4,
+    predationExposureIndex: 3,
+    speciesLineages: [
+      lineage({ id: 351, mobility: 0, sociality: 0, cognition: 0, dietBreadth: 0.5 }),
+      lineage({ id: 352, mobility: 1, sociality: 1, cognition: 1, dietBreadth: 0.5 })
+    ]
+  };
+  const plan = buildObservedFauna({ state: localState, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 115, windowRadiusKm: 5, individualRadiusKm: 0.2 });
+  const represented = new Map();
+  for (const herd of plan.herds) represented.set(herd.lineageId, (represented.get(herd.lineageId) ?? 0) + herd.population);
+
+  assert.ok((represented.get(352) ?? 0) > (represented.get(351) ?? 0));
+  assert.equal([...represented.values()].reduce((sum, value) => sum + value, 0), plan.visiblePopulation);
+});
+
 test("social lineages form larger, fewer groups without changing represented population", () => {
   const lowSocialState = { ...state, speciesLineages: [lineage({ sociality: 0 })] };
   const highSocialState = { ...state, speciesLineages: [lineage({ sociality: 1 })] };
