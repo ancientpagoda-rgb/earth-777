@@ -20,6 +20,8 @@ There is no separate behavior state machine or collapse/reconstruction memory. S
 
 `SurfaceFaunaManager` only turns that runtime state into paged Three.js instances. Paged pools grow as needed, so there is no fixed animal display count.
 
+Final predator/prey envelope overlap also produces a bounded, deterministic **encounter-to-ecology proposal**. It combines multiple packs contacting the same herd without counting that herd twice and exposes only dimensionless contact pressure. The proposal is explicitly diagnostic: it does not remove local animals, mutate aggregate biomass, or let an observer's camera alter global history. A future aggregate-ecology owner may consume an equivalent spatially scheduled forcing independently of observation.
+
 ## Surface work
 
 The surface now uses a small direct work loop shared by terrain, environment, and fauna. Each producer receives part of the current frame budget, and the starting producer rotates each frame so one busy queue cannot permanently starve the others.

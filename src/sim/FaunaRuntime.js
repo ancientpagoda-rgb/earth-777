@@ -3,8 +3,9 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v12";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and simulated time; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v13";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; not yet fossil-calibrated";
+export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
 function random01(seed) { return fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123); }
@@ -514,6 +515,63 @@ function refreshPredatorTargetDistances(packs, herds) {
   }));
 }
 
+export function deriveEncounterEcologyProposal({ packs = [], herds = [], visiblePopulation = 0, visibleCarnivorePopulation = 0 } = {}) {
+  const herdById = new Map((herds ?? []).map((herd) => [herd.id, herd]));
+  const contactsByHerd = new Map();
+  let contactingCarnivorePopulation = 0;
+  let contactCount = 0;
+
+  for (const pack of packs ?? []) {
+    if (pack?.encounterContact !== true || pack.targetGroupId == null) continue;
+    const herd = herdById.get(pack.targetGroupId);
+    if (!herd) continue;
+    const clearanceKm = Math.max(1e-12, Number(pack.encounterClearanceKm) || 0);
+    const overlapFraction = clamp01((Number(pack.encounterContactMarginKm) || 0) / clearanceKm);
+    const readiness = clamp01(0.2 + clamp01(pack.mobility ?? 0.5) * 0.4 + clamp01(pack.cognition ?? 0.5) * 0.4);
+    const packContribution = clamp01(overlapFraction * readiness * (1 - Math.exp(-Math.max(0, Number(pack.population) || 0) / 3)));
+    const current = contactsByHerd.get(herd.id) ?? {
+      herd,
+      contactCount: 0,
+      combinedPressure: 0,
+      contactPacks: []
+    };
+    current.contactCount += 1;
+    current.combinedPressure = 1 - (1 - current.combinedPressure) * (1 - packContribution);
+    current.contactPacks.push(pack.id);
+    contactsByHerd.set(herd.id, current);
+    contactingCarnivorePopulation += Math.max(0, Number(pack.population) || 0);
+    contactCount += 1;
+  }
+
+  const totalHerbivores = Math.max(0, Number(visiblePopulation) || 0);
+  const totalCarnivores = Math.max(0, Number(visibleCarnivorePopulation) || 0);
+  const contactedHerds = Object.freeze([...contactsByHerd.values()].map(({ herd, contactCount: herdContactCount, combinedPressure, contactPacks }) => {
+    const observedPopulationFraction = totalHerbivores > 0 ? clamp01((Number(herd.population) || 0) / totalHerbivores) : 0;
+    return Object.freeze({
+      herdGroupId: herd.id,
+      preyLineageId: herd.lineageId ?? null,
+      observedPopulation: Math.max(0, Number(herd.population) || 0),
+      observedPopulationFraction,
+      contactCount: herdContactCount,
+      pressureIndex: clamp01(combinedPressure),
+      contactPackIds: Object.freeze(contactPacks)
+    });
+  }));
+  const observedHerbivoreExposureIndex = contactedHerds.reduce((sum, herd) => sum + herd.observedPopulationFraction * herd.pressureIndex, 0);
+
+  return Object.freeze({
+    policy: ENCOUNTER_ECOLOGY_POLICY,
+    epistemicStatus: "provisional geometric encounter pressure proposal; diagnostic only and not an aggregate population writer",
+    authoritative: false,
+    application: "not applied: aggregate ecology must consume equivalent spatially scheduled forcing independently of observation",
+    contactCount,
+    contactedHerdCount: contactedHerds.length,
+    observedHerbivoreExposureIndex: clamp01(observedHerbivoreExposureIndex),
+    observedCarnivoreEngagementIndex: totalCarnivores > 0 ? clamp01(contactingCarnivorePopulation / totalCarnivores) : 0,
+    contactedHerds
+  });
+}
+
 function alignHerbivoreIndividuals(individuals, herds) {
   if (!individuals?.length) return Object.freeze([]);
   const herdById = new Map((herds ?? []).map((herd) => [herd.id, herd]));
@@ -598,6 +656,12 @@ export function buildObservedFauna({
   const movedAlarmedHerdCount = herds.filter((herd) => Number(herd.alarmMoveDistanceKm) > 0).length;
   const predatorContactCount = packs.filter((pack) => pack.encounterContact === true).length;
   const predatorGainCount = packs.filter((pack) => pack.targetGroupId != null && Number(pack.netClosingDistanceKm) > 0).length;
+  const encounterEcology = deriveEncounterEcologyProposal({
+    packs,
+    herds,
+    visiblePopulation: herbivorePopulation,
+    visibleCarnivorePopulation: carnivorePopulation
+  });
 
   return Object.freeze({
     policy: FAUNA_POLICY,
@@ -618,6 +682,7 @@ export function buildObservedFauna({
     movedAlarmedHerdCount,
     predatorContactCount,
     predatorGainCount,
+    encounterEcology,
     behaviorCounts: Object.freeze(behaviorCounts),
     materializedHerbivores: herbivoreIndividuals.length,
     materializedCarnivores: carnivoreIndividuals.length,
