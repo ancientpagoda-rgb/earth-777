@@ -265,6 +265,8 @@ test("integrity audit catches accidentally frozen internal state and declares ev
   assert.ok(!audit.unexpectedlyUnchanged.includes("methane"));
   assert.ok(!audit.unexpectedlyUnchanged.includes("nitrousOxide"));
   assert.ok(!audit.unexpectedlyUnchanged.includes("tectonicTimeMyr"));
+  assert.ok(!audit.unexpectedlyUnchanged.includes("predationPressureIndex"));
+  assert.ok(!audit.unexpectedlyUnchanged.includes("predationExposureIndex"));
   assert.ok(!audit.declaredFixedSystems.includes("terrain"));
   assert.equal(EARTH_SYSTEM_STATUS.terrain.status, "dynamic-partial");
   assert.equal(EARTH_SYSTEM_STATUS.tectonics.status, "dynamic-partial");

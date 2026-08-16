@@ -21,7 +21,7 @@ export const EARTH_SYSTEM_STATUS = Object.freeze({
 export const DYNAMIC_STATE_FIELDS = Object.freeze([
   "co2", "methane", "nitrousOxide", "greenhouseForcing", "temperatureAnomaly", "oceanTemperatureAnomaly",
   "oceanOverturningIndex", "oceanVentilationIndex", "iceIndex", "seaLevel", "geologicActivityIndex", "tectonicTimeMyr",
-  "tectonicBoundaryActivity", "productivityIndex", "grazingPressureIndex", "herbivoreBiomass", "carnivoreBiomass", "homininPopulationIndex",
+  "tectonicBoundaryActivity", "productivityIndex", "grazingPressureIndex", "predationPressureIndex", "predationExposureIndex", "herbivoreBiomass", "carnivoreBiomass", "homininPopulationIndex",
   "cognitionIndex", "cultureIndex", "technologyIndex", "communicationIndex", "magneticStrength", "atmosphericCarbonPgC",
   "oceanSurfaceCarbonPgC", "oceanDeepCarbonPgC", "terrestrialCarbonPgC", "methaneCarbonPgC",
   "terrestrialReactiveNitrogenTgN", "oceanReactiveNitrogenTgN", "atmosphericN2ONitrogenTgN"
