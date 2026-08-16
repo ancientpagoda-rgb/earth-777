@@ -119,5 +119,31 @@ test("regional inspection consumes generalized gridded hydroclimate and exposes 
   assert.equal(region.atmospherePolicy, GENERAL_ATMOSPHERE_POLICY);
   assert.ok(Number.isFinite(region.runoffPotential));
   assert.ok(Number.isFinite(region.windSpeed));
+  assert.ok(Number.isFinite(region.fauna.herbivoreDensityAnimalsPerKm2));
+  assert.ok(Number.isFinite(region.fauna.carnivoreDensityAnimalsPerKm2));
+  assert.ok(Number.isFinite(region.fauna.predationExposure));
   assert.match(region.confidence, /general intermediate-complexity atmospheric circulation/);
+});
+
+test("regional fauna aggregate is deterministic and cannot write global ecology", () => {
+  const branch = branchState({ herbivoreBiomass: 1.7, carnivoreBiomass: 0.4, predationExposureIndex: 0.8, grazingPressureIndex: 0.3 });
+  const field = materializer();
+  const before = {
+    herbivoreBiomass: branch.herbivoreBiomass,
+    carnivoreBiomass: branch.carnivoreBiomass,
+    predationExposureIndex: branch.predationExposureIndex,
+    grazingPressureIndex: branch.grazingPressureIndex
+  };
+  const options = { climateLayer: climate, hydroClimate: field, spatialDetail: 0.85 };
+  const first = regionalState(branch, 0, 20, options);
+  const second = regionalState(branch, 0, 20, options);
+
+  assert.deepEqual(first.fauna, second.fauna);
+  assert.ok(Object.isFrozen(first.fauna));
+  assert.deepEqual({
+    herbivoreBiomass: branch.herbivoreBiomass,
+    carnivoreBiomass: branch.carnivoreBiomass,
+    predationExposureIndex: branch.predationExposureIndex,
+    grazingPressureIndex: branch.grazingPressureIndex
+  }, before);
 });

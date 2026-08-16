@@ -1,7 +1,32 @@
 import { CHECKPOINT_777 } from "../data/checkpoint-777.js";
+import { faunaPopulationAt } from "./FaunaRuntime.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const round = (value, digits = 2) => Number(value.toFixed(digits));
+
+function regionalFaunaAggregate(globalState, vegetationState, hydro, latitude, longitude) {
+  const field = faunaPopulationAt({
+    state: globalState,
+    vegetationSample: vegetationState,
+    hydrologySample: hydro,
+    latitude,
+    longitude,
+    areaKm2: 1,
+    key: "regional-aggregate"
+  });
+  return Object.freeze({
+    policy: field.policy,
+    epistemicStatus: field.epistemicStatus,
+    herbivoreDensityAnimalsPerKm2: field.herbivoreDensityAnimalsPerKm2,
+    carnivoreDensityAnimalsPerKm2: field.carnivoreDensityAnimalsPerKm2,
+    meanHerdSize: field.meanHerdSize,
+    meanPackSize: field.meanPackSize,
+    predatorPressure: field.predatorPressure,
+    aggregatePredationExposure: field.aggregatePredationExposure,
+    predationExposure: field.predationExposure,
+    preyPressure: field.preyPressure
+  });
+}
 
 function biomeFromHydroClimate(globalState, latitude, temperatureCelsius, soilMoistureIndex) {
   if (Math.abs(latitude) > 72 - globalState.iceIndex * 8) return "polar ice / tundra";
@@ -93,6 +118,7 @@ export function regionalState(
     ? vegetation?.pftDiagnostics?.(globalState, latitude, longitude, spatialDetail) ?? null
     : null;
   const fallbackBiome = biomeFromHydroClimate(globalState, latitude, hydro.temperatureCelsius, moisture);
+  const fauna = regionalFaunaAggregate(globalState, vegetationState, hydro, latitude, longitude);
   const soilProfileApplied = Boolean(hydro.soilProfileApplied);
   return Object.freeze({
     latitude,
@@ -146,6 +172,7 @@ export function regionalState(
     biome: vegetationState?.biomeLabel ?? fallbackBiome,
     hydroclimatePotentialBiome: fallbackBiome,
     biomeCode: vegetationState?.biomeCode ?? null,
+    fauna,
     npp: Number.isFinite(vegetationState?.npp) ? round(vegetationState.npp, 1) : null,
     lai: Number.isFinite(vegetationState?.lai) ? round(vegetationState.lai, 2) : null,
     vegetationProductivityFactor: Number.isFinite(vegetationState?.productivityFactor) ? vegetationState.productivityFactor : null,
