@@ -252,6 +252,8 @@ test("regional materialization is finite and classified", () => {
   const region = regionalState(state, 52, 13);
   assert.ok(Number.isFinite(region.annualTemperature));
   assert.ok(region.biome.length > 3);
+  assert.ok(Number.isFinite(region.fauna.herbivoreDensityAnimalsPerKm2));
+  assert.ok(Object.isFrozen(region.fauna));
 });
 
 test("integrity audit catches accidentally frozen internal state and declares evolving terrain", () => {

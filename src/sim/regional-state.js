@@ -86,6 +86,7 @@ function fallbackRegionalState(globalState, latitude, longitude, climateLayer = 
     moisture = clamp(0.64 + Math.cos(lat * 2.7) * 0.22 + Math.sin(lon * 1.7 - lat) * 0.16 - globalState.iceIndex * seasonality * 0.2, 0.02, 0.995);
   }
 
+  const fauna = regionalFaunaAggregate(globalState, null, null, latitude, longitude);
   return Object.freeze({
     latitude,
     longitude,
@@ -94,6 +95,7 @@ function fallbackRegionalState(globalState, latitude, longitude, climateLayer = 
     cloudCover: Number.isFinite(cloudCover) ? round(cloudCover, 1) : null,
     moisture: round(moisture, 2),
     biome: biomeFromHydroClimate(globalState, latitude, annualTemperature, moisture),
+    fauna,
     climateSource,
     checkpointClimate: climateSource === "krapp-2021-777ka",
     confidence
