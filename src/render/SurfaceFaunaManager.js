@@ -116,18 +116,24 @@ export class SurfaceFaunaManager {
 
   _rebuild(cells = []) {
     if (!this.context) return;
-    this.regionalFields = faunaForCells(cells.filter((cell) => cell.scope === "regional"), this.context);
-    this.localFields = faunaForCells(cells.filter((cell) => cell.scope === "local"), this.context);
-    const focus = this.terrain._geographicAt?.(this.camera.x, this.camera.z) ?? this.context;
-    const faunaField = faunaPopulationAt({
+    const environmentForCell = (cell) => ({
       ...this.context,
+      ...this.terrain._surfaceContext?.(cell.latitude, cell.longitude, this.context.state)
+    });
+    const fieldContext = { ...this.context, environmentForCell };
+    this.regionalFields = faunaForCells(cells.filter((cell) => cell.scope === "regional"), fieldContext);
+    this.localFields = faunaForCells(cells.filter((cell) => cell.scope === "local"), fieldContext);
+    const focus = this.terrain._geographicAt?.(this.camera.x, this.camera.z) ?? this.context;
+    const focusContext = environmentForCell(focus);
+    const faunaField = faunaPopulationAt({
+      ...focusContext,
       latitude: focus.latitude,
       longitude: focus.longitude,
       areaKm2: Math.PI * this.windowRadiusKm * this.windowRadiusKm,
       key: "observed-window"
     });
     this.observed = buildObservedFauna({
-      ...this.context,
+      ...focusContext,
       latitude: focus.latitude,
       longitude: focus.longitude,
       seed: this.context.state?.seed ?? this.terrain.branchSeed ?? 777001,

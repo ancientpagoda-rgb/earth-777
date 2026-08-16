@@ -202,15 +202,18 @@ export function faunaPopulationAt({
 }
 
 export function faunaForCells(cells = [], context = {}) {
-  return Object.freeze(cells.map((cell) => faunaPopulationAt({
-    state: context.state,
-    vegetationSample: context.vegetationSample,
-    hydrologySample: context.hydrologySample,
+  return Object.freeze(cells.map((cell) => {
+    const cellContext = context.environmentForCell?.(cell) ?? context;
+    return faunaPopulationAt({
+    state: cellContext.state ?? context.state,
+    vegetationSample: cellContext.vegetationSample,
+    hydrologySample: cellContext.hydrologySample,
     latitude: cell.latitude,
     longitude: cell.longitude,
     areaKm2: approximateCellAreaKm2(cell),
     key: cell.key
-  })));
+    });
+  }));
 }
 
 export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsedYears = 0, field = {}, lineage = null } = {}) {

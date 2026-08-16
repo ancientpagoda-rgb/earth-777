@@ -54,6 +54,18 @@ test("regional and local cells use the same compact summary function", () => {
   assert.ok(summaries.every((summary) => Number.isFinite(summary.estimatedPacks)));
 });
 
+test("cell fauna summaries read their own environmental context", () => {
+  const cells = [cell("regional", "wet", 30, 40, -100, -90), cell("regional", "dry", 30, 40, -90, -80)];
+  const summaries = faunaForCells(cells, {
+    state,
+    environmentForCell: (entry) => entry.key === "wet"
+      ? { state, vegetationSample: { biomeCode: 17, npp: 1600 }, hydrologySample: { surfaceRunoffMmPerYear: 700 } }
+      : { state, vegetationSample: { biomeCode: 28, npp: 30 }, hydrologySample: { surfaceRunoffMmPerYear: 5 } }
+  });
+
+  assert.ok(summaries[0].herbivoreDensityAnimalsPerKm2 > summaries[1].herbivoreDensityAnimalsPerKm2);
+});
+
 test("group behavior is deterministic and moves with simulated time", () => {
   const field = faunaPopulationAt({ state, vegetationSample: vegetation, hydrologySample: hydrology, areaKm2: 10 });
   const a = faunaGroupBehaviorAt({ role: "herbivore", id: "herd-a", elapsedYears: 4, field });
