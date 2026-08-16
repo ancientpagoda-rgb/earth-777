@@ -100,6 +100,10 @@ const page = await evaluate(`({
   })()
 })`);
 
+const fallbackMessages = runtimeMessages.filter((message) => {
+  const text = message.params?.entry?.text ?? "";
+  return /checkpoint (?:climate|vegetation).*?(?:unavailable|fallback)|(?:climate|vegetation).*visual fallback/i.test(text);
+});
 const fatalMessages = runtimeMessages.filter((message) =>
   message.method === "Runtime.exceptionThrown" || message.params?.entry?.level === "error"
 );
@@ -117,6 +121,7 @@ const checks = [
   [page.yearAdvanced, "timeline did not advance"],
   [page.orbitReadout.includes("tilt"), "orbital forcing readout missing"],
   [page.seaLevelProvenance.includes("Spratt–Lisiecki"), "sea-level provenance missing"],
+  [fallbackMessages.length === 0, "published Krapp reconstruction fell back to synthetic visuals"],
   [fatalMessages.length === 0, "runtime errors were reported"]
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
@@ -124,6 +129,7 @@ const failures = checks.filter(([passed]) => !passed).map(([, message]) => messa
 console.log(JSON.stringify({
   page,
   renderDiagnostics,
+  fallbackMessages,
   messages: runtimeMessages
 }, null, 2));
 socket.close();
