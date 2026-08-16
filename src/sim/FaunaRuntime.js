@@ -5,8 +5,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v15";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack channels remain descriptive compatibility scaffolding and are not lineage classes; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v16";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous prey-pursuit drive, deterministic target acquisition, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and hunt/stalk labels remain descriptive compatibility scaffolding rather than lineage or targeting commands; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -207,11 +207,12 @@ export function faunaForCells(cells = [], context = {}) {
 export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsedYears = 0, field = {}, lineage = null } = {}) {
   const phase = fract((Number(elapsedYears) || 0) * 365.2425 + random01(hashText(id)) * 31.7);
   let threatIndex = null;
+  let preyPursuitDrive = 0;
   if (!lineage) {
     let behavior;
     if (role === "carnivore") {
-      const huntDrive = clamp01((field.preyPressure ?? 0.5) * 0.76 + phase * 0.24);
-      behavior = huntDrive > 0.64 ? "hunt" : phase > 0.72 ? "travel" : phase > 0.38 ? "stalk" : "rest";
+      preyPursuitDrive = clamp01((field.preyPressure ?? 0.5) * 0.76 + phase * 0.24);
+      behavior = preyPursuitDrive > 0.64 ? "hunt" : preyPursuitDrive > 0.38 ? "stalk" : phase > 0.72 ? "travel" : "rest";
     } else {
       const threat = clamp01((field.predatorPressure ?? 0.1) * 0.62
         + (field.predationExposure ?? 0) * 0.10
@@ -232,17 +233,19 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
         : behavior === "stalk" ? 0.06
           : behavior === "drink" ? 0.04
             : 0.025;
-    return Object.freeze({ role, behavior, heading, distanceKm, threatIndex });
+    return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive });
   }
 
   const traits = lineageTraits(lineage);
   let behavior;
   if (role === "carnivore") {
     const preyDependence = 0.78 + (1 - traits.dietBreadth) * 0.22;
-    const huntDrive = clamp01((field.preyPressure ?? 0.5) * 0.68 * preyDependence + phase * 0.16 + traits.mobility * 0.08 + traits.cognition * 0.08);
-    behavior = huntDrive > 0.64 ? "hunt"
-      : phase > 0.76 - traits.cognition * 0.12 ? "travel"
-        : phase > 0.42 - traits.cognition * 0.12 ? "stalk"
+    const rawPursuitDrive = clamp01((field.preyPressure ?? 0.5) * 0.68 * preyDependence + phase * 0.16 + traits.mobility * 0.08 + traits.cognition * 0.08);
+    const livePreyAffinity = hasExplicitFeedingProfile(lineage) ? feedingProfileForLineage(lineage).livePreyAffinity : 1;
+    preyPursuitDrive = clamp01(rawPursuitDrive * livePreyAffinity);
+    behavior = preyPursuitDrive > 0.64 ? "hunt"
+      : preyPursuitDrive > 0.38 ? "stalk"
+        : phase > 0.76 - traits.cognition * 0.12 ? "travel"
           : "rest";
   } else {
     const threat = clamp01((field.predatorPressure ?? 0.1) * 0.58
@@ -271,7 +274,7 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
           : 0.025;
   const mobilityScale = 0.70 + traits.mobility * 0.70;
   const distanceKm = baseDistanceKm * mobilityScale;
-  return Object.freeze({ role, behavior, heading, distanceKm, threatIndex });
+  return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive });
 }
 
 function visiblePopulation(density, radiusKm) {
@@ -325,6 +328,8 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       behavior: behavior.behavior,
       heading: behavior.heading,
       movementDistanceKm: behavior.distanceKm,
+      threatIndex: behavior.threatIndex,
+      preyPursuitDrive: behavior.preyPursuitDrive,
       localSuitability,
       channelAffinity,
       plantMatterAffinity: feeding?.plantMatterAffinity ?? null,
@@ -397,7 +402,8 @@ function targetPredatorPacks(packs, herds) {
   if (!packs?.length || !herds?.length) return Object.freeze(packs ?? []);
   return Object.freeze(packs.map((pack) => {
     const perceptionRadiusKm = predatorPerceptionRadiusKm(pack);
-    if (pack.behavior !== "hunt" && pack.behavior !== "stalk") return Object.freeze({ ...pack, perceptionRadiusKm });
+    const preyPursuitDrive = clamp01(pack.preyPursuitDrive ?? 0);
+    if (preyPursuitDrive <= 0.38) return Object.freeze({ ...pack, perceptionRadiusKm, preyPursuitDrive });
     let target = null;
     let bestScore = -Infinity;
     for (const herd of herds) {
@@ -409,7 +415,7 @@ function targetPredatorPacks(packs, herds) {
         target = herd;
       }
     }
-    if (!target) return Object.freeze({ ...pack, perceptionRadiusKm });
+    if (!target) return Object.freeze({ ...pack, perceptionRadiusKm, preyPursuitDrive });
     const dx = target.x - pack.x;
     const dz = target.z - pack.z;
     const targetDistanceBeforeKm = Math.hypot(dx, dz);
@@ -428,6 +434,7 @@ function targetPredatorPacks(packs, herds) {
       z,
       heading,
       perceptionRadiusKm,
+      preyPursuitDrive,
       targetGroupId: target.id,
       targetLineageId: target.lineageId ?? null,
       targetDistanceKm,
