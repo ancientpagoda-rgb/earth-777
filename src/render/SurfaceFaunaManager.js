@@ -43,6 +43,11 @@ export function shouldRecenterFaunaObservation(anchor, camera, windowRadiusKm = 
   return Math.hypot(dx, dz) >= faunaObservationRecenterThresholdKm(windowRadiusKm, individualRadiusKm);
 }
 
+export function faunaAdaptiveRebuildIntervalMs(lastRebuildDurationMs = 0) {
+  const measuredCost = Math.max(0, Number(lastRebuildDurationMs) || 0);
+  return clamp(Math.max(16, measuredCost * 8), 16, 120);
+}
+
 class PagedInstancePool {
   constructor(scene, geometry, material, pageSize) {
     this.scene = scene;
@@ -101,6 +106,10 @@ export class SurfaceFaunaManager {
     this.localFields = Object.freeze([]);
     this.queue = [];
     this.cursor = 0;
+    this.lastRebuildAtMs = -Infinity;
+    this.lastRebuildDurationMs = 0;
+    this.rebuildCount = 0;
+    this.deferredRebuildCount = 0;
 
     this.pools = {
       herd: new PagedInstancePool(scene, new THREE.SphereGeometry(0.0042, 6, 4), new THREE.MeshStandardMaterial({ color: 0x62503a, roughness: 1, transparent: true, opacity: 0.72 }), 256),
@@ -138,6 +147,7 @@ export class SurfaceFaunaManager {
     this.windowRadiusKm = window;
     this.individualRadiusKm = individual;
     this.observedAnchor = null;
+    this.lastRebuildAtMs = -Infinity;
     this.dirty = true;
     return true;
   }
@@ -146,6 +156,7 @@ export class SurfaceFaunaManager {
     if (!cameraPosition) return false;
     this.camera = { x: Number(cameraPosition.x) || 0, z: Number(cameraPosition.z) || 0 };
     if (!shouldRecenterFaunaObservation(this.observedAnchor, this.camera, this.windowRadiusKm, this.individualRadiusKm)) return false;
+    this.lastRebuildAtMs = -Infinity;
     this.dirty = true;
     return true;
   }
@@ -208,12 +219,26 @@ export class SurfaceFaunaManager {
 
   pump(sliceMs = 0.85, cells = []) {
     if (!this.context) return 0;
-    if (this.dirty) this._rebuild(cells);
     const started = performance.now();
+    const sliceBudgetMs = Math.max(0.05, Number(sliceMs) || 0.85);
+    if (this.dirty) {
+      const rebuildIntervalMs = faunaAdaptiveRebuildIntervalMs(this.lastRebuildDurationMs);
+      const deferRebuild = this.observed && started - this.lastRebuildAtMs < rebuildIntervalMs;
+      if (deferRebuild) {
+        this.deferredRebuildCount += 1;
+      } else {
+        const rebuildStarted = performance.now();
+        this._rebuild(cells);
+        this.lastRebuildDurationMs = Math.max(0, performance.now() - rebuildStarted);
+        this.lastRebuildAtMs = performance.now();
+        this.rebuildCount += 1;
+        if (performance.now() - started >= sliceBudgetMs) return 0;
+      }
+    }
     const counts = Object.fromEntries(Object.entries(this.pools).map(([key, pool]) => [key, pool.count]));
     let work = 0;
 
-    while (this.cursor < this.queue.length && performance.now() - started < Math.max(0.05, sliceMs)) {
+    while (this.cursor < this.queue.length && performance.now() - started < sliceBudgetMs) {
       const item = this.queue[this.cursor++];
       const actor = item.value;
       if (item.type === "herd" || item.type === "pack") {
@@ -256,7 +281,11 @@ export class SurfaceFaunaManager {
       observationRecenterThresholdKm: faunaObservationRecenterThresholdKm(this.windowRadiusKm, this.individualRadiusKm),
       observationAnchorXKm: this.observedAnchor?.x ?? null,
       observationAnchorZKm: this.observedAnchor?.z ?? null,
-      observationAnchorDistanceKm: anchorDistanceKm
+      observationAnchorDistanceKm: anchorDistanceKm,
+      adaptiveRebuildIntervalMs: faunaAdaptiveRebuildIntervalMs(this.lastRebuildDurationMs),
+      lastRebuildDurationMs: this.lastRebuildDurationMs,
+      rebuildCount: this.rebuildCount,
+      deferredRebuildCount: this.deferredRebuildCount
     });
   }
 
@@ -267,6 +296,8 @@ export class SurfaceFaunaManager {
     this.localFields = Object.freeze([]);
     this.queue = [];
     this.cursor = 0;
+    this.lastRebuildAtMs = -Infinity;
+    this.lastRebuildDurationMs = 0;
     this.dirty = true;
     for (const pool of Object.values(this.pools)) pool.clear();
   }
