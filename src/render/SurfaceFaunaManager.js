@@ -28,6 +28,21 @@ export function faunaStateSignature(state = {}) {
   return `legacy:${Number(state?.herbivoreBiomass ?? 0).toFixed(3)}:${Number(state?.carnivoreBiomass ?? 0).toFixed(3)}`;
 }
 
+export function faunaObservationRecenterThresholdKm(windowRadiusKm = 3.5, individualRadiusKm = 0.55) {
+  const window = clamp(windowRadiusKm, 0.5, 12);
+  const individual = clamp(individualRadiusKm, 0.08, window);
+  const target = Math.max(0.2, individual * 0.8, window * 0.12);
+  const upperBound = Math.max(0.2, Math.min(1.25, window * 0.35));
+  return Math.min(target, upperBound);
+}
+
+export function shouldRecenterFaunaObservation(anchor, camera, windowRadiusKm = 3.5, individualRadiusKm = 0.55) {
+  if (!anchor || !camera) return true;
+  const dx = (Number(camera.x) || 0) - (Number(anchor.x) || 0);
+  const dz = (Number(camera.z) || 0) - (Number(anchor.z) || 0);
+  return Math.hypot(dx, dz) >= faunaObservationRecenterThresholdKm(windowRadiusKm, individualRadiusKm);
+}
+
 class PagedInstancePool {
   constructor(scene, geometry, material, pageSize) {
     this.scene = scene;
@@ -77,7 +92,7 @@ export class SurfaceFaunaManager {
     this.context = null;
     this.contextSignature = "";
     this.camera = { x: 0, z: 0 };
-    this.cameraSignature = "";
+    this.observedAnchor = null;
     this.windowRadiusKm = 3.5;
     this.individualRadiusKm = 0.55;
     this.dirty = true;
@@ -122,6 +137,7 @@ export class SurfaceFaunaManager {
     if (window === this.windowRadiusKm && individual === this.individualRadiusKm) return false;
     this.windowRadiusKm = window;
     this.individualRadiusKm = individual;
+    this.observedAnchor = null;
     this.dirty = true;
     return true;
   }
@@ -129,9 +145,7 @@ export class SurfaceFaunaManager {
   updateCamera(cameraPosition) {
     if (!cameraPosition) return false;
     this.camera = { x: Number(cameraPosition.x) || 0, z: Number(cameraPosition.z) || 0 };
-    const signature = `${Math.round(this.camera.x * 5)}:${Math.round(this.camera.z * 5)}`;
-    if (signature === this.cameraSignature) return false;
-    this.cameraSignature = signature;
+    if (!shouldRecenterFaunaObservation(this.observedAnchor, this.camera, this.windowRadiusKm, this.individualRadiusKm)) return false;
     this.dirty = true;
     return true;
   }
@@ -167,6 +181,7 @@ export class SurfaceFaunaManager {
       windowRadiusKm: this.windowRadiusKm,
       individualRadiusKm: this.individualRadiusKm
     });
+    this.observedAnchor = Object.freeze({ x: this.camera.x, z: this.camera.z });
 
     for (const pool of Object.values(this.pools)) pool.clear();
     this.queue = [];
@@ -215,6 +230,9 @@ export class SurfaceFaunaManager {
   }
 
   diagnostics() {
+    const anchorDistanceKm = this.observedAnchor
+      ? Math.hypot(this.camera.x - this.observedAnchor.x, this.camera.z - this.observedAnchor.z)
+      : null;
     return Object.freeze({
       policy: FAUNA_POLICY,
       epistemicStatus: FAUNA_EPISTEMIC_STATUS,
@@ -234,12 +252,17 @@ export class SurfaceFaunaManager {
       queueRemaining: Math.max(0, this.queue.length - this.cursor),
       pools: Object.freeze(Object.fromEntries(Object.entries(this.pools).map(([key, pool]) => [key, pool.diagnostics()]))),
       windowRadiusKm: this.windowRadiusKm,
-      individualRadiusKm: this.individualRadiusKm
+      individualRadiusKm: this.individualRadiusKm,
+      observationRecenterThresholdKm: faunaObservationRecenterThresholdKm(this.windowRadiusKm, this.individualRadiusKm),
+      observationAnchorXKm: this.observedAnchor?.x ?? null,
+      observationAnchorZKm: this.observedAnchor?.z ?? null,
+      observationAnchorDistanceKm: anchorDistanceKm
     });
   }
 
   clear() {
     this.observed = null;
+    this.observedAnchor = null;
     this.regionalFields = Object.freeze([]);
     this.localFields = Object.freeze([]);
     this.queue = [];
