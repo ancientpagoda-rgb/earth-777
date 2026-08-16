@@ -5,8 +5,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v19";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous threat/resource/pursuit locomotion drives, perceived-threat response, feeding-affinity-derived group geometry, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and named behavior labels remain descriptive compatibility scaffolding rather than lineage, targeting, locomotion, or geometry commands; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v20";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, feeding-weighted local suitability, role-independent explicit-lineage threat/resource/pursuit locomotion drives, perceived-threat response, feeding-affinity-derived group geometry, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack, herbivore/carnivore role, and named behavior labels remain descriptive compatibility scaffolding rather than explicit-lineage physics commands; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -51,6 +51,24 @@ function lineagePredationAffinity(lineage, role) {
   return feedingProfileForLineage(lineage).livePreyAffinity;
 }
 
+function primaryFeedingShares(lineage, role) {
+  if (!lineage || !hasExplicitFeedingProfile(lineage)) {
+    return Object.freeze(role === "carnivore"
+      ? { plantShare: 0, livePreyShare: 1 }
+      : { plantShare: 1, livePreyShare: 0 });
+  }
+  const feeding = feedingProfileForLineage(lineage);
+  const total = feeding.plantMatterAffinity + feeding.livePreyAffinity;
+  if (total > 1e-12) {
+    return Object.freeze({
+      plantShare: feeding.plantMatterAffinity / total,
+      livePreyShare: feeding.livePreyAffinity / total
+    });
+  }
+  const livePreyShare = clamp01(feeding.trophicLevel ?? 0.5);
+  return Object.freeze({ plantShare: 1 - livePreyShare, livePreyShare });
+}
+
 function lineagesForRole(state, role) {
   const living = (state?.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null && Number(lineage.populationIndex) > 0);
   return Object.freeze(living.filter((lineage) => lineageChannelAffinity(lineage, role) > 1e-9));
@@ -71,16 +89,19 @@ function lineageTraits(lineage) {
 function lineageLocalSuitability(lineage, role, state, field) {
   if (!lineage) return 1;
   const traits = lineageTraits(lineage);
+  const primary = primaryFeedingShares(lineage, role);
   const temperature = Number(state?.temperatureAnomaly);
   const thermalFitness = Number.isFinite(temperature) && traits.thermalOptimumK != null
     ? clamp(Math.exp(-0.16 * (temperature - traits.thermalOptimumK) ** 2), 0.06, 1)
     : 1;
-  const localSupport = role === "carnivore"
-    ? clamp01(field?.preyPressure ?? 0.5)
-    : Math.sqrt(clamp01(field?.productivity ?? 0.6) * clamp01(field?.waterAccess ?? 0.6));
+  const plantSupport = Math.sqrt(clamp01(field?.productivity ?? 0.6) * clamp01(field?.waterAccess ?? 0.6));
+  const preySupport = clamp01(field?.preyPressure ?? 0.5);
+  const localSupport = plantSupport * primary.plantShare + preySupport * primary.livePreyShare;
   const flexibility = 0.78 + traits.dietBreadth * 0.16 + traits.mobility * 0.06;
   const marginalBuffer = 1 + (1 - localSupport) * (traits.dietBreadth * 0.18 + traits.mobility * 0.08);
-  const predationExposure = role === "carnivore" ? 0 : clamp01((field?.predationExposure ?? 0) / 3);
+  // The aggregate exposure field is currently prey-side context, so project it
+  // continuously onto the plant-feeding share instead of using a role switch.
+  const predationExposure = clamp01((field?.predationExposure ?? 0) / 3) * primary.plantShare;
   const defensiveCapacity = clamp01(0.15 + traits.mobility * 0.42 + traits.sociality * 0.28 + traits.cognition * 0.15);
   const predationSuitability = 1 - predationExposure * (1 - defensiveCapacity) * 0.38;
   return clamp(thermalFitness * (0.35 + localSupport * 0.65) * flexibility * marginalBuffer * predationSuitability, 0.03, 1.25);
@@ -205,13 +226,13 @@ export function faunaForCells(cells = [], context = {}) {
   return Object.freeze(cells.map((cell) => {
     const cellContext = context.environmentForCell?.(cell) ?? context;
     return faunaPopulationAt({
-    state: cellContext.state ?? context.state,
-    vegetationSample: cellContext.vegetationSample,
-    hydrologySample: cellContext.hydrologySample,
-    latitude: cell.latitude,
-    longitude: cell.longitude,
-    areaKm2: approximateCellAreaKm2(cell),
-    key: cell.key
+      state: cellContext.state ?? context.state,
+      vegetationSample: cellContext.vegetationSample,
+      hydrologySample: cellContext.hydrologySample,
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      areaKm2: approximateCellAreaKm2(cell),
+      key: cell.key
     });
   }));
 }
@@ -248,57 +269,80 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
         : behavior === "stalk" ? 0.06
           : behavior === "drink" ? 0.04
             : 0.025;
-    return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive, resourceNeed: null, waterNeed: null, locomotionDrive: null });
+    return Object.freeze({
+      role,
+      behavior,
+      heading,
+      distanceKm,
+      threatIndex,
+      preyPursuitDrive,
+      resourceNeed: null,
+      plantResourceNeed: null,
+      preyResourceNeed: null,
+      waterNeed: null,
+      locomotionDrive: null,
+      plantFeedingShare: null,
+      livePreyFeedingShare: null
+    });
   }
 
   const traits = lineageTraits(lineage);
+  const feeding = feedingProfileForLineage(lineage);
+  const primary = primaryFeedingShares(lineage, role);
+  const preyDependence = 0.78 + (1 - traits.dietBreadth) * 0.22;
+  const rawPursuitDrive = clamp01((field.preyPressure ?? 0.5) * 0.68 * preyDependence + phase * 0.16 + traits.mobility * 0.08 + traits.cognition * 0.08);
+  preyPursuitDrive = clamp01(rawPursuitDrive * feeding.livePreyAffinity);
+
+  const rawThreat = clamp01((field.predatorPressure ?? 0.1) * 0.58
+    + (field.predationExposure ?? 0) * 0.12
+    + random01(hashText(id) + Math.floor(elapsedYears * 12)) * 0.18
+    + traits.cognition * 0.05
+    - traits.sociality * 0.05);
+  threatIndex = clamp01(rawThreat * primary.plantShare);
+
+  const rawPlantNeed = clamp01((1 - (field.productivity ?? 0.6)) * 0.58 + (1 - (field.waterAccess ?? 0.6)) * 0.42);
+  const plantResourceNeed = clamp01(rawPlantNeed * (1 - traits.dietBreadth * 0.22) * primary.plantShare);
+  const preyResourceNeed = clamp01((1 - (field.preyPressure ?? 0.5)) * (1 - traits.dietBreadth * 0.18) * primary.livePreyShare);
+  const resourceNeed = Math.max(plantResourceNeed, preyResourceNeed);
+  const waterNeed = clamp01(1 - (field.waterAccess ?? 0.6));
+  const roamingDrive = clamp01(phase * (0.55 + traits.mobility * 0.45));
+  const locomotionDrive = clamp01(Math.max(threatIndex, resourceNeed * 0.82, waterNeed * 0.35, preyPursuitDrive, roamingDrive * 0.8));
+
   let behavior;
-  let resourceNeed = 0;
-  let waterNeed = 0;
-  let locomotionDrive = 0;
-  if (role === "carnivore") {
-    const preyDependence = 0.78 + (1 - traits.dietBreadth) * 0.22;
-    const rawPursuitDrive = clamp01((field.preyPressure ?? 0.5) * 0.68 * preyDependence + phase * 0.16 + traits.mobility * 0.08 + traits.cognition * 0.08);
-    const livePreyAffinity = hasExplicitFeedingProfile(lineage) ? feedingProfileForLineage(lineage).livePreyAffinity : 1;
-    preyPursuitDrive = clamp01(rawPursuitDrive * livePreyAffinity);
-    resourceNeed = preyPursuitDrive;
-    const roamingDrive = clamp01(phase * (0.55 + traits.mobility * 0.45));
-    locomotionDrive = clamp01(Math.max(preyPursuitDrive, roamingDrive * 0.8));
-    behavior = preyPursuitDrive > 0.64 ? "hunt"
-      : preyPursuitDrive > 0.38 ? "stalk"
-        : phase > 0.76 - traits.cognition * 0.12 ? "travel"
-          : "rest";
-  } else {
-    const threat = clamp01((field.predatorPressure ?? 0.1) * 0.58
-      + (field.predationExposure ?? 0) * 0.12
-      + random01(hashText(id) + Math.floor(elapsedYears * 12)) * 0.18
-      + traits.cognition * 0.05
-      - traits.sociality * 0.05);
-    threatIndex = threat;
-    const rawNeed = clamp01((1 - (field.productivity ?? 0.6)) * 0.58 + (1 - (field.waterAccess ?? 0.6)) * 0.42);
-    resourceNeed = clamp01(rawNeed * (1 - traits.dietBreadth * 0.22));
-    waterNeed = clamp01(1 - (field.waterAccess ?? 0.6));
-    locomotionDrive = clamp01(Math.max(threatIndex, resourceNeed * 0.82, waterNeed * 0.35));
-    behavior = threat > 0.66 ? "flee"
-      : resourceNeed > 0.58 ? "travel"
-        : phase < 0.15 ? "drink"
-          : phase > 0.84 ? "rest"
-            : "graze";
-  }
+  if (threatIndex > 0.66 && threatIndex >= preyPursuitDrive) behavior = "flee";
+  else if (preyPursuitDrive > 0.64) behavior = "hunt";
+  else if (preyPursuitDrive > 0.38) behavior = "stalk";
+  else if (resourceNeed > 0.58) behavior = "travel";
+  else if (waterNeed > 0.55 && phase < 0.30) behavior = "drink";
+  else if (phase > 0.84) behavior = "rest";
+  else behavior = primary.plantShare >= primary.livePreyShare ? "graze" : "travel";
 
   const seed = hashText(id);
   const seasonal = (Number(elapsedYears) || 0) * TAU;
   const headingWander = 0.82 - traits.cognition * 0.34;
   const heading = random01(seed + 17) * TAU + Math.sin(seasonal + random01(seed + 29) * TAU) * headingWander;
   // Physical displacement follows continuous internal/environmental drive.
-  // Named behaviors above classify that state for observers; they do not set
-  // the movement budget.
-  const baseDistanceKm = role === "carnivore"
-    ? 0.025 + locomotionDrive * 0.085
-    : 0.025 + locomotionDrive * 0.135;
+  // The legacy role string and named behaviors classify the state for callers;
+  // neither chooses the explicit lineage movement budget.
+  const strideRangeKm = 0.135 - primary.livePreyShare * 0.05;
+  const baseDistanceKm = 0.025 + locomotionDrive * strideRangeKm;
   const mobilityScale = 0.70 + traits.mobility * 0.70;
   const distanceKm = baseDistanceKm * mobilityScale;
-  return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive, resourceNeed, waterNeed, locomotionDrive });
+  return Object.freeze({
+    role,
+    behavior,
+    heading,
+    distanceKm,
+    threatIndex,
+    preyPursuitDrive,
+    resourceNeed,
+    plantResourceNeed,
+    preyResourceNeed,
+    waterNeed,
+    locomotionDrive,
+    plantFeedingShare: primary.plantShare,
+    livePreyFeedingShare: primary.livePreyShare
+  });
 }
 
 function visiblePopulation(density, radiusKm) {
@@ -357,8 +401,12 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       threatIndex: behavior.threatIndex,
       preyPursuitDrive: behavior.preyPursuitDrive,
       resourceNeed: behavior.resourceNeed,
+      plantResourceNeed: behavior.plantResourceNeed,
+      preyResourceNeed: behavior.preyResourceNeed,
       waterNeed: behavior.waterNeed,
       locomotionDrive: behavior.locomotionDrive,
+      plantFeedingShare: behavior.plantFeedingShare,
+      livePreyFeedingShare: behavior.livePreyFeedingShare,
       localSuitability,
       channelAffinity,
       predationAffinity,
@@ -371,7 +419,9 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       sociality: lineage ? traits.sociality : null,
       dietBreadth: lineage ? traits.dietBreadth : null,
       cognition: lineage ? traits.cognition : null,
-      threatPerceptionRadiusKm: role === "herbivore" ? herdThreatPerceptionRadiusKm({ mobility: traits.mobility, sociality: traits.sociality, cognition: traits.cognition }) : null,
+      threatPerceptionRadiusKm: lineage
+        ? herdThreatPerceptionRadiusKm({ mobility: traits.mobility, sociality: traits.sociality, cognition: traits.cognition })
+        : role === "herbivore" ? herdThreatPerceptionRadiusKm({ mobility: traits.mobility, sociality: traits.sociality, cognition: traits.cognition }) : null,
       bodyMassLog10Kg: lineage?.bodyMassLog10Kg ?? null,
       trophicLevel: feeding?.trophicLevel ?? lineage?.trophicLevel ?? null
     }));
@@ -521,8 +571,9 @@ function respondTargetedHerds(herds, packs) {
       ? clamp01(Math.max(herd.locomotionDrive, directThreatDrive))
       : null;
     const mobilityScale = 0.70 + clamp01(herd.mobility ?? 0.5) * 0.70;
+    const strideRangeKm = 0.135 - clamp01(herd.predationAffinity ?? 0) * 0.05;
     const continuousResponseDistanceKm = hasContinuousLocomotion
-      ? (0.025 + responseLocomotionDrive * 0.135) * mobilityScale
+      ? (0.025 + responseLocomotionDrive * strideRangeKm) * mobilityScale
       : 0;
     const fleeDistanceKm = hasContinuousLocomotion
       ? Math.max(Math.max(0, Number(herd.movementDistanceKm) || 0), continuousResponseDistanceKm)
