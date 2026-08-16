@@ -90,6 +90,27 @@ test("cognition modestly changes directional wandering", () => {
   assert.notEqual(low.heading, high.heading);
 });
 
+test("aggregate predation exposure raises derived herd threat without letting observation write it", () => {
+  const lowHistory = faunaPopulationAt({
+    state: { ...state, carnivoreBiomass: 0.1, predationExposureIndex: 0 },
+    vegetationSample: vegetation,
+    hydrologySample: hydrology,
+    areaKm2: 10
+  });
+  const highHistory = faunaPopulationAt({
+    state: { ...state, carnivoreBiomass: 0.1, predationExposureIndex: 3 },
+    vegetationSample: vegetation,
+    hydrologySample: hydrology,
+    areaKm2: 10
+  });
+  const low = faunaGroupBehaviorAt({ role: "herbivore", id: "history-herd", elapsedYears: 4, field: lowHistory, lineage: lineage() });
+  const high = faunaGroupBehaviorAt({ role: "herbivore", id: "history-herd", elapsedYears: 4, field: highHistory, lineage: lineage() });
+
+  assert.equal(lowHistory.predatorPressure, highHistory.predatorPressure);
+  assert.ok(high.threatIndex > low.threatIndex);
+  assert.equal(highHistory.predationExposure, 3);
+});
+
 test("observed fauna is deterministic for seed, place, and time", () => {
   const options = { state, vegetationSample: vegetation, hydrologySample: hydrology, latitude: 39, longitude: -95, seed: 777001, windowRadiusKm: 3, individualRadiusKm: 0.6 };
   const first = buildObservedFauna(options);

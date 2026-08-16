@@ -55,6 +55,15 @@ function applyAggregatePredation(state, dtYears) {
   const loss = herbivoreBiomass * (1 - Math.exp(-Math.max(0, dtYears) * lossRatePerYear));
   state.herbivoreBiomass = positive(herbivoreBiomass - loss, 0.001);
   state.predationPressureIndex = pressure;
+  // This short aggregate history belongs to the aggregate ecology owner, never
+  // to demand-driven observed groups. It is not organism memory or a spatial
+  // encounter record.
+  state.predationExposureIndex = clamp(relax(
+    clamp(state.predationExposureIndex ?? 0, 0, 3),
+    pressure,
+    Math.max(0, dtYears),
+    110
+  ), 0, 3);
   state.predationMassCompatibilityIndex = massCompatibility;
   state.predationHerbivoreLossPerYear = loss / Math.max(1e-9, dtYears);
 }
@@ -278,6 +287,7 @@ export class FreeEarthEngine {
       productivityIndex: round(this.state.productivityIndex, 4),
       herbivoreBiomass: round(this.state.herbivoreBiomass, 4), carnivoreBiomass: round(this.state.carnivoreBiomass, 4),
       predationPressureIndex: round(this.state.predationPressureIndex ?? 0, 4),
+      predationExposureIndex: round(this.state.predationExposureIndex ?? 0, 4),
       predationMassCompatibilityIndex: round(this.state.predationMassCompatibilityIndex ?? 0, 4),
       predationHerbivoreLossPerYear: round(this.state.predationHerbivoreLossPerYear ?? 0, 6),
       speciesRichness: this.state.speciesRichness, evolutionaryNoveltyIndex: round(this.state.evolutionaryNoveltyIndex, 4),
