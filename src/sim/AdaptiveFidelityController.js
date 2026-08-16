@@ -8,7 +8,7 @@ const TIER_SPATIAL_DETAIL = Object.freeze({ high: 1, medium: 0.65, background: 0
 
 const RUNTIME_BOUND_SYSTEMS = new Set([
   "tectonics", "carbon", "methane", "nitrogen", "climate", "ocean", "ice", "seaLevel",
-  "herbivores", "carnivores", "evolution", "hominins", "magnetism"
+  "fauna", "evolution", "hominins", "magnetism"
 ]);
 
 function normalizeObserverRelevance(observerRelevance = {}) {
