@@ -89,6 +89,26 @@ test("aggregate ecology converts predator and prey lineage traits into bounded p
   }
 });
 
+test("aggregate predation prefers compatible predator and prey body masses", () => {
+  const configure = (predatorMass, preyMass) => {
+    const engine = new FreeEarthEngine(992);
+    engine.state.herbivoreBiomass = 4;
+    engine.state.carnivoreBiomass = 2;
+    engine.state.speciesLineages = [
+      { id: 1, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.2, bodyMassLog10Kg: preyMass, mobility: 0.5, sociality: 0.5, cognition: 0.5 },
+      { id: 2, extinctionYearBP: null, populationIndex: 1, trophicLevel: 0.8, bodyMassLog10Kg: predatorMass, mobility: 0.5, sociality: 0.5, cognition: 0.5 }
+    ];
+    return engine.advance(25);
+  };
+  const compatible = configure(0.85, 1.3);
+  const mismatched = configure(-0.3, 3.3);
+
+  assert.ok(compatible.predationMassCompatibilityIndex > mismatched.predationMassCompatibilityIndex);
+  assert.ok(compatible.predationPressureIndex > mismatched.predationPressureIndex);
+  assert.ok(compatible.predationHerbivoreLossPerYear > mismatched.predationHerbivoreLossPerYear);
+  assert.ok(compatible.herbivoreBiomass < mismatched.herbivoreBiomass);
+});
+
 test("CO2 can exceed the old 330 ppm guardrail and is then reduced only by modeled fluxes", () => {
   const engine = new FreeEarthEngine(77);
   engine.state.atmosphericCarbonPgC = 800 * BIOGEOCHEMISTRY_BASELINE.atmosphericCarbonPgCPerPpm;
