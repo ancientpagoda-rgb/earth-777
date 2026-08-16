@@ -5,8 +5,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v16";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous prey-pursuit drive, deterministic target acquisition, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and hunt/stalk labels remain descriptive compatibility scaffolding rather than lineage or targeting commands; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v17";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous threat/resource/pursuit locomotion drives, deterministic target acquisition, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and named behavior labels remain descriptive compatibility scaffolding rather than lineage, targeting, or locomotion commands; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -209,6 +209,9 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
   let threatIndex = null;
   let preyPursuitDrive = 0;
   if (!lineage) {
+    // Preserve the old label-driven fallback for callers that have not yet
+    // supplied an evolving lineage. Current simulated lineages use the
+    // continuous drive path below.
     let behavior;
     if (role === "carnivore") {
       preyPursuitDrive = clamp01((field.preyPressure ?? 0.5) * 0.76 + phase * 0.24);
@@ -233,16 +236,22 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
         : behavior === "stalk" ? 0.06
           : behavior === "drink" ? 0.04
             : 0.025;
-    return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive });
+    return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive, resourceNeed: null, waterNeed: null, locomotionDrive: null });
   }
 
   const traits = lineageTraits(lineage);
   let behavior;
+  let resourceNeed = 0;
+  let waterNeed = 0;
+  let locomotionDrive = 0;
   if (role === "carnivore") {
     const preyDependence = 0.78 + (1 - traits.dietBreadth) * 0.22;
     const rawPursuitDrive = clamp01((field.preyPressure ?? 0.5) * 0.68 * preyDependence + phase * 0.16 + traits.mobility * 0.08 + traits.cognition * 0.08);
     const livePreyAffinity = hasExplicitFeedingProfile(lineage) ? feedingProfileForLineage(lineage).livePreyAffinity : 1;
     preyPursuitDrive = clamp01(rawPursuitDrive * livePreyAffinity);
+    resourceNeed = preyPursuitDrive;
+    const roamingDrive = clamp01(phase * (0.55 + traits.mobility * 0.45));
+    locomotionDrive = clamp01(Math.max(preyPursuitDrive, roamingDrive * 0.8));
     behavior = preyPursuitDrive > 0.64 ? "hunt"
       : preyPursuitDrive > 0.38 ? "stalk"
         : phase > 0.76 - traits.cognition * 0.12 ? "travel"
@@ -255,9 +264,11 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
       - traits.sociality * 0.05);
     threatIndex = threat;
     const rawNeed = clamp01((1 - (field.productivity ?? 0.6)) * 0.58 + (1 - (field.waterAccess ?? 0.6)) * 0.42);
-    const need = clamp01(rawNeed * (1 - traits.dietBreadth * 0.22));
+    resourceNeed = clamp01(rawNeed * (1 - traits.dietBreadth * 0.22));
+    waterNeed = clamp01(1 - (field.waterAccess ?? 0.6));
+    locomotionDrive = clamp01(Math.max(threatIndex, resourceNeed * 0.82, waterNeed * 0.35));
     behavior = threat > 0.66 ? "flee"
-      : need > 0.58 ? "travel"
+      : resourceNeed > 0.58 ? "travel"
         : phase < 0.15 ? "drink"
           : phase > 0.84 ? "rest"
             : "graze";
@@ -267,14 +278,15 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
   const seasonal = (Number(elapsedYears) || 0) * TAU;
   const headingWander = 0.82 - traits.cognition * 0.34;
   const heading = random01(seed + 17) * TAU + Math.sin(seasonal + random01(seed + 29) * TAU) * headingWander;
-  const baseDistanceKm = behavior === "flee" ? 0.16
-    : behavior === "travel" || behavior === "hunt" ? 0.11
-      : behavior === "stalk" ? 0.06
-        : behavior === "drink" ? 0.04
-          : 0.025;
+  // Physical displacement follows continuous internal/environmental drive.
+  // Named behaviors above classify that state for observers; they do not set
+  // the movement budget.
+  const baseDistanceKm = role === "carnivore"
+    ? 0.025 + locomotionDrive * 0.085
+    : 0.025 + locomotionDrive * 0.135;
   const mobilityScale = 0.70 + traits.mobility * 0.70;
   const distanceKm = baseDistanceKm * mobilityScale;
-  return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive });
+  return Object.freeze({ role, behavior, heading, distanceKm, threatIndex, preyPursuitDrive, resourceNeed, waterNeed, locomotionDrive });
 }
 
 function visiblePopulation(density, radiusKm) {
@@ -330,6 +342,9 @@ function buildGroups({ role, population, meanSize, radiusKm, individualRadiusKm,
       movementDistanceKm: behavior.distanceKm,
       threatIndex: behavior.threatIndex,
       preyPursuitDrive: behavior.preyPursuitDrive,
+      resourceNeed: behavior.resourceNeed,
+      waterNeed: behavior.waterNeed,
+      locomotionDrive: behavior.locomotionDrive,
       localSuitability,
       channelAffinity,
       plantMatterAffinity: feeding?.plantMatterAffinity ?? null,
