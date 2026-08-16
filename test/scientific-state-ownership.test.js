@@ -61,14 +61,19 @@ test("evolutionary lineages read aggregate animal biomass without rewriting it",
     greenhouseForcing: 0.2,
     iceIndex: 0.22,
     productivityIndex: 1.15,
+    animalBiomass: 1.79,
+    animalPlantMatterBiomass: 1.37,
+    animalLivePreyBiomass: 0.42,
     herbivoreBiomass: 1.37,
     carnivoreBiomass: 0.42
   };
+  const animalBefore = state.animalBiomass;
   const herbivoreBefore = state.herbivoreBiomass;
   const carnivoreBefore = state.carnivoreBiomass;
 
   advanceEvolutionaryEcology(state, 250, () => 0.5);
 
+  assert.equal(state.animalBiomass, animalBefore);
   assert.equal(state.herbivoreBiomass, herbivoreBefore);
   assert.equal(state.carnivoreBiomass, carnivoreBefore);
   assert.ok(Array.isArray(state.speciesLineages));
@@ -83,6 +88,9 @@ test("aggregate predation pressure selects lineage traits without becoming a sec
     greenhouseForcing: 0,
     iceIndex: 0.18,
     productivityIndex: 1.15,
+    animalBiomass: 1.79,
+    animalPlantMatterBiomass: 1.37,
+    animalLivePreyBiomass: 0.42,
     herbivoreBiomass: 1.37,
     carnivoreBiomass: 0.42,
     predationPressureIndex: 3,
@@ -92,6 +100,7 @@ test("aggregate predation pressure selects lineage traits without becoming a sec
       { id: 2, extinctionYearBP: null, populationIndex: 0.8, trophicLevel: 0.2, bodyMassLog10Kg: 1, thermalOptimumK: -0.8, mobility: 0.5, sociality: 1, cognition: 1, dietBreadth: 0.5, divergence: 0 }
     ]
   };
+  const animalBefore = state.animalBiomass;
   const herbivoreBefore = state.herbivoreBiomass;
   const carnivoreBefore = state.carnivoreBiomass;
   const pressureBefore = state.predationPressureIndex;
@@ -100,6 +109,7 @@ test("aggregate predation pressure selects lineage traits without becoming a sec
   advanceEvolutionaryEcology(state, 25, () => 1);
 
   assert.ok(state.speciesLineages[1].populationIndex > state.speciesLineages[0].populationIndex);
+  assert.equal(state.animalBiomass, animalBefore);
   assert.equal(state.herbivoreBiomass, herbivoreBefore);
   assert.equal(state.carnivoreBiomass, carnivoreBefore);
   assert.equal(state.predationPressureIndex, pressureBefore);
@@ -114,6 +124,9 @@ test("decaying aggregate predation exposure prolongs defensive lineage selection
     greenhouseForcing: 0,
     iceIndex: 0.18,
     productivityIndex: 1.15,
+    animalBiomass: 1.79,
+    animalPlantMatterBiomass: 1.37,
+    animalLivePreyBiomass: 0.42,
     herbivoreBiomass: 1.37,
     carnivoreBiomass: 0.42,
     predationPressureIndex: 0.05,
