@@ -22,7 +22,7 @@ There is no separate behavior state machine or collapse/reconstruction memory. S
 
 Final predator/prey envelope overlap also produces a bounded, deterministic **encounter-to-ecology proposal**. It combines multiple packs contacting the same herd without counting that herd twice and exposes only dimensionless contact pressure. The proposal is explicitly diagnostic: it does not remove local animals, mutate aggregate biomass, or let an observer's camera alter global history. A future aggregate-ecology owner may consume an equivalent spatially scheduled forcing independently of observation.
 
-The aggregate ecology owner also retains a bounded, short-lived **predation exposure index** from prior aggregate pressure. Demand-driven fauna may read that index when deriving current herd threat, but observed groups cannot write it. This is provisional aggregate ecological persistence, not organism memory, and it has no spatial or camera-dependent encounter history.
+The aggregate ecology owner also retains a bounded, short-lived **predation exposure index** from prior aggregate pressure. Demand-driven fauna refine that read-only signal through local prey support when deriving current herd threat, but observed groups cannot write either signal. This is provisional aggregate ecological persistence, not organism memory, and it has no spatial or camera-dependent encounter history.
 
 ## Surface work
 
