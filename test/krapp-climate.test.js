@@ -4,17 +4,31 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { checkpointState } from "../src/data/checkpoint-777.js";
-import { Krapp777ClimateLayer, KRAPP_777_META } from "../src/data/krapp-777-climate.js";
+import { Krapp777ClimateLayer, KRAPP_777_META, loadKrapp777Climate } from "../src/data/krapp-777-climate.js";
 import { regionalState } from "../src/sim/regional-state.js";
 
+const compressedAsset = readFileSync(new URL("../public/data/krapp-777-climate.bin.gz", import.meta.url));
+const rawAsset = gunzipSync(compressedAsset);
+
+function arrayBufferOf(bytes) {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function responseFor(bytes) {
+  return {
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => arrayBufferOf(bytes)
+  };
+}
+
 function loadLayer() {
-  const compressed = readFileSync(new URL("../public/data/krapp-777-climate.bin.gz", import.meta.url));
-  const digest = createHash("sha256").update(compressed).digest("hex");
+  const digest = createHash("sha256").update(compressedAsset).digest("hex");
   assert.equal(digest, KRAPP_777_META.assetSha256);
-  const raw = gunzipSync(compressed);
-  assert.equal(raw.byteLength, KRAPP_777_META.uncompressedBytes);
-  const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-  return new Krapp777ClimateLayer(buffer);
+  const rawDigest = createHash("sha256").update(rawAsset).digest("hex");
+  assert.equal(rawDigest, KRAPP_777_META.uncompressedSha256);
+  assert.equal(rawAsset.byteLength, KRAPP_777_META.uncompressedBytes);
+  return new Krapp777ClimateLayer(arrayBufferOf(rawAsset));
 }
 
 test("published Krapp 777 ka layer is checksum-valid and sampleable", () => {
@@ -27,6 +41,23 @@ test("published Krapp 777 ka layer is checksum-valid and sampleable", () => {
     assert.ok(sample.cloudCoverPercent >= 0 && sample.cloudCoverPercent <= 100);
     assert.equal(sample.availableMonths, 12);
   }
+});
+
+test("Krapp climate loader accepts the original gzip transport", async () => {
+  const layer = await loadKrapp777Climate({ fetchImpl: async () => responseFor(compressedAsset) });
+  assert.ok(layer.annualAt(0, 25));
+});
+
+test("Krapp climate loader accepts browser-transparent gzip decoding with raw integrity verification", async () => {
+  const layer = await loadKrapp777Climate({ fetchImpl: async () => responseFor(rawAsset) });
+  assert.ok(layer.annualAt(0, 25));
+
+  const corrupted = Buffer.from(rawAsset);
+  corrupted[corrupted.length - 1] ^= 1;
+  await assert.rejects(
+    () => loadKrapp777Climate({ fetchImpl: async () => responseFor(corrupted) }),
+    /uncompressed SHA-256 mismatch/
+  );
 });
 
 test("monthly Krapp access accepts names and numeric month indexes", () => {

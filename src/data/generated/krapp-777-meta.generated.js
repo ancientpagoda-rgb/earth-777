@@ -56,6 +56,7 @@ export const KRAPP_777_META = Object.freeze({
   "asset": "data/krapp-777-climate.bin.gz",
   "assetCompression": "gzip",
   "assetSha256": "607ba8e30d31bdc5eb10feb9e17c5945e6f72aab871c7508b84d717b060fa7df",
+  "uncompressedSha256": "023c1e1ab846203c388cece8dd2275b95b3c475b0ac334fb06f4815981cbcc90",
   "uncompressedBytes": 18662400,
   "compressedBytes": 3943589,
   "epistemicStatus": "study constrained published reconstruction at 777 ka; quantization is model-derived loss-limited preprocessing"

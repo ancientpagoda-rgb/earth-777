@@ -89,6 +89,7 @@ export const KRAPP_777_VEGETATION_META = Object.freeze({
   "asset": "data/krapp-777-vegetation.bin.gz",
   "assetCompression": "gzip",
   "assetSha256": "3f93f2e502c664c495a3ca5066907618824a9ec190ef295fb1bbc44efbc9a53b",
+  "uncompressedSha256": "81c91a5da31137ff4681ca32c92e7d08e7b43353f697a4a8ddcbc6bc7515b8bf",
   "uncompressedBytes": 7516800,
   "compressedBytes": 1138384,
   "epistemicStatus": "study-constrained published BIOME4 model output at 777 ka; compact quantization is model-derived loss-limited preprocessing"
