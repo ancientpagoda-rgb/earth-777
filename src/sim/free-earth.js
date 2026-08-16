@@ -11,7 +11,7 @@ import {
 } from "./EarthBiogeochemistry.js";
 import { advanceGeologicActivity, advanceLithosphere, initializeLithosphere } from "./DynamicLithosphere.js";
 import { advanceOceanCirculation, initializeOceanCirculation } from "./SpatialOceanCirculation.js";
-import { advanceEvolutionaryEcology, initializeEvolutionaryEcology } from "./EvolutionaryEcology.js";
+import { advanceEvolutionaryEcology, feedingProfileForLineage, initializeEvolutionaryEcology } from "./EvolutionaryEcology.js";
 import { advanceHomininLineages, initializeHomininLineages } from "./HomininLineages.js";
 import { createRandom, gaussian } from "./random.js";
 
@@ -20,45 +20,56 @@ const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-dtYears / tauYears));
 
-function meanLineageTrait(state, predicate, key, fallback = 0.5) {
-  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null && predicate(lineage));
-  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
-  if (total <= 0) return fallback;
-  return lineages.reduce((sum, lineage) => sum + clamp(Number(lineage[key]) || 0, 0, 1) * Math.max(0, Number(lineage.populationIndex) || 0), 0) / total;
+const plantMatterWeight = (lineage) => feedingProfileForLineage(lineage).plantMatterAffinity;
+const livePreyWeight = (lineage) => feedingProfileForLineage(lineage).livePreyAffinity;
+
+function lineageWeight(lineage, weightForLineage) {
+  return Math.max(0, Number(lineage.populationIndex) || 0) * clamp(Number(weightForLineage(lineage)) || 0, 0, 1);
 }
 
-function meanLineageBodyMassLog10Kg(state, predicate, fallback = 0.4) {
-  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null && predicate(lineage));
-  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
+function meanLineageTrait(state, weightForLineage, key, fallback = 0.5) {
+  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null);
+  const total = lineages.reduce((sum, lineage) => sum + lineageWeight(lineage, weightForLineage), 0);
   if (total <= 0) return fallback;
-  return lineages.reduce((sum, lineage) => sum + clamp(Number(lineage.bodyMassLog10Kg) || 0, -0.5, 3.5) * Math.max(0, Number(lineage.populationIndex) || 0), 0) / total;
+  return lineages.reduce((sum, lineage) => sum
+    + clamp(Number(lineage[key]) || 0, 0, 1) * lineageWeight(lineage, weightForLineage), 0) / total;
 }
 
-function meanLineageThermalAdaptation(state, predicate, fallback = 1) {
+function meanLineageBodyMassLog10Kg(state, weightForLineage, fallback = 0.4) {
+  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null);
+  const total = lineages.reduce((sum, lineage) => sum + lineageWeight(lineage, weightForLineage), 0);
+  if (total <= 0) return fallback;
+  return lineages.reduce((sum, lineage) => sum
+    + clamp(Number(lineage.bodyMassLog10Kg) || 0, -0.5, 3.5) * lineageWeight(lineage, weightForLineage), 0) / total;
+}
+
+function meanLineageThermalAdaptation(state, weightForLineage, fallback = 1) {
   const temperature = Number(state.temperatureAnomaly);
   if (!Number.isFinite(temperature)) return fallback;
   const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null
-    && predicate(lineage)
     && Number.isFinite(Number(lineage.thermalOptimumK)));
-  const total = lineages.reduce((sum, lineage) => sum + Math.max(0, Number(lineage.populationIndex) || 0), 0);
+  const total = lineages.reduce((sum, lineage) => sum + lineageWeight(lineage, weightForLineage), 0);
   if (total <= 0) return fallback;
   return lineages.reduce((sum, lineage) => {
     const fit = Math.exp(-0.12 * (temperature - Number(lineage.thermalOptimumK)) ** 2);
-    return sum + fit * Math.max(0, Number(lineage.populationIndex) || 0);
+    return sum + fit * lineageWeight(lineage, weightForLineage);
   }, 0) / total;
 }
 
 function applyAggregatePredation(state, dtYears) {
   const herbivoreBiomass = positive(state.herbivoreBiomass, 0.001);
   const carnivoreBiomass = positive(state.carnivoreBiomass, 0.001);
-  const predatorMobility = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) >= 0.55, "mobility");
-  const predatorCognition = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) >= 0.55, "cognition");
-  const predatorDietBreadth = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) >= 0.55, "dietBreadth");
-  const preyMobility = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "mobility");
-  const preySociality = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "sociality");
-  const preyCognition = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "cognition");
-  const predatorBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, (lineage) => Number(lineage.trophicLevel) >= 0.55);
-  const preyBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, (lineage) => Number(lineage.trophicLevel) < 0.55);
+  // These legacy aggregate channels remain authoritative for compatibility,
+  // but lineage traits participate continuously according to feeding affinity.
+  // Carrion affinity does not imply active pursuit and is not a hunting weight.
+  const predatorMobility = meanLineageTrait(state, livePreyWeight, "mobility");
+  const predatorCognition = meanLineageTrait(state, livePreyWeight, "cognition");
+  const predatorDietBreadth = meanLineageTrait(state, livePreyWeight, "dietBreadth");
+  const preyMobility = meanLineageTrait(state, plantMatterWeight, "mobility");
+  const preySociality = meanLineageTrait(state, plantMatterWeight, "sociality");
+  const preyCognition = meanLineageTrait(state, plantMatterWeight, "cognition");
+  const predatorBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, livePreyWeight);
+  const preyBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, plantMatterWeight);
   const huntingEffectiveness = clamp(0.22 + predatorMobility * 0.46 + predatorCognition * 0.32, 0.05, 1);
   const escapeEffectiveness = clamp(0.18 + preyMobility * 0.38 + preySociality * 0.28 + preyCognition * 0.16, 0.05, 1);
   const massMismatch = Math.abs((preyBodyMassLog10Kg - predatorBodyMassLog10Kg) - 0.45);
@@ -216,7 +227,9 @@ export class FreeEarthEngine {
     const iceAvailability = Math.exp(-0.72 * (state.iceIndex - b.iceIndex));
     // Vegetation remains the sole productivity writer. Aggregate herbivore
     // biomass is a read-only consumer pressure, not a second vegetation model.
-    const herbivoreDietBreadth = meanLineageTrait(state, (lineage) => Number(lineage.trophicLevel) < 0.55, "dietBreadth");
+    // The legacy diagnostic name remains, but all plant-consuming lineages
+    // contribute continuously according to plant-matter affinity.
+    const herbivoreDietBreadth = meanLineageTrait(state, plantMatterWeight, "dietBreadth");
     const grazingPressure = clamp(
       positive(state.herbivoreBiomass, 0) / (positive(state.herbivoreBiomass, 0) + 1.25) * (1 - herbivoreDietBreadth * 0.26),
       0,
@@ -230,7 +243,7 @@ export class FreeEarthEngine {
     this.fidelity.recordExecution("vegetation", 1);
 
     this.fidelity.execute("herbivores", dt, (subDt) => {
-      const thermalAdaptation = meanLineageThermalAdaptation(state, (lineage) => Number(lineage.trophicLevel) < 0.55);
+      const thermalAdaptation = meanLineageThermalAdaptation(state, plantMatterWeight);
       state.herbivoreThermalAdaptationIndex = thermalAdaptation;
       const carryingCapacity = positive(state.productivityIndex * Math.exp(-0.16 * (state.iceIndex - b.iceIndex)) * (0.42 + thermalAdaptation * 0.58), 0.01);
       state.herbivoreBiomass = positive(relax(state.herbivoreBiomass, carryingCapacity, subDt, 34), 0.001);
@@ -238,7 +251,7 @@ export class FreeEarthEngine {
 
     this.fidelity.execute("carnivores", dt, (subDt) => {
       applyAggregatePredation(state, subDt);
-      const thermalAdaptation = meanLineageThermalAdaptation(state, (lineage) => Number(lineage.trophicLevel) >= 0.55);
+      const thermalAdaptation = meanLineageThermalAdaptation(state, livePreyWeight);
       state.carnivoreThermalAdaptationIndex = thermalAdaptation;
       const preySupportedCapacity = positive(state.herbivoreBiomass ** 0.92 * state.productivityIndex ** 0.08 * (0.42 + thermalAdaptation * 0.58), 0.001);
       state.carnivoreBiomass = positive(relax(state.carnivoreBiomass, preySupportedCapacity, subDt, 48), 0.001);
