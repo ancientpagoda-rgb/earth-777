@@ -30,6 +30,14 @@ Only the regional and local fauna grids that are actually consumed are generated
 
 `SurfaceEcologyManager` handles vegetation, rocks, and rivers. Fauna has one rendering path. Hominins and built-environment presentation remain outside the surface stack until their dedicated evidence phase.
 
+## Emergent category direction
+
+The current runtime still uses provisional labels such as herbivore/carnivore, herd/pack, hunt, flee, graze, drink, and rest as causal shortcuts. These are scaffolding, not the intended final ontology.
+
+Future higher-fidelity work should increasingly derive those labels from continuous feeding ecology, traits, needs, perception, geometry, resource acquisition, and physical interaction. Labels may remain for UI, diagnostics, testing, and coarse summaries, but should become descriptive rather than prescriptive.
+
+See [`EMERGENT_CATEGORIES.md`](./EMERGENT_CATEGORIES.md) for the project rule and migration direction.
+
 ## Scientific boundary
 
 Current abundance and behavior remain provisional functional models. They are not yet calibrated to Neotoma or Paleobiology Database occurrence envelopes.
