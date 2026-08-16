@@ -69,7 +69,10 @@ test("selected-region PFT diagnostics consume the conserved trace and run compet
   assert.equal(diagnostics.competitiveOccupancyEnabled, true);
   assert.equal(diagnostics.categoricalBiomeTransitionsEnabled, true);
   assert.ok(diagnostics.competition);
+  assert.ok(diagnostics.classifier);
+  assert.equal(diagnostics.classifier.appliedToVegetation, false);
   assert.ok(diagnostics.succession);
+  assert.equal(diagnostics.succession.candidateBiomeCode, diagnostics.classifier.biomeCode);
   assert.equal(diagnostics.succession.progress, 0);
   assert.equal(diagnostics.succession.biomeLabel, baseline.biomeLabel);
   for (const candidate of diagnostics.candidates) {
