@@ -6,22 +6,22 @@ import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xa2b3aa);
-  scene.fog = new THREE.Fog(0xa2b3aa, 1.4, 44);
+  scene.fog = new THREE.Fog(0xa2b3aa, 1.4, 440);
 
-  const camera = new THREE.PerspectiveCamera(61, 1, 0.0007, 650);
+  const camera = new THREE.PerspectiveCamera(61, 1, 0.00005, 1200);
   const controls = new OrbitControls(camera, canvas);
   controls.enabled = false;
   controls.enableDamping = true;
   controls.dampingFactor = 0.065;
   controls.enablePan = true;
   controls.screenSpacePanning = true;
-  controls.minDistance = 0.004;
-  controls.maxDistance = 8;
-  controls.minPolarAngle = 0.05;
-  controls.maxPolarAngle = Math.PI * 0.495;
+  controls.minDistance = 0.00035;
+  controls.maxDistance = 160;
+  controls.minPolarAngle = 0.02;
+  controls.maxPolarAngle = Math.PI * 0.499;
   controls.rotateSpeed = 0.42;
   controls.panSpeed = 0.48;
-  controls.zoomSpeed = 0.62;
+  controls.zoomSpeed = 1.0;
 
   const sky = new Sky();
   sky.scale.setScalar(420);

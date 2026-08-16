@@ -27,17 +27,17 @@ function createStars(count = 700) {
 export function createGlobePresentation(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x030907);
-  scene.fog = new THREE.FogExp2(0x030907, 0.016);
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.01, 100);
+  scene.fog = new THREE.FogExp2(0x030907, 0.004);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.001, 500);
   camera.position.set(0, 0.7, 4.25);
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.055;
   controls.enablePan = false;
-  controls.minDistance = 2.2;
-  controls.maxDistance = 8.2;
+  controls.minDistance = 1.425;
+  controls.maxDistance = 120;
   controls.rotateSpeed = 0.48;
-  controls.zoomSpeed = 0.7;
+  controls.zoomSpeed = 1.0;
 
   const earthMaterial = new THREE.MeshStandardMaterial({
     color: 0x36503c,

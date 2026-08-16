@@ -208,47 +208,35 @@ export class EarthView {
   }
 
   orbitBy(deltaAzimuth, deltaPolar) {
-    if (this.mode !== "globe" || (!deltaAzimuth && !deltaPolar)) return;
-    const offset = this.camera.position.clone().sub(this.controls.target);
+    if (this.mode === "descent" || (!deltaAzimuth && !deltaPolar)) return;
+    const camera = this.mode === "surface" ? this.surfaceCamera : this.camera;
+    const controls = this.mode === "surface" ? this.surfaceControls : this.controls;
+    const offset = camera.position.clone().sub(controls.target);
     const spherical = new THREE.Spherical().setFromVector3(offset);
+    const minPolar = Number.isFinite(controls.minPolarAngle) ? Math.max(0.001, controls.minPolarAngle) : 0.18;
+    const maxPolar = Number.isFinite(controls.maxPolarAngle) ? Math.min(Math.PI - 0.001, controls.maxPolarAngle) : Math.PI - 0.18;
     spherical.theta -= deltaAzimuth;
-    spherical.phi = clamp(spherical.phi + deltaPolar, 0.18, Math.PI - 0.18);
+    spherical.phi = clamp(spherical.phi + deltaPolar, minPolar, maxPolar);
     offset.setFromSpherical(spherical);
-    this.camera.position.copy(this.controls.target).add(offset);
-    this.camera.lookAt(this.controls.target);
+    camera.position.copy(controls.target).add(offset);
+    camera.lookAt(controls.target);
     this.continuousUntilMs = performance.now() + 400;
-    this.controls.update();
+    controls.update();
     this.invalidate();
   }
 
   zoomBy(deltaDistance) {
-    if (this.mode !== "globe" || !deltaDistance) return;
-    const offset = this.camera.position.clone().sub(this.controls.target);
-    offset.setLength(clamp(offset.length() + deltaDistance, this.controls.minDistance, this.controls.maxDistance));
-    this.camera.position.copy(this.controls.target).add(offset);
+    if (this.mode === "descent" || !deltaDistance) return;
+    const camera = this.mode === "surface" ? this.surfaceCamera : this.camera;
+    const controls = this.mode === "surface" ? this.surfaceControls : this.controls;
+    const offset = camera.position.clone().sub(controls.target);
+    const currentDistance = Math.max(1e-12, offset.length());
+    const zoomScale = Math.exp(Number(deltaDistance) * 0.65);
+    offset.setLength(clamp(currentDistance * zoomScale, controls.minDistance, controls.maxDistance));
+    camera.position.copy(controls.target).add(offset);
     this.continuousUntilMs = performance.now() + 400;
-    this.controls.update();
+    controls.update();
     this.invalidate();
-  }
-
-  orbitBy(deltaAzimuth, deltaPolar) {
-    if (!deltaAzimuth && !deltaPolar) return;
-    const offset = this.camera.position.clone().sub(this.controls.target);
-    const spherical = new THREE.Spherical().setFromVector3(offset);
-    spherical.theta -= deltaAzimuth;
-    spherical.phi = clamp(spherical.phi + deltaPolar, 0.18, Math.PI - 0.18);
-    offset.setFromSpherical(spherical);
-    this.camera.position.copy(this.controls.target).add(offset);
-    this.camera.lookAt(this.controls.target);
-    this.controls.update();
-  }
-
-  zoomBy(deltaDistance) {
-    if (!deltaDistance) return;
-    const offset = this.camera.position.clone().sub(this.controls.target);
-    offset.setLength(clamp(offset.length() + deltaDistance, this.controls.minDistance, this.controls.maxDistance));
-    this.camera.position.copy(this.controls.target).add(offset);
-    this.controls.update();
   }
 
   resize() {
@@ -278,7 +266,8 @@ export class EarthView {
     } else {
       continuous = updateSurfaceEntry(this, now) || continuous;
       continuous = (this.surfaceControls.enabled && this.surfaceControls.update() === true) || continuous;
-      const floor = this.terrain.heightAt(this.surfaceCamera.position.x, this.surfaceCamera.position.z) + 0.18;
+      const cameraClearanceKm = Math.max(0.0002, this.surfaceCamera.near * 4);
+      const floor = this.terrain.heightAt(this.surfaceCamera.position.x, this.surfaceCamera.position.z) + cameraClearanceKm;
       if (this.surfaceCamera.position.y < floor) this.surfaceCamera.position.y = floor;
       this.terrain.update(this.surfaceCamera.position);
       const pumpBudget = this.interacting ? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS;
