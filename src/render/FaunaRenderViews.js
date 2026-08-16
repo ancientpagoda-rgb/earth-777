@@ -20,14 +20,31 @@ export function observedGroupViews(observed = {}) {
   return Object.freeze(groups);
 }
 
+function renderPredationAffinity(actor = {}, parentGroup = null) {
+  const explicitAffinity = Number(actor?.predationAffinity ?? parentGroup?.predationAffinity);
+  const legacyPredator = actor?.role === "carnivore"
+    || actor?.representation === "pack"
+    || parentGroup?.role === "carnivore"
+    || parentGroup?.representation === "pack";
+  return Number.isFinite(explicitAffinity) ? clamp01(explicitAffinity) : legacyPredator ? 1 : 0;
+}
+
 export function faunaGroupRenderShape(group = {}) {
-  const explicitAffinity = Number(group?.predationAffinity);
-  const legacyPredator = group?.role === "carnivore" || group?.representation === "pack";
-  const predationAffinity = Number.isFinite(explicitAffinity) ? clamp01(explicitAffinity) : legacyPredator ? 1 : 0;
+  const predationAffinity = renderPredationAffinity(group);
   return Object.freeze({
     predationAffinity,
     longitudinalScale: 2.3 - predationAffinity * 0.7,
     verticalScale: 0.72 - predationAffinity * 0.10,
     lateralScale: 1
+  });
+}
+
+export function faunaIndividualRenderShape(animal = {}, parentGroup = null) {
+  const predationAffinity = renderPredationAffinity(animal, parentGroup);
+  return Object.freeze({
+    predationAffinity,
+    longitudinalScale: 1.8 - predationAffinity * 0.25,
+    verticalScale: 1,
+    lateralScale: 0.8
   });
 }
