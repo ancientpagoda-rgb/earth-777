@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { checkpointState } from "../src/data/checkpoint-777.js";
 import { Krapp777ClimateLayer, KRAPP_777_META } from "../src/data/krapp-777-climate.js";
-import { regionalState } from "../src/sim/free-earth.js";
+import { regionalState } from "../src/sim/regional-state.js";
 
 function loadLayer() {
   const compressed = readFileSync(new URL("../public/data/krapp-777-climate.bin.gz", import.meta.url));
@@ -39,13 +39,13 @@ test("monthly Krapp access accepts names and numeric month indexes", () => {
 test("regional state preserves the Krapp checkpoint but allows branch hydroclimate to evolve", () => {
   const layer = loadLayer();
   const checkpoint = checkpointState();
-  const base = regionalState(checkpoint, 0, 25, layer);
+  const base = regionalState(checkpoint, 0, 25, { climateLayer: layer });
   assert.equal(base.climateSource, "krapp-2021-777ka");
   assert.match(base.confidence, /published reconstruction/);
   assert.ok(Number.isFinite(base.annualPrecipitation));
   assert.ok(Number.isFinite(base.cloudCover));
 
-  const later = regionalState({ ...checkpoint, elapsedYears: 1_000, temperatureAnomaly: checkpoint.temperatureAnomaly + 1 }, 0, 25, layer);
+  const later = regionalState({ ...checkpoint, elapsedYears: 1_000, temperatureAnomaly: checkpoint.temperatureAnomaly + 1 }, 0, 25, { climateLayer: layer });
   assert.ok(Math.abs((later.annualTemperature - base.annualTemperature) - 1) < 0.11);
   assert.notEqual(later.annualPrecipitation, base.annualPrecipitation);
   assert.notEqual(later.cloudCover, base.cloudCover);
@@ -54,7 +54,7 @@ test("regional state preserves the Krapp checkpoint but allows branch hydroclima
 });
 
 test("regional climate safely falls back when no Krapp layer is supplied", () => {
-  const region = regionalState(checkpointState(), 52, 13, null);
+  const region = regionalState(checkpointState(), 52, 13);
   assert.ok(Number.isFinite(region.annualTemperature));
   assert.equal(region.climateSource, "regional-emulator");
   assert.equal(region.checkpointClimate, false);
