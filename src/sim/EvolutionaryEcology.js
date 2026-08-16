@@ -36,7 +36,7 @@ function initialLineage(seed, index) {
   };
 }
 
-export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v1";
+export const EVOLUTIONARY_ECOLOGY_POLICY = "energy-limited-open-lineage-evolution-v2";
 
 export function initializeEvolutionaryEcology(state, seed = 777001) {
   if (!Array.isArray(state.speciesLineages)) {
@@ -70,6 +70,17 @@ function nicheCompetition(lineage, lineages) {
     overlap += similarity * positive(other.populationIndex, 0);
   }
   return overlap;
+}
+
+function predationSelectionFeedback(state, lineage) {
+  const pressure = Math.max(0, Number(state.predationPressureIndex) || 0);
+  if (pressure <= 0) return 1;
+  if (Number(lineage.trophicLevel) < 0.55) {
+    const evasion = clamp01(0.18 + clamp01(lineage.mobility) * 0.35 + clamp01(lineage.sociality) * 0.27 + clamp01(lineage.cognition) * 0.20);
+    return Math.exp(-pressure * 0.18 * (1 - evasion));
+  }
+  const hunting = clamp01(0.20 + clamp01(lineage.mobility) * 0.45 + clamp01(lineage.cognition) * 0.35);
+  return 1 + pressure * 0.09 * hunting;
 }
 
 function mutate(parent, childId, state, random) {
@@ -108,7 +119,8 @@ export function advanceEvolutionaryEcology(state, dtYears, random = Math.random)
     const competition = nicheCompetition(lineage, lineages);
     const breadthBuffer = 0.62 + lineage.dietBreadth * 0.76;
     const mobilityBuffer = 0.72 + lineage.mobility * climateVariability * 0.22;
-    const carryingCapacity = positive(support * thermalFitness * breadthBuffer * mobilityBuffer / (0.55 + competition * 0.42), 1e-8);
+    const predationFeedback = predationSelectionFeedback(state, lineage);
+    const carryingCapacity = positive(support * thermalFitness * breadthBuffer * mobilityBuffer * predationFeedback / (0.55 + competition * 0.42), 1e-8);
     const ecologicalTau = 46 + 110 * 10 ** Math.max(-0.5, lineage.bodyMassLog10Kg) / 1000;
     lineage.populationIndex = positive(relax(lineage.populationIndex, carryingCapacity, dt, ecologicalTau), 1e-12);
 
