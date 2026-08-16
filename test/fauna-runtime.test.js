@@ -134,6 +134,24 @@ test("observed fauna is deterministic for seed, place, and time", () => {
   assert.deepEqual(first.individuals, second.individuals);
 });
 
+test("observed fauna materializes from a supplied aggregate field", () => {
+  const radiusKm = 3;
+  const faunaField = faunaPopulationAt({
+    state,
+    vegetationSample: vegetation,
+    hydrologySample: hydrology,
+    latitude: 39,
+    longitude: -95,
+    areaKm2: Math.PI * radiusKm * radiusKm,
+    key: "observed-window"
+  });
+  const plan = buildObservedFauna({ state, vegetationSample: vegetation, hydrologySample: hydrology, faunaField, latitude: 39, longitude: -95, seed: 777001, windowRadiusKm: radiusKm, individualRadiusKm: 0.6 });
+
+  assert.equal(plan.field, faunaField);
+  assert.equal(plan.herds.reduce((sum, herd) => sum + herd.population, 0), faunaField.herbivorePopulation);
+  assert.equal(plan.packs.reduce((sum, pack) => sum + pack.population, 0), faunaField.carnivorePopulation);
+});
+
 test("observed groups inherit identity from living evolutionary lineages", () => {
   const lineageState = {
     ...state,

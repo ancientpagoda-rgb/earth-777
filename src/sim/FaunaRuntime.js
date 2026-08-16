@@ -654,6 +654,7 @@ export function buildObservedFauna({
   state = {},
   vegetationSample = null,
   hydrologySample = null,
+  faunaField = null,
   latitude = 0,
   longitude = 0,
   seed = 777001,
@@ -665,7 +666,7 @@ export function buildObservedFauna({
   const radiusKm = Math.max(0.05, Number(windowRadiusKm) || 3.5);
   const nearRadiusKm = clamp(individualRadiusKm, 0.05, radiusKm);
   const elapsedYears = Number(state.elapsedYears) || 0;
-  const field = faunaPopulationAt({
+  const field = faunaField ?? faunaPopulationAt({
     state,
     vegetationSample,
     hydrologySample,
