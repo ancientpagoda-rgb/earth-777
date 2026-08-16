@@ -66,6 +66,47 @@ test("cell fauna summaries read their own environmental context", () => {
   assert.ok(summaries[0].herbivoreDensityAnimalsPerKm2 > summaries[1].herbivoreDensityAnimalsPerKm2);
 });
 
+test("demand-driven fauna fields and observed detail cannot write aggregate ecology", () => {
+  const authoritativeState = {
+    ...state,
+    predationExposureIndex: 1.4,
+    speciesLineages: [
+      lineage({ id: 301, trophicLevel: 0.2 }),
+      lineage({ id: 302, trophicLevel: 0.8, mobility: 0.8, cognition: 0.8 })
+    ]
+  };
+  const before = structuredClone(authoritativeState);
+  const cells = [cell("regional", "wet", 30, 40, -100, -90), cell("local", "dry", 38, 39, -96, -95)];
+  const fields = faunaForCells(cells, {
+    state: authoritativeState,
+    environmentForCell: (entry) => entry.key === "wet"
+      ? { state: authoritativeState, vegetationSample: { biomeCode: 17, npp: 1600 }, hydrologySample: { surfaceRunoffMmPerYear: 700 } }
+      : { state: authoritativeState, vegetationSample: { biomeCode: 28, npp: 30 }, hydrologySample: { surfaceRunoffMmPerYear: 5 } }
+  });
+  const nearby = faunaPopulationAt({
+    state: authoritativeState,
+    vegetationSample: vegetation,
+    hydrologySample: hydrology,
+    latitude: 39,
+    longitude: -95,
+    areaKm2: Math.PI * 3 ** 2,
+    key: "observed-window"
+  });
+  const plan = buildObservedFauna({
+    state: authoritativeState,
+    faunaField: nearby,
+    latitude: 39,
+    longitude: -95,
+    seed: 777001,
+    windowRadiusKm: 3,
+    individualRadiusKm: 3
+  });
+
+  assert.equal(fields.length, 2);
+  assert.equal(plan.field, nearby);
+  assert.deepEqual(authoritativeState, before);
+});
+
 test("group behavior is deterministic and moves with simulated time", () => {
   const field = faunaPopulationAt({ state, vegetationSample: vegetation, hydrologySample: hydrology, areaKm2: 10 });
   const a = faunaGroupBehaviorAt({ role: "herbivore", id: "herd-a", elapsedYears: 4, field });
