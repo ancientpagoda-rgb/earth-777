@@ -39,12 +39,6 @@ jobs:
       - name: Build for GitHub Pages
         run: npm run build -- --base=/earth-777/
 
-      - name: Report raw reconstruction digests
-        shell: bash
-        run: |
-          echo "climate_raw_sha256=$(gzip -dc public/data/krapp-777-climate.bin.gz | sha256sum | cut -d' ' -f1)"
-          echo "vegetation_raw_sha256=$(gzip -dc public/data/krapp-777-vegetation.bin.gz | sha256sum | cut -d' ' -f1)"
-
       - name: Browser smoke test
         shell: bash
         run: |
