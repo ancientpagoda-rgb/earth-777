@@ -5,8 +5,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v17";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous threat/resource/pursuit locomotion drives, deterministic target acquisition, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and named behavior labels remain descriptive compatibility scaffolding rather than lineage, targeting, or locomotion commands; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v18";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving continuous feeding affinities and lineage traits, local suitability, continuous threat/resource/pursuit locomotion drives, perceived-threat response, deterministic target acquisition, bounded approach movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; legacy herd/pack and named behavior labels remain descriptive compatibility scaffolding rather than lineage, targeting, or locomotion commands; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -494,7 +494,22 @@ function respondTargetedHerds(herds, packs) {
     const dx = herd.x - nearest.x;
     const dz = herd.z - nearest.z;
     const heading = threatDistanceBeforeKm > 1e-12 ? Math.atan2(dz, dx) : herd.heading + Math.PI;
-    const fleeDistanceKm = Math.max(0, Number(herd.movementDistanceKm) || 0);
+    const hasContinuousLocomotion = herd.locomotionDrive != null;
+    const perceptionRadiusKm = Math.max(1e-12, Number(nearest.herdThreatPerceptionRadiusKm) || herdThreatPerceptionRadiusKm(herd));
+    const proximityDrive = clamp01(1 - threatDistanceBeforeKm / perceptionRadiusKm);
+    const pursuitDrive = clamp01(nearest.preyPursuitDrive ?? 0);
+    const multipleThreatDrive = clamp01(threats.length / 3);
+    const directThreatDrive = clamp01(proximityDrive * 0.65 + pursuitDrive * 0.25 + multipleThreatDrive * 0.10);
+    const responseLocomotionDrive = hasContinuousLocomotion
+      ? clamp01(Math.max(herd.locomotionDrive, directThreatDrive))
+      : null;
+    const mobilityScale = 0.70 + clamp01(herd.mobility ?? 0.5) * 0.70;
+    const continuousResponseDistanceKm = hasContinuousLocomotion
+      ? (0.025 + responseLocomotionDrive * 0.135) * mobilityScale
+      : 0;
+    const fleeDistanceKm = hasContinuousLocomotion
+      ? Math.max(Math.max(0, Number(herd.movementDistanceKm) || 0), continuousResponseDistanceKm)
+      : Math.max(0, Number(herd.movementDistanceKm) || 0);
     const fleeXKm = Math.cos(heading) * fleeDistanceKm;
     const fleeZKm = Math.sin(heading) * fleeDistanceKm;
     const x = herd.x + fleeXKm;
@@ -510,7 +525,9 @@ function respondTargetedHerds(herds, packs) {
       threatLineageId: nearest.lineageId ?? null,
       threatDistanceKm,
       threatDistanceBeforeKm,
-      threatPerceptionRadiusKm: nearest.herdThreatPerceptionRadiusKm,
+      threatPerceptionRadiusKm: perceptionRadiusKm,
+      directThreatDrive,
+      responseLocomotionDrive,
       threatenedByCount: threats.length,
       fleeDistanceKm,
       fleeXKm,
