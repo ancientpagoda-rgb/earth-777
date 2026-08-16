@@ -78,7 +78,10 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
   if (dt <= 0) return state;
   const temperature = Number(state.temperatureAnomaly ?? -1.27);
   const productivity = positive(state.productivityIndex ?? 1, 0.001);
-  const prey = positive(state.herbivoreBiomass ?? 1, 0.001);
+  const preyBiomass = positive(
+    state.animalPlantMatterBiomass ?? state.herbivoreBiomass ?? state.animalBiomass ?? 1,
+    0.001
+  );
   const ecologicalDiversity = Math.log1p(Math.max(0, Number(state.speciesRichness) || 1));
   const climateVariability = Math.min(3, Math.abs(Number(state.greenhouseForcing) || 0) * 0.16 + Math.abs((state.iceIndex ?? 0.18) - 0.18) * 2.1);
   const living = state.homininLineages.filter((lineage) => lineage.extinctionYearBP == null);
@@ -89,7 +92,7 @@ export function advanceHomininLineages(state, dtYears, random = Math.random) {
     const thermalBuffer = 0.58 + lineage.fireReliance * 0.34 + technology * 0.22;
     const climateSuitability = Math.exp(-0.045 * (temperature + 0.7 - lineage.ecologicalBreadth * 1.4) ** 2 * (1.2 - thermalBuffer * 0.35));
     const subsistence = productivity ** (0.36 + lineage.ecologicalBreadth * 0.18)
-      * prey ** (0.18 + technology * 0.16)
+      * preyBiomass ** (0.18 + technology * 0.16)
       * (1 + ecologicalDiversity * 0.055);
     const cooperation = 0.66 + lineage.sociality * 0.52 + lineage.communication * 0.33;
     const carryingCapacity = positive(subsistence * climateSuitability * cooperation * (0.58 + lineage.mobility * 0.38 + technology * 0.24), 1e-8);
