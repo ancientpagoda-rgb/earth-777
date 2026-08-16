@@ -86,6 +86,7 @@ test("aggregate predation pressure selects lineage traits without becoming a sec
     herbivoreBiomass: 1.37,
     carnivoreBiomass: 0.42,
     predationPressureIndex: 3,
+    predationExposureIndex: 2,
     speciesLineages: [
       { id: 1, extinctionYearBP: null, populationIndex: 0.8, trophicLevel: 0.2, bodyMassLog10Kg: 1, thermalOptimumK: -0.8, mobility: 0.5, sociality: 0, cognition: 0, dietBreadth: 0.5, divergence: 0 },
       { id: 2, extinctionYearBP: null, populationIndex: 0.8, trophicLevel: 0.2, bodyMassLog10Kg: 1, thermalOptimumK: -0.8, mobility: 0.5, sociality: 1, cognition: 1, dietBreadth: 0.5, divergence: 0 }
@@ -94,6 +95,7 @@ test("aggregate predation pressure selects lineage traits without becoming a sec
   const herbivoreBefore = state.herbivoreBiomass;
   const carnivoreBefore = state.carnivoreBiomass;
   const pressureBefore = state.predationPressureIndex;
+  const exposureBefore = state.predationExposureIndex;
 
   advanceEvolutionaryEcology(state, 25, () => 1);
 
@@ -101,6 +103,7 @@ test("aggregate predation pressure selects lineage traits without becoming a sec
   assert.equal(state.herbivoreBiomass, herbivoreBefore);
   assert.equal(state.carnivoreBiomass, carnivoreBefore);
   assert.equal(state.predationPressureIndex, pressureBefore);
+  assert.equal(state.predationExposureIndex, exposureBefore);
 });
 
 test("Free Earth keeps advanced hominin spatial systems parked", () => {

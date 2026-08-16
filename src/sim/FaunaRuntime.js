@@ -3,8 +3,8 @@ const KM_PER_DEGREE_LATITUDE = 111.32;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const clamp01 = (value) => clamp(value, 0, 1);
 
-export const FAUNA_POLICY = "earth777-fauna-runtime-v13";
-export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; not yet fossil-calibrated";
+export const FAUNA_POLICY = "earth777-fauna-runtime-v14";
+export const FAUNA_EPISTEMIC_STATUS = "provisional functional fauna derived from modeled productivity, water, instantaneous and aggregate-history predator/prey pressure, evolving lineage traits, local suitability, deterministic predator-prey targeting, bounded approach movement, direct herd threat response, bounded herd flee movement, local social alarm response, bounded alarm movement, geometric encounter outcomes, and diagnostic encounter-to-ecology proposals; not yet fossil-calibrated";
 export const ENCOUNTER_ECOLOGY_POLICY = "observed-geometric-predation-proposal-v1";
 
 function fract(value) { return value - Math.floor(value); }
@@ -135,6 +135,9 @@ export function faunaPopulationAt({
     40
   );
   const predatorPressure = clamp(carnivoreBiomass / Math.max(0.05, herbivoreBiomass), 0, 3);
+  // Read-only aggregate temporal context from FreeEarthEngine. Observing or
+  // materializing fauna can never create or modify this state.
+  const predationExposure = clamp(state.predationExposureIndex ?? 0, 0, 3);
   const carnivoreDensity = clamp(herbivoreDensity * (0.012 + predatorPressure * 0.018), 0, 1.6);
   const preyPressure = clamp01(herbivoreDensity / 8);
   const area = Math.max(0, Number(areaKm2) || 0);
@@ -161,6 +164,7 @@ export function faunaPopulationAt({
     productivity,
     waterAccess,
     predatorPressure,
+    predationExposure,
     preyPressure,
     biomeCode: vegetationSample?.biomeCode ?? null
   });
@@ -180,13 +184,17 @@ export function faunaForCells(cells = [], context = {}) {
 
 export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsedYears = 0, field = {}, lineage = null } = {}) {
   const phase = fract((Number(elapsedYears) || 0) * 365.2425 + random01(hashText(id)) * 31.7);
+  let threatIndex = null;
   if (!lineage) {
     let behavior;
     if (role === "carnivore") {
       const huntDrive = clamp01((field.preyPressure ?? 0.5) * 0.76 + phase * 0.24);
       behavior = huntDrive > 0.64 ? "hunt" : phase > 0.72 ? "travel" : phase > 0.38 ? "stalk" : "rest";
     } else {
-      const threat = clamp01((field.predatorPressure ?? 0.1) * 0.72 + random01(hashText(id) + Math.floor(elapsedYears * 12)) * 0.18);
+      const threat = clamp01((field.predatorPressure ?? 0.1) * 0.62
+        + (field.predationExposure ?? 0) * 0.10
+        + random01(hashText(id) + Math.floor(elapsedYears * 12)) * 0.18);
+      threatIndex = threat;
       const need = clamp01((1 - (field.productivity ?? 0.6)) * 0.58 + (1 - (field.waterAccess ?? 0.6)) * 0.42);
       behavior = threat > 0.66 ? "flee"
         : need > 0.58 ? "travel"
@@ -202,7 +210,7 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
         : behavior === "stalk" ? 0.06
           : behavior === "drink" ? 0.04
             : 0.025;
-    return Object.freeze({ role, behavior, heading, distanceKm });
+    return Object.freeze({ role, behavior, heading, distanceKm, threatIndex });
   }
 
   const traits = lineageTraits(lineage);
@@ -215,10 +223,12 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
         : phase > 0.42 - traits.cognition * 0.12 ? "stalk"
           : "rest";
   } else {
-    const threat = clamp01((field.predatorPressure ?? 0.1) * 0.68
+    const threat = clamp01((field.predatorPressure ?? 0.1) * 0.58
+      + (field.predationExposure ?? 0) * 0.12
       + random01(hashText(id) + Math.floor(elapsedYears * 12)) * 0.18
       + traits.cognition * 0.05
       - traits.sociality * 0.05);
+    threatIndex = threat;
     const rawNeed = clamp01((1 - (field.productivity ?? 0.6)) * 0.58 + (1 - (field.waterAccess ?? 0.6)) * 0.42);
     const need = clamp01(rawNeed * (1 - traits.dietBreadth * 0.22));
     behavior = threat > 0.66 ? "flee"
@@ -239,7 +249,7 @@ export function faunaGroupBehaviorAt({ role = "herbivore", id = "group", elapsed
           : 0.025;
   const mobilityScale = 0.70 + traits.mobility * 0.70;
   const distanceKm = baseDistanceKm * mobilityScale;
-  return Object.freeze({ role, behavior, heading, distanceKm });
+  return Object.freeze({ role, behavior, heading, distanceKm, threatIndex });
 }
 
 function visiblePopulation(density, radiusKm) {
