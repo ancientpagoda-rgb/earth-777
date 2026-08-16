@@ -142,7 +142,7 @@ export function syncAggregateFaunaProjections(state = {}, { acceptLegacyInput = 
 
 export function updateAggregateGrazingPressure(state = {}) {
   syncAggregateFaunaProjections(state, { preserveShares: true });
-  const plantMatterBiomass = positive(state.animalPlantMatterBiomass, 0);
+  const plantMatterBiomass = Math.max(0, Number(state.animalPlantMatterBiomass) || 0);
   const plantDietBreadth = meanLineageTrait(state, plantMatterWeight, "dietBreadth");
   const grazingPressure = clamp(
     plantMatterBiomass / (plantMatterBiomass + 1.25) * (1 - plantDietBreadth * 0.26),
@@ -156,8 +156,8 @@ export function updateAggregateGrazingPressure(state = {}) {
 }
 
 function applyAggregatePredation(state, dtYears) {
-  const plantMatterBiomass = positive(state.animalPlantMatterBiomass, 0.001);
-  const livePreyBiomass = positive(state.animalLivePreyBiomass, 0.001);
+  const plantMatterBiomass = Math.max(0, Number(state.animalPlantMatterBiomass) || 0);
+  const livePreyBiomass = Math.max(0, Number(state.animalLivePreyBiomass) || 0);
   const predatorMobility = meanLineageTrait(state, livePreyWeight, "mobility");
   const predatorCognition = meanLineageTrait(state, livePreyWeight, "cognition");
   const predatorDietBreadth = meanLineageTrait(state, livePreyWeight, "dietBreadth");
@@ -172,7 +172,7 @@ function applyAggregatePredation(state, dtYears) {
   const massCompatibility = Math.exp(-0.55 * massMismatch * (1 - predatorDietBreadth * 0.52));
   const preyAvailability = plantMatterBiomass / (plantMatterBiomass + 0.28);
   const pressure = livePreyBiomass * preyAvailability * huntingEffectiveness * massCompatibility * (1 - escapeEffectiveness * 0.72);
-  const lossRatePerYear = 0.003 + pressure * 0.012;
+  const lossRatePerYear = pressure * 0.012;
   const loss = plantMatterBiomass * (1 - Math.exp(-Math.max(0, dtYears) * lossRatePerYear));
 
   // Predation mortality now changes the one aggregate animal pool. Feeding
@@ -211,7 +211,7 @@ export function advanceAggregateFauna(state = {}, dtYears = 0, { baselineIceInde
     0.01
   );
   const livePreySupportedCapacity = positive(
-    positive(state.animalPlantMatterBiomass, 0.001) ** 0.92
+    Math.max(0.001, Number(state.animalPlantMatterBiomass) || 0) ** 0.92
       * productivity ** 0.08
       * (0.42 + livePreyThermalAdaptation * 0.58),
     0.001
