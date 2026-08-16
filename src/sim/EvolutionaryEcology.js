@@ -94,9 +94,20 @@ export function initializeEvolutionaryEcology(state, seed = 777001) {
 function resourceSupport(state, lineage) {
   const productivity = positive(state.productivityIndex ?? 1, 0.001);
   const feeding = feedingProfileForLineage(lineage);
+  const legacyPlantBiomass = Math.max(0, Number(state.herbivoreBiomass) || 0);
+  const legacyLivePreyBiomass = Math.max(0, Number(state.carnivoreBiomass) || 0);
+  const legacyAnimalBiomass = ((legacyPlantBiomass + legacyLivePreyBiomass) / 2) || 1;
+  const plantMatterBiomass = positive(
+    state.animalPlantMatterBiomass ?? state.herbivoreBiomass ?? state.animalBiomass ?? 1,
+    0.001
+  );
+  const animalBiomass = positive(state.animalBiomass ?? legacyAnimalBiomass, 0.001);
   const plantSupport = productivity ** (0.35 + feeding.plantMatterAffinity * 0.65);
-  const preySupport = positive(state.herbivoreBiomass ?? 1, 0.001) ** (feeding.livePreyAffinity * 0.82);
-  const carrionSupport = positive(state.carnivoreBiomass ?? 1, 0.001) ** (feeding.carrionAffinity * 0.12);
+  const preySupport = plantMatterBiomass ** (feeding.livePreyAffinity * 0.82);
+  // Carrion can originate from any animal. Total animal biomass is therefore
+  // the substrate proxy; carrion affinity is a resource tendency, not a
+  // separate scavenger population or an implication of active pursuit.
+  const carrionSupport = animalBiomass ** (feeding.carrionAffinity * 0.12);
   return plantSupport * preySupport * carrionSupport;
 }
 
