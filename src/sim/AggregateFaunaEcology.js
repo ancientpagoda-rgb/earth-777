@@ -110,24 +110,30 @@ export function initializeAggregateFauna(state = {}) {
 }
 
 export function syncAggregateFaunaProjections(state = {}, { acceptLegacyInput = false, preserveShares = false } = {}) {
+  // Capture compatibility fields before initialization reasserts the derived
+  // projections, otherwise an intentional legacy write would be invisible.
+  const incomingAnimalBiomass = Number(state.animalBiomass);
+  const hadAggregateBiomass = Number.isFinite(incomingAnimalBiomass);
+  const incomingLegacyPlant = Math.max(0, Number(state.herbivoreBiomass) || 0);
+  const incomingLegacyLive = Math.max(0, Number(state.carnivoreBiomass) || 0);
+  const incomingShares = storedFeedingShares(state);
+
   initializeAggregateFauna(state);
-  const previousShares = storedFeedingShares(state) ?? aggregateFeedingShares(state);
+  const previousShares = incomingShares ?? storedFeedingShares(state) ?? aggregateFeedingShares(state);
   let shares = preserveShares ? previousShares : aggregateFeedingShares(state);
 
-  if (acceptLegacyInput) {
-    const legacyPlant = Math.max(0, Number(state.herbivoreBiomass) || 0);
-    const legacyLive = Math.max(0, Number(state.carnivoreBiomass) || 0);
-    const expectedPlant = positive(state.animalBiomass, 0.001) * previousShares.plantMatterShare;
-    const expectedLive = positive(state.animalBiomass, 0.001) * previousShares.livePreyShare;
-    const changedExternally = Math.abs(legacyPlant - expectedPlant) > 1e-9 || Math.abs(legacyLive - expectedLive) > 1e-9;
-    const legacyTotal = legacyPlant + legacyLive;
+  if (acceptLegacyInput && hadAggregateBiomass) {
+    const expectedPlant = positive(incomingAnimalBiomass, 0.001) * previousShares.plantMatterShare;
+    const expectedLive = positive(incomingAnimalBiomass, 0.001) * previousShares.livePreyShare;
+    const changedExternally = Math.abs(incomingLegacyPlant - expectedPlant) > 1e-9 || Math.abs(incomingLegacyLive - expectedLive) > 1e-9;
+    const legacyTotal = incomingLegacyPlant + incomingLegacyLive;
 
     if (changedExternally && legacyTotal > 0) {
       // Transitional compatibility bridge for callers/tests that still set the
       // legacy projections directly. Once ingested, the projections immediately
       // return to being read-only views of the unified biomass.
       state.animalBiomass = legacyTotal;
-      shares = { plantMatterShare: legacyPlant / legacyTotal, livePreyShare: legacyLive / legacyTotal };
+      shares = { plantMatterShare: incomingLegacyPlant / legacyTotal, livePreyShare: incomingLegacyLive / legacyTotal };
     }
   }
 
