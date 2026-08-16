@@ -11,7 +11,13 @@ import {
 } from "./EarthBiogeochemistry.js";
 import { advanceGeologicActivity, advanceLithosphere, initializeLithosphere } from "./DynamicLithosphere.js";
 import { advanceOceanCirculation, initializeOceanCirculation } from "./SpatialOceanCirculation.js";
-import { advanceEvolutionaryEcology, feedingProfileForLineage, initializeEvolutionaryEcology } from "./EvolutionaryEcology.js";
+import { advanceEvolutionaryEcology, initializeEvolutionaryEcology } from "./EvolutionaryEcology.js";
+import {
+  advanceAggregateFauna,
+  initializeAggregateFauna,
+  syncAggregateFaunaProjections,
+  updateAggregateGrazingPressure
+} from "./AggregateFaunaEcology.js";
 import { advanceHomininLineages, initializeHomininLineages } from "./HomininLineages.js";
 import { createRandom, gaussian } from "./random.js";
 
@@ -19,79 +25,6 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
 const round = (value, digits = 4) => Number(value.toFixed(digits));
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-dtYears / tauYears));
-
-const plantMatterWeight = (lineage) => feedingProfileForLineage(lineage).plantMatterAffinity;
-const livePreyWeight = (lineage) => feedingProfileForLineage(lineage).livePreyAffinity;
-
-function lineageWeight(lineage, weightForLineage) {
-  return Math.max(0, Number(lineage.populationIndex) || 0) * clamp(Number(weightForLineage(lineage)) || 0, 0, 1);
-}
-
-function meanLineageTrait(state, weightForLineage, key, fallback = 0.5) {
-  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null);
-  const total = lineages.reduce((sum, lineage) => sum + lineageWeight(lineage, weightForLineage), 0);
-  if (total <= 0) return fallback;
-  return lineages.reduce((sum, lineage) => sum
-    + clamp(Number(lineage[key]) || 0, 0, 1) * lineageWeight(lineage, weightForLineage), 0) / total;
-}
-
-function meanLineageBodyMassLog10Kg(state, weightForLineage, fallback = 0.4) {
-  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null);
-  const total = lineages.reduce((sum, lineage) => sum + lineageWeight(lineage, weightForLineage), 0);
-  if (total <= 0) return fallback;
-  return lineages.reduce((sum, lineage) => sum
-    + clamp(Number(lineage.bodyMassLog10Kg) || 0, -0.5, 3.5) * lineageWeight(lineage, weightForLineage), 0) / total;
-}
-
-function meanLineageThermalAdaptation(state, weightForLineage, fallback = 1) {
-  const temperature = Number(state.temperatureAnomaly);
-  if (!Number.isFinite(temperature)) return fallback;
-  const lineages = (state.speciesLineages ?? []).filter((lineage) => lineage.extinctionYearBP == null
-    && Number.isFinite(Number(lineage.thermalOptimumK)));
-  const total = lineages.reduce((sum, lineage) => sum + lineageWeight(lineage, weightForLineage), 0);
-  if (total <= 0) return fallback;
-  return lineages.reduce((sum, lineage) => {
-    const fit = Math.exp(-0.12 * (temperature - Number(lineage.thermalOptimumK)) ** 2);
-    return sum + fit * lineageWeight(lineage, weightForLineage);
-  }, 0) / total;
-}
-
-function applyAggregatePredation(state, dtYears) {
-  const herbivoreBiomass = positive(state.herbivoreBiomass, 0.001);
-  const carnivoreBiomass = positive(state.carnivoreBiomass, 0.001);
-  // These legacy aggregate channels remain authoritative for compatibility,
-  // but lineage traits participate continuously according to feeding affinity.
-  // Carrion affinity does not imply active pursuit and is not a hunting weight.
-  const predatorMobility = meanLineageTrait(state, livePreyWeight, "mobility");
-  const predatorCognition = meanLineageTrait(state, livePreyWeight, "cognition");
-  const predatorDietBreadth = meanLineageTrait(state, livePreyWeight, "dietBreadth");
-  const preyMobility = meanLineageTrait(state, plantMatterWeight, "mobility");
-  const preySociality = meanLineageTrait(state, plantMatterWeight, "sociality");
-  const preyCognition = meanLineageTrait(state, plantMatterWeight, "cognition");
-  const predatorBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, livePreyWeight);
-  const preyBodyMassLog10Kg = meanLineageBodyMassLog10Kg(state, plantMatterWeight);
-  const huntingEffectiveness = clamp(0.22 + predatorMobility * 0.46 + predatorCognition * 0.32, 0.05, 1);
-  const escapeEffectiveness = clamp(0.18 + preyMobility * 0.38 + preySociality * 0.28 + preyCognition * 0.16, 0.05, 1);
-  const massMismatch = Math.abs((preyBodyMassLog10Kg - predatorBodyMassLog10Kg) - 0.45);
-  const massCompatibility = Math.exp(-0.55 * massMismatch * (1 - predatorDietBreadth * 0.52));
-  const preyAvailability = herbivoreBiomass / (herbivoreBiomass + 0.28);
-  const pressure = carnivoreBiomass * preyAvailability * huntingEffectiveness * massCompatibility * (1 - escapeEffectiveness * 0.72);
-  const lossRatePerYear = 0.003 + pressure * 0.012;
-  const loss = herbivoreBiomass * (1 - Math.exp(-Math.max(0, dtYears) * lossRatePerYear));
-  state.herbivoreBiomass = positive(herbivoreBiomass - loss, 0.001);
-  state.predationPressureIndex = pressure;
-  // This short aggregate history belongs to the aggregate ecology owner, never
-  // to demand-driven observed groups. It is not organism memory or a spatial
-  // encounter record.
-  state.predationExposureIndex = clamp(relax(
-    clamp(state.predationExposureIndex ?? 0, 0, 3),
-    pressure,
-    Math.max(0, dtYears),
-    110
-  ), 0, 3);
-  state.predationMassCompatibilityIndex = massCompatibility;
-  state.predationHerbivoreLossPerYear = loss / Math.max(1e-9, dtYears);
-}
 
 export function stageForYearBP(yearBP) {
   const year = Math.max(0, Number(yearBP) || 0);
@@ -118,6 +51,7 @@ export class FreeEarthEngine {
     initializeLithosphere(this.state, this.seed);
     initializeOceanCirculation(this.state);
     initializeEvolutionaryEcology(this.state, this.seed);
+    initializeAggregateFauna(this.state);
     initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
@@ -141,6 +75,7 @@ export class FreeEarthEngine {
     initializeLithosphere(this.state, this.seed);
     initializeOceanCirculation(this.state);
     initializeEvolutionaryEcology(this.state, this.seed);
+    initializeAggregateFauna(this.state);
     initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
@@ -220,42 +155,23 @@ export class FreeEarthEngine {
       state.seaLevel = relax(state.seaLevel, seaLevelTarget, subDt, 700);
     });
 
+    // Accept direct writes to the old fields only as a transition bridge for
+    // older callers/tests. From this point onward they are projections of the
+    // one authoritative animalBiomass field.
+    syncAggregateFaunaProjections(state, { acceptLegacyInput: true });
+
     const b = BIOGEOCHEMISTRY_BASELINE;
     const co2Saturation = (state.co2 / (state.co2 + 180)) / (b.co2Ppm / (b.co2Ppm + 180));
     const temperatureSuitability = Math.exp(-0.035 * ((state.temperatureAnomaly - 0.4) ** 2 - (b.temperatureAnomalyK - 0.4) ** 2));
     const nitrogenAvailability = positive(state.terrestrialReactiveNitrogenTgN) / b.nitrogen.terrestrialReactiveTgN;
     const iceAvailability = Math.exp(-0.72 * (state.iceIndex - b.iceIndex));
-    // Vegetation remains the sole productivity writer. Aggregate herbivore
-    // biomass is a read-only consumer pressure, not a second vegetation model.
-    // The legacy diagnostic name remains, but all plant-consuming lineages
-    // contribute continuously according to plant-matter affinity.
-    const herbivoreDietBreadth = meanLineageTrait(state, plantMatterWeight, "dietBreadth");
-    const grazingPressure = clamp(
-      positive(state.herbivoreBiomass, 0) / (positive(state.herbivoreBiomass, 0) + 1.25) * (1 - herbivoreDietBreadth * 0.26),
-      0,
-      1
-    );
-    state.grazingPressureIndex = grazingPressure;
-    state.herbivoreDietBreadthIndex = herbivoreDietBreadth;
+    const grazingPressure = updateAggregateGrazingPressure(state);
     const grazingImpact = 1 - grazingPressure * 0.14;
     const productivityTarget = positive(co2Saturation ** 0.48 * temperatureSuitability * nitrogenAvailability ** 0.16 * iceAvailability * grazingImpact, 0.01);
     state.productivityIndex = positive(relax(state.productivityIndex, productivityTarget, dt, 55), 0.01);
     this.fidelity.recordExecution("vegetation", 1);
 
-    this.fidelity.execute("herbivores", dt, (subDt) => {
-      const thermalAdaptation = meanLineageThermalAdaptation(state, plantMatterWeight);
-      state.herbivoreThermalAdaptationIndex = thermalAdaptation;
-      const carryingCapacity = positive(state.productivityIndex * Math.exp(-0.16 * (state.iceIndex - b.iceIndex)) * (0.42 + thermalAdaptation * 0.58), 0.01);
-      state.herbivoreBiomass = positive(relax(state.herbivoreBiomass, carryingCapacity, subDt, 34), 0.001);
-    });
-
-    this.fidelity.execute("carnivores", dt, (subDt) => {
-      applyAggregatePredation(state, subDt);
-      const thermalAdaptation = meanLineageThermalAdaptation(state, livePreyWeight);
-      state.carnivoreThermalAdaptationIndex = thermalAdaptation;
-      const preySupportedCapacity = positive(state.herbivoreBiomass ** 0.92 * state.productivityIndex ** 0.08 * (0.42 + thermalAdaptation * 0.58), 0.001);
-      state.carnivoreBiomass = positive(relax(state.carnivoreBiomass, preySupportedCapacity, subDt, 48), 0.001);
-    });
+    this.fidelity.execute("fauna", dt, (subDt) => advanceAggregateFauna(state, subDt, { baselineIceIndex: b.iceIndex }));
 
     const animalLineagesBefore = new Set((state.speciesLineages ?? [])
       .filter((lineage) => lineage.extinctionYearBP == null && lineage.populationIndex > 0)
@@ -264,6 +180,10 @@ export class FreeEarthEngine {
       .filter((lineage) => lineage.extinctionYearBP == null && lineage.populationIndex > 0)
       .map((lineage) => lineage.id));
     this.fidelity.execute("evolution", dt, (subDt) => advanceEvolutionaryEcology(state, subDt, this.evolutionRandom));
+    // Evolution changes lineage abundances/feeding composition but never the
+    // aggregate biomass owner. Re-project the unchanged total through the new
+    // lineage mixture before downstream systems observe it.
+    syncAggregateFaunaProjections(state);
     this.fidelity.execute("hominins", dt, (subDt) => advanceHomininLineages(state, subDt, this.homininRandom));
     this._recordLineageEvents(animalLineagesBefore, homininLineagesBefore);
 
@@ -327,13 +247,23 @@ export class FreeEarthEngine {
       geologicActivityIndex: round(this.state.geologicActivityIndex, 4), tectonicTimeMyr: round(this.state.tectonicTimeMyr, 6),
       tectonicBoundaryActivity: round(this.state.tectonicBoundaryActivity, 4), mantleHeatIndex: round(this.state.mantleHeatIndex, 4),
       productivityIndex: round(this.state.productivityIndex, 4),
+      animalBiomass: round(this.state.animalBiomass, 4),
+      animalPlantMatterBiomass: round(this.state.animalPlantMatterBiomass, 4),
+      animalLivePreyBiomass: round(this.state.animalLivePreyBiomass, 4),
+      animalPlantMatterShare: round(this.state.animalPlantMatterShare, 4),
+      animalLivePreyShare: round(this.state.animalLivePreyShare, 4),
+      animalCarryingCapacityIndex: round(this.state.animalCarryingCapacityIndex ?? this.state.animalBiomass, 4),
       herbivoreBiomass: round(this.state.herbivoreBiomass, 4), carnivoreBiomass: round(this.state.carnivoreBiomass, 4),
       predationPressureIndex: round(this.state.predationPressureIndex ?? 0, 4),
       predationExposureIndex: round(this.state.predationExposureIndex ?? 0, 4),
       predationMassCompatibilityIndex: round(this.state.predationMassCompatibilityIndex ?? 0, 4),
+      predationAnimalLossPerYear: round(this.state.predationAnimalLossPerYear ?? 0, 6),
       predationHerbivoreLossPerYear: round(this.state.predationHerbivoreLossPerYear ?? 0, 6),
       grazingPressureIndex: round(this.state.grazingPressureIndex ?? 0, 4),
+      animalPlantDietBreadthIndex: round(this.state.animalPlantDietBreadthIndex ?? 0.5, 4),
       herbivoreDietBreadthIndex: round(this.state.herbivoreDietBreadthIndex ?? 0.5, 4),
+      animalPlantMatterThermalAdaptationIndex: round(this.state.animalPlantMatterThermalAdaptationIndex ?? 1, 4),
+      animalLivePreyThermalAdaptationIndex: round(this.state.animalLivePreyThermalAdaptationIndex ?? 1, 4),
       herbivoreThermalAdaptationIndex: round(this.state.herbivoreThermalAdaptationIndex ?? 1, 4),
       carnivoreThermalAdaptationIndex: round(this.state.carnivoreThermalAdaptationIndex ?? 1, 4),
       speciesRichness: this.state.speciesRichness, evolutionaryNoveltyIndex: round(this.state.evolutionaryNoveltyIndex, 4),
