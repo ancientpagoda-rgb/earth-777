@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { FAUNA_EPISTEMIC_STATUS, FAUNA_POLICY, buildObservedFauna, faunaForCells } from "../sim/FaunaRuntime.js";
+import { FAUNA_EPISTEMIC_STATUS, FAUNA_POLICY, buildObservedFauna, faunaForCells, faunaPopulationAt } from "../sim/FaunaRuntime.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
@@ -119,6 +119,13 @@ export class SurfaceFaunaManager {
     this.regionalFields = faunaForCells(cells.filter((cell) => cell.scope === "regional"), this.context);
     this.localFields = faunaForCells(cells.filter((cell) => cell.scope === "local"), this.context);
     const focus = this.terrain._geographicAt?.(this.camera.x, this.camera.z) ?? this.context;
+    const faunaField = faunaPopulationAt({
+      ...this.context,
+      latitude: focus.latitude,
+      longitude: focus.longitude,
+      areaKm2: Math.PI * this.windowRadiusKm * this.windowRadiusKm,
+      key: "observed-window"
+    });
     this.observed = buildObservedFauna({
       ...this.context,
       latitude: focus.latitude,
@@ -126,6 +133,7 @@ export class SurfaceFaunaManager {
       seed: this.context.state?.seed ?? this.terrain.branchSeed ?? 777001,
       focusXKm: this.camera.x,
       focusZKm: this.camera.z,
+      faunaField,
       windowRadiusKm: this.windowRadiusKm,
       individualRadiusKm: this.individualRadiusKm
     });
