@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const earthView = readFileSync(new URL("../src/render/earth-view.js", import.meta.url), "utf8");
+const globePresentation = readFileSync(new URL("../src/render/GlobePresentation.js", import.meta.url), "utf8");
+const rasterRefresh = readFileSync(new URL("../src/render/RasterRefresh.js", import.meta.url), "utf8");
 const surfaceTerrain = readFileSync(new URL("../src/render/SurfaceTerrainSystem.js", import.meta.url), "utf8");
 
 test("surface render hot path checks pending work without materializing diagnostics", () => {
@@ -41,4 +43,17 @@ test("interaction prioritizes smooth frames before rebuilding all surface detail
   assert.match(earthView, /SURFACE_PUMP_ACTIVE_MS = 0\.9/);
   assert.match(earthView, /SURFACE_PUMP_IDLE_MS = 2\.3/);
   assert.match(earthView, /this\.interacting \? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS/);
+});
+
+test("globe drag disables damping only for the active gesture", () => {
+  assert.match(globePresentation, /dampingFactor = 0\.09/);
+  assert.match(globePresentation, /addEventListener\("start", \(\) => \{ controls\.enableDamping = false; \}\)/);
+  assert.match(globePresentation, /addEventListener\("end", \(\) => \{ controls\.enableDamping = true; \}\)/);
+});
+
+test("completed raster jobs wait until globe motion settles before GPU upload", () => {
+  assert.match(rasterRefresh, /applyWhenViewSettles/);
+  assert.match(rasterRefresh, /Boolean\(view\.interacting\)/);
+  assert.match(rasterRefresh, /performance\.now\(\) < \(Number\(view\.continuousUntilMs\) \|\| 0\)/);
+  assert.match(rasterRefresh, /setTimeout\(tryApply, RASTER_APPLY_RETRY_MS\)/);
 });
