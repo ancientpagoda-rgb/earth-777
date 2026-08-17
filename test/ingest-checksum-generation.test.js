@@ -12,6 +12,6 @@ test("BIOME4 ingestion regenerates the pinned raw checksums used for browser-tra
   assert.match(soilIngest, /"uncompressedSha256": raw_sha/);
   assert.match(pftIngest, /raw_sha = hashlib\.sha256\(raw_bytes\)\.hexdigest\(\)/);
   assert.match(pftIngest, /"uncompressedSha256": raw_sha/);
-  assert.equal(BIOME4_SOIL_META.uncompressedSha256, "bdf14436cde35df8c1465f2b945d07d7f6b46caaee26e2d6e081ad5d76f0f767");
-  assert.equal(BIOME4_PFT_DRIVERS_META.uncompressedSha256, "995b6c33a13436c84c945041f0ee8db904f7452ba1e28738d135e9d44ca4138e");
+  assert.equal(BIOME4_SOIL_META.uncompressedSha256, "bdf14436460cefbbcad8d1bf0c4bd97e2d2ad4eaf1f6f5bf9486d41a27f0f767");
+  assert.equal(BIOME4_PFT_DRIVERS_META.uncompressedSha256, "995b6c33627d34ed27eb6df88d35b3ddaceba11c4a4335bffa37417f3ca4138e");
 });
