@@ -52,7 +52,7 @@ export const BIOME4_SOIL_META = Object.freeze({
   "asset": "data/biome4-soil.bin.gz",
   "assetCompression": "gzip",
   "assetSha256": "9fe94404851f8ff73b90c38eedd775e160061b65b7e8b5783c3d7872731133de",
-  "uncompressedSha256": "bdf14436cde35df8c1465f2b945d07d7f6b46caaee26e2d6e081ad5d76f0f767",
+  "uncompressedSha256": "bdf14436460cefbbcad8d1bf0c4bd97e2d2ad4eaf1f6f5bf9486d41a27f0f767",
   "uncompressedBytes": 4406400,
   "compressedBytes": 138298,
   "license": "GPL-2.0-only (upstream BIOME4 4.1 package)",
