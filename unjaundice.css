@@ -1,0 +1,91 @@
+/* Neutral presentation override.
+   Removes the green/amber cast from the interface without filtering the scientific globe raster. */
+
+:root {
+  --bg: #05090d;
+  --panel: rgba(8, 13, 18, 0.92);
+  --panel-strong: rgba(10, 16, 22, 0.97);
+  --text: #d2dae1;
+  --strong: #f6f8fa;
+  --muted: #8794a0;
+  --jade: #86a9bc;
+  --jade-bright: #b7cfdb;
+  --amber: #c3ced8;
+  --blue: #79a8c4;
+  --border: rgba(134, 169, 188, 0.25);
+}
+
+html,
+body,
+.app-shell {
+  background: var(--bg);
+}
+
+.brand__mark {
+  background: rgba(8, 13, 18, 0.78);
+}
+
+.epoch {
+  background: rgba(5, 9, 13, 0.86);
+}
+
+.drawer-panel[open] > summary {
+  border-bottom-color: rgba(134, 169, 188, 0.13);
+}
+
+.provenance-note,
+.branch-row {
+  border-top-color: rgba(134, 169, 188, 0.12);
+}
+
+.primary-button,
+.quiet-button,
+.play-button,
+.close-button {
+  background: rgba(15, 23, 30, 0.9);
+}
+
+.primary-button {
+  color: #071016;
+}
+
+.quiet-button:hover {
+  border-color: rgba(134, 169, 188, 0.58);
+  background: rgba(134, 169, 188, 0.14);
+}
+
+input[type="range"] {
+  background: linear-gradient(
+    90deg,
+    var(--jade) var(--progress, 0%),
+    rgba(134, 169, 188, 0.2) var(--progress, 0%)
+  );
+}
+
+.speed-select select {
+  background: rgba(15, 23, 30, 0.94);
+}
+
+.branch-row i {
+  box-shadow: 0 0 7px rgba(134, 169, 188, 0.48);
+}
+
+.center-reticle {
+  border-color: rgba(151, 188, 207, 0.48);
+  box-shadow: 0 0 22px rgba(121, 168, 196, 0.13);
+}
+
+.center-reticle::before,
+.center-reticle::after {
+  background: rgba(183, 207, 219, 0.82);
+}
+
+.modal {
+  background: rgba(2, 5, 8, 0.76);
+}
+
+.source-item,
+.data-section {
+  border-color: rgba(134, 169, 188, 0.17);
+  background: rgba(5, 9, 13, 0.7);
+}
