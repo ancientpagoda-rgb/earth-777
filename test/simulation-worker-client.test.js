@@ -32,7 +32,8 @@ function readyClient() {
     type: "ready",
     requestId: init.requestId,
     version: init.version,
-    state: { yearBP: 777000 },
+    state: { yearBP: 777000, temperatureAnomaly: -1.27, events: [] },
+    stateMode: "full",
     fidelity: { targets: [] },
     durationMs: 1
   });
@@ -40,7 +41,7 @@ function readyClient() {
 }
 
 test("coalesces advance requests while one worker advance is in flight", async () => {
-  const { worker, client } = readyClient();
+  const { worker, client, states } = readyClient();
   await client.ready;
 
   client.queueAdvance(5);
@@ -57,10 +58,17 @@ test("coalesces advance requests while one worker advance is in flight", async (
     type: "advance",
     requestId: firstAdvance.requestId,
     version: firstAdvance.version,
-    state: { yearBP: 776995 },
-    fidelity: { targets: [] },
+    statePatch: { yearBP: 776995, elapsedYears: 5 },
+    stateMode: "delta",
+    patchKeys: 2,
     durationMs: 4
   });
+
+  assert.equal(states[0].state.yearBP, 776995);
+  assert.equal(states[0].state.temperatureAnomaly, -1.27);
+  assert.deepEqual(states[0].state.events, []);
+  assert.equal(client.diagnostics().lastStateMode, "delta");
+  assert.equal(client.diagnostics().lastPatchKeys, 2);
 
   const advances = worker.sent.filter((message) => message.type === "advance");
   assert.equal(advances.length, 2);
@@ -82,8 +90,9 @@ test("discards stale advance state after a version-changing seek", async () => {
     type: "advance",
     requestId: advance.requestId,
     version: advance.version,
-    state: { yearBP: 776990 },
-    fidelity: { targets: [] },
+    statePatch: { yearBP: 776990, temperatureAnomaly: 99 },
+    stateMode: "delta",
+    patchKeys: 2,
     durationMs: 8
   });
   assert.equal(states.length, 0);
@@ -92,12 +101,14 @@ test("discards stale advance state after a version-changing seek", async () => {
     type: "seek",
     requestId: seek.requestId,
     version: seek.version,
-    state: { yearBP: 775000 },
+    state: { yearBP: 775000, temperatureAnomaly: -1.1 },
+    stateMode: "full",
     fidelity: { targets: [] },
     durationMs: 12
   });
   const result = await seekPromise;
   assert.equal(result.state.yearBP, 775000);
+  assert.equal(result.state.temperatureAnomaly, -1.1);
   assert.equal(states.length, 1);
   assert.equal(states[0].type, "seek");
 });
@@ -116,8 +127,9 @@ test("clearPendingAdvance removes work that has not been sent yet", async () => 
     type: "advance",
     requestId: firstAdvance.requestId,
     version: firstAdvance.version,
-    state: { yearBP: 776995 },
-    fidelity: { targets: [] },
+    statePatch: { yearBP: 776995 },
+    stateMode: "delta",
+    patchKeys: 1,
     durationMs: 5
   });
   assert.equal(worker.sent.filter((message) => message.type === "advance").length, 1);
