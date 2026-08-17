@@ -63,14 +63,24 @@ test("regional observation and reconstruction science remain code-split out of s
   assert.doesNotMatch(main, /import\("\.\/sim\/EarthSystemHydrology\.js"\)/);
 });
 
-test("regional science yields to first interaction and publishes progressive stages", () => {
-  assert.match(main, /REGIONAL_SCIENCE_IDLE_TIMEOUT_MS = 750/);
-  assert.match(main, /requestIdleCallback/);
-  assert.match(main, /ensureRegionalScience\(\)\.then/);
+test("regional science starts only on selection and still publishes progressive stages", () => {
+  assert.doesNotMatch(main, /REGIONAL_SCIENCE_IDLE_TIMEOUT_MS/);
+  assert.doesNotMatch(main, /requestIdleCallback/);
+  assert.doesNotMatch(main, /scheduleRegionalScienceLoad/);
+  assert.match(main, /function handleRegionSelect[\s\S]*ensureRegionalScience\(\)\.then/);
   assert.match(regionalRuntime, /publish\("climate"/);
   assert.match(regionalRuntime, /publish\("hydrology-provisional"/);
   assert.match(regionalRuntime, /publish\("hydrology"/);
   assert.match(regionalRuntime, /publish\("complete"/);
+});
+
+test("quiet startup avoids eager source, journal, performance and regional-data work", () => {
+  assert.match(main, /let speed = 1;/);
+  assert.match(main, /let sourcesPopulated = false/);
+  assert.match(main, /if \(isSourcesOpen\(\)\) updateJournal\(state\)/);
+  assert.doesNotMatch(main, /\npopulateSources\(\);\nupdateInteractionHint/);
+  assert.doesNotMatch(main, /updatePerformanceHud\(performance\.now\(\), true\);\s*requestFrame\(\);\s*$/m);
+  assert.doesNotMatch(main, /scheduleRegionalScienceLoad\(\)/);
 });
 
 test("large regional assets are verified and decompressed in a dedicated worker", () => {
