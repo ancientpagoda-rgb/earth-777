@@ -40,7 +40,8 @@ export function createGlobePresentation(canvas) {
   controls.minDistance = 1.425;
   controls.maxDistance = 120;
   controls.rotateSpeed = 0.54;
-  controls.zoomSpeed = -1.0;
+  // OrbitControls' normal convention is wheel-up = zoom in and wheel-down = zoom out.
+  controls.zoomSpeed = 1.0;
 
   const earthMaterial = new THREE.MeshStandardMaterial({
     color: 0x36503c,
@@ -64,19 +65,25 @@ export function createGlobePresentation(canvas) {
   );
   scene.add(atmosphere);
 
-  // Direct manipulation gets a motion-specific presentation budget. Damping
-  // is disabled, large transparent blend passes are suppressed, and only the
-  // WebGL drawing buffer is temporarily reduced. CSS size, camera geometry,
-  // Earth texture detail, simulation state, and resting fidelity do not change.
-  // Rapid re-grabs remain in this cheaper mode until the same 900 ms settle
-  // window used by EarthView expires, then the original drawing-buffer ratio
-  // and atmospheric layers are restored in one redraw.
+  // Direct manipulation gets a motion-specific presentation budget, but a plain
+  // click must remain visually inert. OrbitControls emits `start` on pointer-down,
+  // so entering the cheaper presentation there caused the first selection click
+  // to resize the drawing buffer and blink transparent layers. We now wait for a
+  // real camera `change`, which occurs on an actual drag/zoom but not a click.
   let presentationRestoreTimer = null;
   let restingPixelRatio = null;
+  let restingCloudVisibility = null;
+  let restingAtmosphereVisibility = null;
+  let controlGestureActive = false;
+  let interactionPresentationActive = false;
 
   function enterInteractionPresentation() {
+    if (interactionPresentationActive) return;
+    interactionPresentationActive = true;
     if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
     presentationRestoreTimer = null;
+    restingCloudVisibility = clouds.visible;
+    restingAtmosphereVisibility = atmosphere.visible;
     clouds.visible = false;
     atmosphere.visible = false;
 
@@ -91,23 +98,32 @@ export function createGlobePresentation(canvas) {
   }
 
   function restoreInteractionPresentation() {
+    if (!interactionPresentationActive) return;
     if (restingPixelRatio != null) {
       canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * restingPixelRatio));
       canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * restingPixelRatio));
       restingPixelRatio = null;
     }
-    clouds.visible = true;
-    atmosphere.visible = true;
+    if (restingCloudVisibility != null) clouds.visible = restingCloudVisibility;
+    if (restingAtmosphereVisibility != null) atmosphere.visible = restingAtmosphereVisibility;
+    restingCloudVisibility = null;
+    restingAtmosphereVisibility = null;
+    interactionPresentationActive = false;
     presentationRestoreTimer = null;
     controls.dispatchEvent({ type: "change" });
   }
 
   controls.addEventListener("start", () => {
+    controlGestureActive = true;
     controls.enableDamping = false;
-    enterInteractionPresentation();
+  });
+  controls.addEventListener("change", () => {
+    if (controlGestureActive) enterInteractionPresentation();
   });
   controls.addEventListener("end", () => {
+    controlGestureActive = false;
     controls.enableDamping = true;
+    if (!interactionPresentationActive) return;
     if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
     presentationRestoreTimer = setTimeout(restoreInteractionPresentation, INTERACTION_PRESENTATION_SETTLE_MS);
   });
