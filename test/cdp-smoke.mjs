@@ -124,6 +124,16 @@ await wait(80);
 const sourcesOpened = await evaluate(`document.querySelector("#sources-modal").classList.contains("is-open")`);
 await evaluate(`document.querySelector("#sources-close").click()`);
 
+// The public UI deliberately defaults to 1×. The smoke gate only needs to prove
+// that playback can advance, so switch this synthetic check to 100× rather than
+// waiting more than ten seconds for the 10-year timeline slider step to change.
+const smokeStressSpeed = await evaluate(`(() => {
+  const select = document.querySelector("#speed-select");
+  if (!select) return null;
+  select.value = "100";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return select.value;
+})()`);
 await evaluate(`document.querySelector("#play-button").click()`);
 await wait(650);
 await evaluate(`document.querySelector("#play-button").click()`);
@@ -177,6 +187,7 @@ const checks = [
   [surfaceDiagnostics?.calls > 0 && surfaceDiagnostics?.triangles > 0, "surface renderer produced no geometry"],
   [returnedToGlobe, "surface mode did not return to globe"],
   [page.regionSelected, "globe region selection was lost after surface round trip"],
+  [smokeStressSpeed === "100", "smoke playback stress speed could not be set"],
   [page.yearAdvanced, "timeline did not advance"],
   [page.orbitReadout.includes("tilt"), "orbital forcing readout missing"],
   [page.seaLevelProvenance.includes("Spratt–Lisiecki"), "sea-level provenance missing"],
@@ -190,6 +201,7 @@ console.log(JSON.stringify({
   firstClick: { before: canvasBeforeFirstClick, after: canvasAfterFirstClick, bufferStable: firstClickBufferStable },
   renderDiagnostics,
   surface: { entered: surfaceEntered, diagnostics: surfaceDiagnostics, returnedToGlobe },
+  smokeStressSpeed,
   fallbackMessages,
   messages: runtimeMessages
 }, null, 2));
