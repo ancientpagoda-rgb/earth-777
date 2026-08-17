@@ -1,0 +1,45 @@
+/* Quiet default presentation: keep the globe and timeline primary.
+   Scientific state is still computed; these canvas overlays are simply not
+   painted until a dedicated data/debug surface is requested. */
+.state-panel,
+.perf-hud,
+.journal {
+  display: none !important;
+}
+
+/* Do not occupy the top-right corner until the user actually selects a place. */
+.location-panel:not([open]) {
+  display: none;
+}
+
+/* A selected place gets a compact action card instead of a wall of science text. */
+.location-panel {
+  width: 218px;
+}
+.location-panel #location-detail {
+  display: none;
+}
+.location-panel .drawer-body {
+  padding-top: 7px;
+}
+.location-panel .location-coordinates {
+  margin-bottom: 7px;
+}
+
+/* Keep timeline controls, but remove persistent provenance/seed labels from the canvas. */
+.branch-row > span {
+  display: none;
+}
+.branch-row {
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .location-panel {
+    top: 61px;
+    width: min(218px, calc(100% - 16px));
+  }
+}
