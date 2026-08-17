@@ -24,6 +24,34 @@ async function gunzip(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+async function resolveSoilPayload(received, verifyChecksum) {
+  let raw;
+  if (received.byteLength === BIOME4_SOIL_META.compressedBytes) {
+    if (verifyChecksum) {
+      const digest = await sha256Hex(received);
+      if (digest !== BIOME4_SOIL_META.assetSha256) throw new Error(`BIOME4 soil compressed SHA-256 mismatch: ${digest}`);
+    }
+    raw = await gunzip(received);
+  } else if (received.byteLength === BIOME4_SOIL_META.uncompressedBytes) {
+    // GitHub Pages/browser fetch may transparently decode Content-Encoding.
+    // Treat that as a transport representation only; the raw scientific bytes
+    // still have an independently pinned checksum below.
+    raw = received;
+  } else {
+    throw new Error(
+      `BIOME4 soil response length ${received.byteLength} matches neither compressed metadata ${BIOME4_SOIL_META.compressedBytes} nor uncompressed metadata ${BIOME4_SOIL_META.uncompressedBytes}.`
+    );
+  }
+  if (raw.byteLength !== BIOME4_SOIL_META.uncompressedBytes) {
+    throw new Error(`BIOME4 soil payload length ${raw.byteLength} does not match metadata ${BIOME4_SOIL_META.uncompressedBytes}.`);
+  }
+  if (verifyChecksum) {
+    const digest = await sha256Hex(raw);
+    if (digest !== BIOME4_SOIL_META.uncompressedSha256) throw new Error(`BIOME4 soil uncompressed SHA-256 mismatch: ${digest}`);
+  }
+  return raw;
+}
+
 export class Biome4SoilLayer {
   constructor(rawBytes, meta = BIOME4_SOIL_META) {
     const bytes = rawBytes instanceof Uint8Array
@@ -113,15 +141,8 @@ export async function loadBiome4Soil({ fetchImpl = globalThis.fetch, url = null,
   const assetUrl = url ?? `${base.replace(/\/?$/, "/")}${BIOME4_SOIL_META.asset.replace(/^\/+/, "")}`;
   const response = await fetchImpl(assetUrl);
   if (!response.ok) throw new Error(`Failed to load BIOME4 soil asset: HTTP ${response.status}`);
-  const compressed = new Uint8Array(await response.arrayBuffer());
-  if (compressed.byteLength !== BIOME4_SOIL_META.compressedBytes) {
-    throw new Error(`BIOME4 soil compressed length ${compressed.byteLength} does not match metadata ${BIOME4_SOIL_META.compressedBytes}.`);
-  }
-  if (verifyChecksum) {
-    const digest = await sha256Hex(compressed);
-    if (digest !== BIOME4_SOIL_META.assetSha256) throw new Error(`BIOME4 soil SHA-256 mismatch: ${digest}`);
-  }
-  return new Biome4SoilLayer(await gunzip(compressed), BIOME4_SOIL_META);
+  const received = new Uint8Array(await response.arrayBuffer());
+  return new Biome4SoilLayer(await resolveSoilPayload(received, verifyChecksum), BIOME4_SOIL_META);
 }
 
 export { BIOME4_SOIL_META };
