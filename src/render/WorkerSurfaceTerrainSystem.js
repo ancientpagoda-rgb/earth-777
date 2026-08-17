@@ -11,6 +11,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.surfaceEcology = new WorkerSurfaceEcologyManager(scene, this, this.computeClient);
     this.terrainGeneration = 0;
     this.terrainInFlight = 0;
+    this.terrainInFlightKeys = new Set();
     this.terrainCompleted = [];
     this.maxTerrainInFlight = 3;
     this.computeContextSignature = "";
@@ -38,6 +39,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     if (!force && signature === this.computeContextSignature) return false;
     this.computeContextSignature = signature;
     this.terrainGeneration += 1;
+    this.terrainInFlightKeys.clear();
     this.terrainCompleted = [];
     this.computeClient.setContext({
       origin: { ...this.origin },
@@ -53,6 +55,14 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     });
     this.surfaceEcology.invalidateComputeContext();
     return true;
+  }
+
+  update(cameraPosition) {
+    super.update(cameraPosition);
+    // TerrainChunkManager tracks queued work in queuedKeys. A worker task is no
+    // longer in the queue while it is computing, so preserve current-generation
+    // in-flight keys to prevent the base updater from enqueueing duplicates.
+    for (const key of this.terrainInFlightKeys) this.queuedKeys.add(key);
   }
 
   _meshFromResult(result, candidate) {
@@ -92,18 +102,22 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       const candidate = this.queue.shift();
       const generation = this.terrainGeneration;
       this.terrainInFlight += 1;
+      this.terrainInFlightKeys.add(candidate.key);
       this.computeClient.terrain(candidate.x, candidate.z).then((result) => {
         if (result && generation === this.terrainGeneration) this.terrainCompleted.push({ candidate, result });
         else if (generation === this.terrainGeneration) this.queuedKeys.delete(candidate.key);
       }).catch((error) => {
-        this.queuedKeys.delete(candidate.key);
-        if (generation === this.terrainGeneration && this._candidateStillWanted(candidate)) {
-          this.queue.unshift(candidate);
-          this.queuedKeys.add(candidate.key);
+        if (generation === this.terrainGeneration) {
+          this.queuedKeys.delete(candidate.key);
+          if (this._candidateStillWanted(candidate)) {
+            this.queue.unshift(candidate);
+            this.queuedKeys.add(candidate.key);
+          }
         }
         console.warn("Surface terrain worker task failed; retrying through the surface work queue.", error);
       }).finally(() => {
         this.terrainInFlight = Math.max(0, this.terrainInFlight - 1);
+        if (generation === this.terrainGeneration) this.terrainInFlightKeys.delete(candidate.key);
       });
     }
     return work;
@@ -182,6 +196,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
   clear() {
     super.clear();
     this.terrainGeneration = (this.terrainGeneration ?? 0) + 1;
+    this.terrainInFlightKeys?.clear?.();
     this.terrainCompleted = [];
     this.computeContextSignature = "";
   }
