@@ -27,6 +27,13 @@ const evaluate = async (expression) => {
   const response = await send("Runtime.evaluate", { expression, returnByValue: true });
   return response.result?.result?.value;
 };
+const refreshPerfHud = () => evaluate(`(() => {
+  const hud = document.querySelector("#perf-hud");
+  if (!hud) return false;
+  hud.open = true;
+  hud.dispatchEvent(new Event("toggle"));
+  return true;
+})()`);
 
 await send("Runtime.enable");
 await send("Log.enable");
@@ -34,15 +41,12 @@ await send("Page.enable");
 await send("Page.reload", { ignoreCache: true });
 await wait(2_500);
 
-await evaluate(`(() => {
-  const hud = document.querySelector("#perf-hud");
-  if (hud) hud.open = true;
-  return Boolean(hud);
-})()`);
+await refreshPerfHud();
 
 let renderDiagnostics = null;
 for (let attempt = 0; attempt < 20; attempt += 1) {
   await wait(500);
+  await refreshPerfHud();
   renderDiagnostics = await evaluate(`(() => {
     const calls = Number(document.querySelector("#perf-calls")?.textContent?.replace(/,/g, "")) || 0;
     const triangles = Number(document.querySelector("#perf-triangles")?.textContent?.replace(/,/g, "")) || 0;
@@ -75,7 +79,7 @@ const firstClickBufferStable = canvasBeforeFirstClick.width === canvasAfterFirst
   && canvasBeforeFirstClick.height === canvasAfterFirstClick.height;
 const regionSelectedBeforeSurface = await evaluate(`document.querySelector("#surface-button")?.disabled === false`);
 
-// Exercise the actual deferred surface bundle and the worker-backed terrain path.
+// Exercise the actual deferred surface bundle and worker-backed terrain path.
 await evaluate(`document.querySelector("#surface-button")?.click()`);
 let surfaceState = null;
 for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -87,10 +91,10 @@ for (let attempt = 0; attempt < 50; attempt += 1) {
   if (surfaceState?.button === "RETURN TO GLOBE") break;
 }
 const surfaceEntered = surfaceState?.button === "RETURN TO GLOBE";
-await evaluate(`(() => { const hud = document.querySelector("#perf-hud"); if (hud) hud.open = true; return true; })()`);
 let surfaceDiagnostics = null;
 for (let attempt = 0; attempt < 30; attempt += 1) {
   await wait(300);
+  await refreshPerfHud();
   surfaceDiagnostics = await evaluate(`(() => ({
     mode: document.querySelector("#perf-mode")?.textContent ?? "",
     chunks: document.querySelector("#perf-chunks")?.textContent ?? "deferred",
@@ -110,13 +114,18 @@ for (let attempt = 0; attempt < 15; attempt += 1) {
 }
 const returnedToGlobe = await evaluate(`document.querySelector("#surface-button")?.textContent === "DESCEND TO REGION"`);
 
+// Returning from surface mode intentionally keeps the view in its interaction
+// settle window for 900 ms. Wait past that before testing simulation advance so
+// the smoke gate measures playback rather than the deliberate interaction pause.
+await wait(1_150);
+
 await evaluate(`document.querySelector("#sources-button").click()`);
 await wait(80);
 const sourcesOpened = await evaluate(`document.querySelector("#sources-modal").classList.contains("is-open")`);
 await evaluate(`document.querySelector("#sources-close").click()`);
 
 await evaluate(`document.querySelector("#play-button").click()`);
-await wait(450);
+await wait(650);
 await evaluate(`document.querySelector("#play-button").click()`);
 
 const page = await evaluate(`({
