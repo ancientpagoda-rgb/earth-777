@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 
 function scienceChunks(id) {
   const path = id.replaceAll("\\", "/");
+  if (path.includes("/node_modules/three/")) return "vendor-three";
   if (path.includes("/src/data/generated/etopo-2022.generated.js")) return "terrain-etopo";
   if (path.includes("/src/sim/DynamicLithosphere.js")) return "dynamic-lithosphere";
   if (path.includes("/src/reconstruction/")) return "terrain-reconstruction";
