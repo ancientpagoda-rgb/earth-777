@@ -1,11 +1,5 @@
 /* Quiet default presentation: keep the globe and timeline primary.
-   Scientific state is still computed; these canvas overlays are simply not
-   painted until a dedicated data/debug surface is requested. */
-.state-panel,
-.perf-hud,
-.journal {
-  display: none !important;
-}
+   Full state, events, diagnostics, and provenance are available in the DATA modal. */
 
 /* Do not occupy the top-right corner until the user actually selects a place. */
 .location-panel:not([open]) {
@@ -37,9 +31,102 @@
   padding-top: 4px;
 }
 
+/* Data that used to float over the globe now lives in one deliberate surface. */
+.data-dashboard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.data-section {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(120, 168, 143, 0.16);
+  border-radius: 9px;
+  background: rgba(7, 16, 13, 0.66);
+}
+.data-section__heading small,
+.data-section__heading strong {
+  display: block;
+}
+.data-section__heading strong {
+  margin-top: 3px;
+  color: var(--strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+.data-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0 0;
+}
+.data-metrics div { min-width: 0; }
+.data-metrics dt {
+  color: var(--muted);
+  font-size: 8px;
+}
+.data-metrics dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--strong);
+  font: 10px "JetBrains Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-journal {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.data-journal li {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  font-size: 8px;
+  line-height: 1.35;
+}
+.data-journal time {
+  color: var(--amber);
+  font-family: "JetBrains Mono", monospace;
+}
+.data-journal span { color: var(--muted); }
+
+.modal .perf-hud {
+  position: static;
+  display: block;
+  width: auto;
+  right: auto;
+  bottom: auto;
+  grid-column: 1 / -1;
+}
+.modal .perf-hud > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.modal .perf-hud > summary::-webkit-details-marker { display: none; }
+.modal .perf-hud > summary::after {
+  content: "+";
+  float: right;
+  margin-top: -15px;
+  color: var(--muted);
+  font: 14px/1 "JetBrains Mono", monospace;
+}
+.modal .perf-hud[open] > summary::after { content: "−"; }
+.modal .perf-hud .perf-grid { margin-top: 12px; }
+
 @media (max-width: 760px) {
   .location-panel {
     top: 61px;
     width: min(218px, calc(100% - 16px));
+  }
+  .data-dashboard,
+  .data-metrics {
+    grid-template-columns: 1fr;
+  }
+  .modal .perf-hud {
+    display: block;
   }
 }
