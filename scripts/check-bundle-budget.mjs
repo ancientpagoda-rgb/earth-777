@@ -11,11 +11,15 @@ if (!existsSync(manifestPath)) throw new Error("Vite manifest missing; build wit
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const entries = Object.entries(manifest);
 
-function findKeyBySource(suffix) {
-  return entries.find(([key, entry]) => key.endsWith(suffix) || String(entry?.src ?? "").endsWith(suffix))?.[0] ?? null;
+function findKey({ sourceSuffix = null, filePattern = null } = {}) {
+  return entries.find(([key, entry]) => {
+    const sourceMatches = sourceSuffix && (key.endsWith(sourceSuffix) || String(entry?.src ?? "").endsWith(sourceSuffix));
+    const fileMatches = filePattern && filePattern.test(String(entry?.file ?? ""));
+    return sourceMatches || fileMatches;
+  })?.[0] ?? null;
 }
 
-const bootstrapKey = findKeyBySource("src/bootstrap.js")
+const bootstrapKey = findKey({ sourceSuffix: "src/bootstrap.js" })
   ?? entries.find(([key, entry]) => entry?.isEntry && (key === "index.html" || entry?.src === "index.html"))?.[0]
   ?? entries.find(([, entry]) => entry?.isEntry)?.[0]
   ?? null;
@@ -23,10 +27,13 @@ if (!bootstrapKey || !manifest[bootstrapKey]) throw new Error("Could not find Ea
 const bootstrap = manifest[bootstrapKey];
 
 const bootstrapDynamicImports = bootstrap.dynamicImports ?? [];
-const mainKey = bootstrapDynamicImports.find((key) => key.endsWith("src/main.js") || String(manifest[key]?.src ?? "").endsWith("src/main.js"))
-  ?? findKeyBySource("src/main.js");
-if (!mainKey || !manifest[mainKey]) throw new Error("Could not find src/main.js in the Vite manifest.");
-if (!bootstrapDynamicImports.includes(mainKey)) throw new Error("src/main.js is no longer the bootstrap's immediate deferred application import.");
+const mainKey = bootstrapDynamicImports.find((key) => {
+  const entry = manifest[key];
+  return key.endsWith("src/main.js")
+    || String(entry?.src ?? "").endsWith("src/main.js")
+    || /(?:^|\/)main-[^/]+\.js$/.test(String(entry?.file ?? ""));
+}) ?? (bootstrapDynamicImports.length === 1 ? bootstrapDynamicImports[0] : null);
+if (!mainKey || !manifest[mainKey]) throw new Error("Could not identify the bootstrap's deferred application chunk in the Vite manifest.");
 
 const includedKeys = new Set();
 function collectStatic(key) {
@@ -48,7 +55,10 @@ for (const file of files) {
   gzipBytes += gzipSync(bytes, { level: 9 }).byteLength;
 }
 
-const surfaceKey = findKeyBySource("src/render/SurfacePresentation.js");
+const surfaceKey = findKey({
+  sourceSuffix: "src/render/SurfacePresentation.js",
+  filePattern: /(?:^|\/)SurfacePresentation-[^/]+\.js$/
+});
 if (!surfaceKey || !manifest[surfaceKey]) throw new Error("SurfacePresentation is missing from the Vite manifest.");
 const surfaceDeferred = !includedKeys.has(surfaceKey);
 const report = {
