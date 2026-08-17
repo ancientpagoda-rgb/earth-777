@@ -17,7 +17,7 @@ const ui = {
 };
 
 let seed = 777001;
-let speed = 100;
+let speed = 1;
 let playing = false;
 let lastFrame = performance.now();
 let lastSimulationUpdate = lastFrame;
@@ -32,6 +32,7 @@ let hydroClimate = null;
 let spatialVegetation = null;
 let lastJournalSignature = "";
 let lastSourcesTrigger = null;
+let sourcesPopulated = false;
 let gamepadConnected = false;
 let hintBase = "DRAG · ZOOM · SELECT";
 let deferredSimulationResult = null;
@@ -46,7 +47,6 @@ const SIMULATION_INTERVAL_MS = 100;
 const UI_UPDATE_INTERVAL_MS = 250;
 const REGION_UPDATE_INTERVAL_MS = 5_000;
 const PERF_HUD_INTERVAL_MS = 400;
-const REGIONAL_SCIENCE_IDLE_TIMEOUT_MS = 750;
 const profiler = new FrameProfiler();
 
 ui.play.disabled = true;
@@ -193,7 +193,7 @@ function updateInterface(state, forceTexture = false, forceRegion = false) {
   ui.range.value = Math.round(state.elapsedYears);
   ui.range.style.setProperty("--progress", `${state.elapsedYears / 777_000 * 100}%`);
   ui.elapsed.textContent = state.elapsedYears < 1 ? "checkpoint" : `+${Math.round(state.elapsedYears).toLocaleString()} years`;
-  updateJournal(state);
+  if (isSourcesOpen()) updateJournal(state);
   const now = performance.now();
   if (selected && (forceRegion || now - lastRegionUpdate >= REGION_UPDATE_INTERVAL_MS)) {
     renderRegion(state, selected.latitude, selected.longitude);
@@ -207,6 +207,11 @@ function isSourcesOpen() { return ui.sourcesModal.classList.contains("is-open");
 
 function openSources(trigger = document.activeElement) {
   lastSourcesTrigger = trigger instanceof HTMLElement ? trigger : null;
+  if (!sourcesPopulated) {
+    populateSources();
+    sourcesPopulated = true;
+  }
+  if (currentState) updateJournal(currentState);
   ui.sourcesModal.classList.add("is-open");
   ui.sourcesClose.focus();
 }
@@ -247,9 +252,9 @@ function handleRegionSelect(region) {
   ui.surface.disabled = false;
   if (ui.locationPanel) ui.locationPanel.open = true;
   renderRegion(currentState, region.latitude, region.longitude);
-  // Demand regional science immediately after selection. The runtime publishes
-  // climate, hydrology, and vegetation stages independently, so this panel gets
-  // progressively more precise without a single large main-thread initialization.
+  // Regional science is strictly demand-driven: selecting a place starts the
+  // progressive climate/hydrology/vegetation stack, while an untouched globe
+  // remains free of background regional model construction.
   ensureRegionalScience().then(() => {
     if (selected === region) renderRegion(currentState, region.latitude, region.longitude);
   }).catch(() => {});
@@ -518,12 +523,6 @@ function ensureRegionalScience() {
   return regionalSciencePromise;
 }
 
-function scheduleRegionalScienceLoad() {
-  const start = () => ensureRegionalScience().catch(() => {});
-  if (typeof requestIdleCallback === "function") requestIdleCallback(start, { timeout: REGIONAL_SCIENCE_IDLE_TIMEOUT_MS });
-  else setTimeout(start, 0);
-}
-
 ui.play.addEventListener("click", () => setPlaying(!playing));
 ui.surface.addEventListener("click", () => Promise.resolve(earthView.toggleSurface()).catch((error) => console.error("Surface runtime failed to load.", error)));
 ui.branch.addEventListener("click", () => setSeed(crypto.getRandomValues(new Uint32Array(1))[0]));
@@ -534,7 +533,7 @@ ui.range.addEventListener("input", () => {
   ui.range.style.setProperty("--progress", `${Number(ui.range.value) / 777_000 * 100}%`);
 });
 ui.range.addEventListener("change", () => { seekTimeline(Number(ui.range.value)); });
-ui.speedSelect.addEventListener("change", () => { setSpeed(Number(ui.speedSelect.value) || 100); });
+ui.speedSelect.addEventListener("change", () => { setSpeed(Number(ui.speedSelect.value) || 1); });
 ui.perfHud?.addEventListener("toggle", () => { if (ui.perfHud.open) updatePerformanceHud(performance.now(), true); });
 ui.sourcesButton.addEventListener("click", (event) => openSources(event.currentTarget));
 ui.sourcesButtonMobile?.addEventListener("click", (event) => openSources(event.currentTarget));
@@ -584,10 +583,7 @@ function frame(now) {
   if (playing || needsAnotherFrame || gamepad.connected) requestFrame();
 }
 
-populateSources();
 updateInteractionHint("DRAG · ZOOM · SELECT");
 setSpeed(speed);
 updateInterface(currentState, true);
-updatePerformanceHud(performance.now(), true);
 requestFrame();
-scheduleRegionalScienceLoad();

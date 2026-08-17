@@ -42,6 +42,11 @@ await send("Performance.enable");
 await send("Page.reload", { ignoreCache: true });
 await wait(2_500);
 
+const defaultSpeed = await evaluate(`document.querySelector("#speed-select")?.value ?? null`);
+const startupRegionalResources = await evaluate(`performance.getEntriesByType("resource")
+  .map((entry) => entry.name)
+  .filter((name) => /RegionalScienceRuntime|regional-data\.worker|krapp-777|biome4-soil|biome4-pft-drivers/i.test(name))`);
+
 const performanceMetrics = async () => {
   const response = await send("Performance.getMetrics");
   return Object.fromEntries((response.result?.metrics ?? []).map(({ name, value }) => [name, Number(value) || 0]));
@@ -158,6 +163,14 @@ const idleMetricsAfter = await performanceMetrics();
 const idleDrag = { ...idleRun.summary, browser: metricDelta(idleMetricsBefore, idleMetricsAfter) };
 await wait(1_000);
 
+// Keep the public default at 1x, then deliberately switch the automated stress
+// phase to 100x so this benchmark remains comparable to previous CI runs.
+const stressSpeed = await evaluate(`(() => {
+  const select = document.querySelector("#speed-select");
+  select.value = "100";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  return select.value;
+})()`);
 const elapsedBefore = await evaluate(`Number(document.querySelector("#timeline-range")?.value) || 0`);
 const playStarted = await evaluate(`(() => {
   const button = document.querySelector("#play-button");
@@ -192,6 +205,9 @@ const fatalMessages = runtimeMessages.filter((message) =>
 const report = {
   environment: "GitHub Actions headless Chrome / SwiftShader; useful for regression detection, not a direct measurement of the user's GPU",
   profiler: "long-task entries are attributed by startTime/duration overlap; CDP Performance deltas accompany each gesture set",
+  defaultSpeed,
+  stressSpeed,
+  startupRegionalResources,
   playStarted,
   playStayedActive: playbackState?.playing === true,
   playbackResumedAfterInteraction: Number(playbackState?.elapsed) > elapsedBefore,
@@ -208,6 +224,9 @@ const report = {
 };
 
 const checks = [
+  [defaultSpeed === "1", `default speed was ${defaultSpeed ?? "missing"}, expected 1x`],
+  [Array.isArray(startupRegionalResources) && startupRegionalResources.length === 0, "regional science/data loaded before any region was selected"],
+  [stressSpeed === "100", "playtest could not switch to the 100x stress speed"],
   [playStarted, "Play did not start"],
   [playbackState?.playing === true, "Play stopped unexpectedly during interaction"],
   [Number(playbackState?.elapsed) > elapsedBefore, "simulation did not resume after globe interaction settled"],
