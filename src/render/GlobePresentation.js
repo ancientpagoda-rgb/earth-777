@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const INTERACTION_PRESENTATION_SETTLE_MS = 900;
+const INTERACTION_PIXEL_RATIO_CAP = 0.65;
 
 function createStars(count = 700) {
   const positions = new Float32Array(count * 3);
@@ -63,30 +64,52 @@ export function createGlobePresentation(canvas) {
   );
   scene.add(atmosphere);
 
-  // Direct manipulation should track the pointer immediately. Damping is useful
-  // after keyboard/gamepad motion, but applying it while a mouse or touch drag
-  // is active makes the globe trail the pointer. The two transparent globe
-  // shells are also temporarily hidden during motion: they cause large-area
-  // blend overdraw while contributing little detail to a moving image. Full
-  // clouds and atmosphere return after the same 900 ms interaction settle used
-  // by EarthView, so resting fidelity is unchanged and rapid re-grabs do not
-  // repeatedly toggle the expensive layers.
+  // Direct manipulation gets a motion-specific presentation budget. Damping
+  // is disabled, large transparent blend passes are suppressed, and only the
+  // WebGL drawing buffer is temporarily reduced. CSS size, camera geometry,
+  // Earth texture detail, simulation state, and resting fidelity do not change.
+  // Rapid re-grabs remain in this cheaper mode until the same 900 ms settle
+  // window used by EarthView expires, then the original drawing-buffer ratio
+  // and atmospheric layers are restored in one redraw.
   let presentationRestoreTimer = null;
-  controls.addEventListener("start", () => {
-    controls.enableDamping = false;
+  let restingPixelRatio = null;
+
+  function enterInteractionPresentation() {
     if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
     presentationRestoreTimer = null;
     clouds.visible = false;
     atmosphere.visible = false;
+
+    if (restingPixelRatio == null) {
+      restingPixelRatio = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
+      const interactionRatio = Math.min(restingPixelRatio, INTERACTION_PIXEL_RATIO_CAP);
+      if (interactionRatio < restingPixelRatio - 0.02) {
+        canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * interactionRatio));
+        canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * interactionRatio));
+      }
+    }
+  }
+
+  function restoreInteractionPresentation() {
+    if (restingPixelRatio != null) {
+      canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * restingPixelRatio));
+      canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * restingPixelRatio));
+      restingPixelRatio = null;
+    }
+    clouds.visible = true;
+    atmosphere.visible = true;
+    presentationRestoreTimer = null;
+    controls.dispatchEvent({ type: "change" });
+  }
+
+  controls.addEventListener("start", () => {
+    controls.enableDamping = false;
+    enterInteractionPresentation();
   });
   controls.addEventListener("end", () => {
     controls.enableDamping = true;
     if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
-    presentationRestoreTimer = setTimeout(() => {
-      clouds.visible = true;
-      atmosphere.visible = true;
-      presentationRestoreTimer = null;
-    }, INTERACTION_PRESENTATION_SETTLE_MS);
+    presentationRestoreTimer = setTimeout(restoreInteractionPresentation, INTERACTION_PRESENTATION_SETTLE_MS);
   });
 
   const marker = new THREE.Mesh(
