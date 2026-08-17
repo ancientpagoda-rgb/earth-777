@@ -39,6 +39,9 @@ jobs:
       - name: Build for GitHub Pages
         run: npm run build -- --base=/earth-777/
 
+      - name: Enforce startup bundle budget
+        run: npm run check:bundle
+
       - name: Browser smoke and interaction playtest
         shell: bash
         run: |
