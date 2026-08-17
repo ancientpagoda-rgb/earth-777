@@ -45,10 +45,20 @@ test("interaction prioritizes smooth frames before rebuilding all surface detail
   assert.match(earthView, /this\.interacting \? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS/);
 });
 
-test("globe drag disables damping only for the active gesture", () => {
+test("globe drag uses a cheaper motion presentation and restores full fidelity", () => {
   assert.match(globePresentation, /dampingFactor = 0\.09/);
-  assert.match(globePresentation, /addEventListener\("start", \(\) => \{ controls\.enableDamping = false; \}\)/);
-  assert.match(globePresentation, /addEventListener\("end", \(\) => \{ controls\.enableDamping = true; \}\)/);
+  assert.match(globePresentation, /INTERACTION_PRESENTATION_SETTLE_MS = 900/);
+  assert.match(globePresentation, /INTERACTION_PIXEL_RATIO_CAP = 0\.65/);
+  assert.match(globePresentation, /controls\.enableDamping = false/);
+  assert.match(globePresentation, /clouds\.visible = false/);
+  assert.match(globePresentation, /atmosphere\.visible = false/);
+  assert.match(globePresentation, /canvas\.width = Math\.max/);
+  assert.match(globePresentation, /canvas\.height = Math\.max/);
+  assert.match(globePresentation, /controls\.enableDamping = true/);
+  assert.match(globePresentation, /setTimeout\(restoreInteractionPresentation, INTERACTION_PRESENTATION_SETTLE_MS\)/);
+  assert.match(globePresentation, /clouds\.visible = true/);
+  assert.match(globePresentation, /atmosphere\.visible = true/);
+  assert.match(globePresentation, /controls\.dispatchEvent\(\{ type: "change" \}\)/);
 });
 
 test("completed raster jobs wait until globe motion settles before GPU upload", () => {

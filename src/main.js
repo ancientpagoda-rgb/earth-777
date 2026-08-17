@@ -5,6 +5,7 @@ import { loadKrapp777Vegetation } from "./data/krapp-777-vegetation.js";
 import { loadBiome4Soil } from "./data/biome4-soil.js";
 import { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";
 import { FreeEarthEngine } from "./sim/free-earth.js";
+import { SimulationWorkerClient } from "./sim/SimulationWorkerClient.js";
 import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
 import { EarthSystemHydrology } from "./sim/EarthSystemHydrology.js";
 import { SpatialVegetation } from "./sim/SpatialVegetation.js";
@@ -42,19 +43,35 @@ let lastJournalSignature = "";
 let lastSourcesTrigger = null;
 let gamepadConnected = false;
 let hintBase = "DRAG · ZOOM · SELECT";
+let deferredSimulationResult = null;
 const SIMULATION_INTERVAL_MS = 100;
 const UI_UPDATE_INTERVAL_MS = 250;
 const REGION_UPDATE_INTERVAL_MS = 5_000;
 const PERF_HUD_INTERVAL_MS = 400;
 const profiler = new FrameProfiler();
-const engine = new FreeEarthEngine(seed);
+
+let bootstrapEngine = new FreeEarthEngine(seed);
+let currentState = bootstrapEngine.snapshot();
+let fidelityDiagnostics = bootstrapEngine.fidelityDiagnostics();
+bootstrapEngine = null;
+
+const simulation = new SimulationWorkerClient({
+  seed,
+  onState: handleSimulationResult,
+  onFidelity(nextFidelity) {
+    if (nextFidelity) fidelityDiagnostics = nextFidelity;
+  },
+  onError(error) {
+    console.error("Simulation worker error.", error);
+  }
+});
 
 function requestFrame() {
   if (rafId != null) return;
   rafId = requestAnimationFrame(frame);
 }
 
-const earthView = new EarthView($("#earth"), engine.snapshot(), handleRegionSelect, {
+const earthView = new EarthView($("#earth"), currentState, handleRegionSelect, {
   onInvalidate: requestFrame,
   onModeChange: handleModeChange
 });
@@ -116,7 +133,7 @@ function signed(value, digits = 2) {
   return Number(value) > 0 ? `+${rounded}` : rounded.replace("-", "−");
 }
 function spatialDetailFor(system, fallback = 0.35) {
-  const target = engine.fidelityDiagnostics().targets.find((entry) => entry.id === system);
+  const target = fidelityDiagnostics?.targets?.find((entry) => entry.id === system);
   return Number.isFinite(target?.spatialDetail) ? target.spatialDetail : fallback;
 }
 function iceDescription(index) {
@@ -146,6 +163,7 @@ function updateInteractionHint(baseText = hintBase) {
 }
 
 function updateInterface(state, forceTexture = false, forceRegion = false) {
+  currentState = state;
   const yearLabel = formatYear(state.yearBP);
   ui.year.textContent = yearLabel;
   ui.timelineDate.textContent = yearLabel;
@@ -217,10 +235,10 @@ function updateJournal(state) {
 
 function handleRegionSelect(region) {
   selected = region;
-  engine.setObserverRelevance({ climate: 1, hydrology: 1, vegetation: 0.8 });
+  simulation.setObserverRelevance({ climate: 1, hydrology: 1, vegetation: 0.8 }).catch(() => {});
   ui.surface.disabled = false;
   if (ui.locationPanel) ui.locationPanel.open = true;
-  renderRegion(engine.snapshot(), region.latitude, region.longitude);
+  renderRegion(currentState, region.latitude, region.longitude);
   lastRegionUpdate = performance.now();
 }
 
@@ -253,6 +271,7 @@ function renderRegion(state, latitude, longitude) {
 function setPlaying(next) {
   playing = next;
   pendingSimulationYears = 0;
+  if (!playing) simulation.clearPendingAdvance();
   lastSimulationUpdate = performance.now();
   ui.play.textContent = playing ? "Ⅱ" : "▶";
   ui.play.classList.toggle("is-playing", playing);
@@ -274,8 +293,12 @@ function stepSpeed(direction) {
 
 function setSeed(nextSeed) {
   seed = Number(nextSeed) >>> 0;
-  engine.setObserverRelevance({});
-  engine.reset(seed);
+  simulation.clearPendingAdvance();
+  simulation.reset(seed).catch(() => {});
+  const bootstrap = new FreeEarthEngine(seed);
+  currentState = bootstrap.snapshot();
+  fidelityDiagnostics = bootstrap.fidelityDiagnostics();
+  deferredSimulationResult = null;
   if (earthView.mode === "surface") earthView.ascendToGlobe();
   selected = null;
   ui.surface.disabled = true;
@@ -286,13 +309,42 @@ function setSeed(nextSeed) {
   if (ui.locationPanel) ui.locationPanel.open = false;
   ui.seed.textContent = `SEED ${seed}`;
   setPlaying(false);
-  updateInterface(engine.snapshot(), true, true);
+  updateInterface(currentState, true, true);
 }
 
 function seekTimeline(elapsedYears) {
   const targetYears = clamp(Math.round(elapsedYears), 0, 777_000);
-  const state = profiler.measure("simMs", () => engine.seek(targetYears));
-  profiler.measure("uiMs", () => updateInterface(state, true, true));
+  simulation.clearPendingAdvance();
+  deferredSimulationResult = null;
+  ui.elapsed.textContent = "seeking…";
+  simulation.seek(targetYears).catch(() => {});
+  requestFrame();
+}
+
+function handleSimulationResult(result) {
+  if (!result?.state) return;
+  if (result.fidelity) fidelityDiagnostics = result.fidelity;
+  profiler.record("simMs", result.durationMs);
+  if (result.type === "advance" && earthView.isInteracting()) {
+    deferredSimulationResult = result;
+    requestFrame();
+    return;
+  }
+  applySimulationResult(result);
+}
+
+function applySimulationResult(result) {
+  if (!result?.state) return;
+  if (deferredSimulationResult?.requestId === result.requestId) deferredSimulationResult = null;
+  const state = result.state;
+  const now = performance.now();
+  currentState = state;
+  if (state.yearBP <= 0 && playing) setPlaying(false);
+  const force = result.type !== "advance";
+  if (force || !playing || now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+    profiler.measure("uiMs", () => updateInterface(state, force, force));
+    lastUiUpdate = now;
+  }
   requestFrame();
 }
 
@@ -445,27 +497,29 @@ function frame(now) {
   const deltaSeconds = Math.min(0.1, Math.max(0, (now - lastFrame) / 1000));
   lastFrame = now;
   profiler.frame(now);
+  const interacting = earthView.isInteracting(now);
+  if (!interacting && deferredSimulationResult) {
+    const result = deferredSimulationResult;
+    deferredSimulationResult = null;
+    applySimulationResult(result);
+  }
   if (playing) {
-    if (earthView.isInteracting()) {
+    if (interacting) {
       pendingSimulationYears = 0;
+      simulation.clearPendingAdvance();
       lastSimulationUpdate = now;
     } else {
       pendingSimulationYears += deltaSeconds * speed;
       if (now - lastSimulationUpdate >= SIMULATION_INTERVAL_MS) {
-        const state = profiler.measure("simMs", () => engine.advance(pendingSimulationYears));
+        simulation.queueAdvance(pendingSimulationYears);
         pendingSimulationYears = 0;
         lastSimulationUpdate = now;
-        if (state.yearBP <= 0) setPlaying(false);
-        if (now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
-          profiler.measure("uiMs", () => updateInterface(state));
-          lastUiUpdate = now;
-        }
       }
     }
   }
   gamepad.update(deltaSeconds);
   const needsAnotherFrame = earthView.render(deltaSeconds, now);
-  profiler.record("renderMs", earthView.diagnostics().renderMs);
+  profiler.record("renderMs", earthView.lastRenderMs);
   updatePerformanceHud(now);
   if (playing || needsAnotherFrame || gamepad.connected) requestFrame();
 }
@@ -473,7 +527,7 @@ function frame(now) {
 populateSources();
 updateInteractionHint("DRAG · ZOOM · SELECT");
 setSpeed(speed);
-updateInterface(engine.snapshot(), true);
+updateInterface(currentState, true);
 updatePerformanceHud(performance.now(), true);
 
 loadKrapp777Climate()
@@ -495,9 +549,9 @@ loadKrapp777Climate()
       earthView.setVegetation(spatialVegetation, surfaceDetail, true);
     } catch (error) {
       console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);
-      earthView.updateState(engine.snapshot(), true, surfaceDetail);
+      earthView.updateState(currentState, true, surfaceDetail);
     }
-    if (selected) renderRegion(engine.snapshot(), selected.latitude, selected.longitude);
+    if (selected) renderRegion(currentState, selected.latitude, selected.longitude);
     requestFrame();
   })
   .catch((error) => console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error));

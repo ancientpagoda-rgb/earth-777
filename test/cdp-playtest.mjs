@@ -25,9 +25,7 @@ const send = (method, params = {}) => new Promise((resolve) => {
 });
 const evaluate = async (expression) => {
   const response = await send("Runtime.evaluate", { expression, returnByValue: true });
-  if (response.result?.exceptionDetails) {
-    throw new Error(response.result.exceptionDetails.text || "Runtime.evaluate failed");
-  }
+  if (response.result?.exceptionDetails) throw new Error(response.result.exceptionDetails.text || "Runtime.evaluate failed");
   return response.result?.result?.value;
 };
 const quantile = (values, q) => {
@@ -64,11 +62,7 @@ await evaluate(`(() => {
     segment.active = false;
     segment.endedAt = performance.now();
     metrics.current = null;
-    return {
-      frames: segment.frames,
-      longTasks: segment.longTasks,
-      durationMs: segment.endedAt - segment.startedAt
-    };
+    return { frames: segment.frames, longTasks: segment.longTasks, durationMs: segment.endedAt - segment.startedAt };
   };
   try {
     const observer = new PerformanceObserver((list) => {
@@ -98,6 +92,59 @@ const gestures = [
   [point(0.42, 0.52), point(0.72, 0.43)]
 ];
 
+function summarize(segments, pointerMoves) {
+  const frames = segments.flatMap((segment) => segment.frames || []).filter((value) => value > 0 && value < 1_000);
+  const longTasks = segments.flatMap((segment) => segment.longTasks || []).filter((value) => value > 0);
+  const p50 = quantile(frames, 0.5);
+  const p95 = quantile(frames, 0.95);
+  const p99 = quantile(frames, 0.99);
+  const maxFrame = frames.length ? Math.max(...frames) : 0;
+  const over33ms = frames.filter((value) => value > 33.4).length;
+  const over50ms = frames.filter((value) => value > 50).length;
+  const maxLongTask = longTasks.length ? Math.max(...longTasks) : 0;
+  return {
+    gestures: gestures.length,
+    pointerMoves,
+    sampledFrames: frames.length,
+    frameMs: { p50: round(p50), p95: round(p95), p99: round(p99), max: round(maxFrame) },
+    over33ms,
+    over50ms,
+    over33Pct: round(frames.length ? over33ms / frames.length * 100 : 0),
+    over50Pct: round(frames.length ? over50ms / frames.length * 100 : 0),
+    estimatedDroppedFrames: frames.reduce((total, frameMs) => total + Math.max(0, Math.round(frameMs / (1000 / 60)) - 1), 0),
+    longTasks: { count: longTasks.length, maxMs: round(maxLongTask) },
+    smoothness: p95 <= 20 ? "smooth" : p95 <= 33.4 ? "mostly-smooth" : p95 <= 50 ? "visible-stutter-likely" : "heavy-stutter"
+  };
+}
+
+async function runGestureSet() {
+  const segments = [];
+  let pointerMoves = 0;
+  for (const [start, end] of gestures) {
+    await evaluate(`window.__earth777StartPlaytestSegment()`);
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: start.x, y: start.y, button: "left", buttons: 1, clickCount: 1 });
+    const steps = 22;
+    for (let step = 1; step <= steps; step += 1) {
+      const t = step / steps;
+      const curve = Math.sin(t * Math.PI) * bounds.height * 0.035;
+      const x = start.x + (end.x - start.x) * t;
+      const y = start.y + (end.y - start.y) * t + (step % 2 ? curve : -curve * 0.35);
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+      pointerMoves += 1;
+      await wait(12);
+    }
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: end.x, y: end.y, button: "left", buttons: 0, clickCount: 1 });
+    await wait(80);
+    segments.push(await evaluate(`window.__earth777StopPlaytestSegment()`));
+    await wait(120);
+  }
+  return summarize(segments, pointerMoves);
+}
+
+// Establish the render/input cost with the simulation paused.
+const idleDrag = await runGestureSet();
+await wait(1_000);
+
 const elapsedBefore = await evaluate(`Number(document.querySelector("#timeline-range")?.value) || 0`);
 const playStarted = await evaluate(`(() => {
   const button = document.querySelector("#play-button");
@@ -105,40 +152,12 @@ const playStarted = await evaluate(`(() => {
   return button.classList.contains("is-playing");
 })()`);
 await wait(300);
+const playDrag = await runGestureSet();
 
-const segments = [];
-let pointerMoves = 0;
-for (const [start, end] of gestures) {
-  await evaluate(`window.__earth777StartPlaytestSegment()`);
-  await send("Input.dispatchMouseEvent", {
-    type: "mousePressed", x: start.x, y: start.y, button: "left", buttons: 1, clickCount: 1
-  });
-  const steps = 22;
-  for (let step = 1; step <= steps; step += 1) {
-    const t = step / steps;
-    // A slight curve makes this closer to a real hand drag than a perfectly linear sweep.
-    const curve = Math.sin(t * Math.PI) * bounds.height * 0.035;
-    const x = start.x + (end.x - start.x) * t;
-    const y = start.y + (end.y - start.y) * t + (step % 2 ? curve : -curve * 0.35);
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
-    pointerMoves += 1;
-    await wait(12);
-  }
-  await send("Input.dispatchMouseEvent", {
-    type: "mouseReleased", x: end.x, y: end.y, button: "left", buttons: 0, clickCount: 1
-  });
-  await wait(80);
-  segments.push(await evaluate(`window.__earth777StopPlaytestSegment()`));
-  // Intentionally re-grab well inside the interaction-priority settle window.
-  await wait(120);
-}
-
-// Exercise zoom while Play is still active.
 await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: center.x, y: center.y, deltaX: 0, deltaY: -180 });
 await wait(100);
 await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: center.x, y: center.y, deltaX: 0, deltaY: 120 });
 
-// Let the settle window expire and prove simulation playback resumes afterward.
 await wait(1_250);
 const playbackState = await evaluate(`({
   elapsed: Number(document.querySelector("#timeline-range")?.value) || 0,
@@ -147,29 +166,10 @@ const playbackState = await evaluate(`({
 await evaluate(`document.querySelector("#play-button")?.click()`);
 await wait(100);
 
-// A normal click should still select a region after the stress interaction.
 await send("Input.dispatchMouseEvent", { type: "mousePressed", x: center.x, y: center.y, button: "left", buttons: 1, clickCount: 1 });
 await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: center.x, y: center.y, button: "left", buttons: 0, clickCount: 1 });
 await wait(180);
 const regionSelected = await evaluate(`document.querySelector("#surface-button")?.disabled === false`);
-
-const allFrames = segments.flatMap((segment) => segment.frames || []).filter((value) => value > 0 && value < 1_000);
-const allLongTasks = segments.flatMap((segment) => segment.longTasks || []).filter((value) => value > 0);
-const p50 = quantile(allFrames, 0.5);
-const p95 = quantile(allFrames, 0.95);
-const p99 = quantile(allFrames, 0.99);
-const maxFrame = allFrames.length ? Math.max(...allFrames) : 0;
-const estimatedDroppedFrames = allFrames.reduce((total, frameMs) => total + Math.max(0, Math.round(frameMs / (1000 / 60)) - 1), 0);
-const over33ms = allFrames.filter((value) => value > 33.4).length;
-const over50ms = allFrames.filter((value) => value > 50).length;
-const maxLongTask = allLongTasks.length ? Math.max(...allLongTasks) : 0;
-const smoothness = p95 <= 20
-  ? "smooth"
-  : p95 <= 33.4
-    ? "mostly-smooth"
-    : p95 <= 50
-      ? "visible-stutter-likely"
-      : "heavy-stutter";
 
 const fatalMessages = runtimeMessages.filter((message) =>
   message.method === "Runtime.exceptionThrown" || message.params?.entry?.level === "error"
@@ -182,23 +182,12 @@ const report = {
   elapsedBefore,
   elapsedAfter: playbackState?.elapsed,
   regionSelected,
-  gestures: gestures.length,
-  pointerMoves,
-  sampledFrames: allFrames.length,
-  frameMs: {
-    p50: round(p50),
-    p95: round(p95),
-    p99: round(p99),
-    max: round(maxFrame)
+  idleDrag,
+  playDrag,
+  playPenaltyMs: {
+    p50: round(playDrag.frameMs.p50 - idleDrag.frameMs.p50),
+    p95: round(playDrag.frameMs.p95 - idleDrag.frameMs.p95)
   },
-  over33ms,
-  over50ms,
-  estimatedDroppedFrames,
-  longTasks: {
-    count: allLongTasks.length,
-    maxMs: round(maxLongTask)
-  },
-  smoothness,
   fatalRuntimeMessages: fatalMessages.length
 };
 
@@ -207,10 +196,10 @@ const checks = [
   [playbackState?.playing === true, "Play stopped unexpectedly during interaction"],
   [Number(playbackState?.elapsed) > elapsedBefore, "simulation did not resume after globe interaction settled"],
   [regionSelected, "region selection failed after repeated drag/zoom interaction"],
-  [pointerMoves >= 100, "playtest did not generate enough pointer movement"],
-  [allFrames.length >= 30, "playtest captured too few animation frames"],
-  [p95 < 100, `catastrophic interaction frame time: p95 ${round(p95)} ms`],
-  [maxFrame < 250, `catastrophic single-frame hitch: ${round(maxFrame)} ms`],
+  [idleDrag.pointerMoves >= 100 && playDrag.pointerMoves >= 100, "playtest did not generate enough pointer movement"],
+  [idleDrag.sampledFrames >= 30 && playDrag.sampledFrames >= 30, "playtest captured too few animation frames"],
+  [playDrag.frameMs.p95 < 100, `catastrophic interaction frame time: p95 ${playDrag.frameMs.p95} ms`],
+  [playDrag.frameMs.max < 250, `catastrophic single-frame hitch: ${playDrag.frameMs.max} ms`],
   [fatalMessages.length === 0, "runtime errors were reported during playtest"]
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);

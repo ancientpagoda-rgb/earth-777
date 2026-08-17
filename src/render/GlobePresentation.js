@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+const INTERACTION_PRESENTATION_SETTLE_MS = 900;
+const INTERACTION_PIXEL_RATIO_CAP = 0.65;
+
 function createStars(count = 700) {
   const positions = new Float32Array(count * 3);
   let state = 0x777001;
@@ -39,14 +42,6 @@ export function createGlobePresentation(canvas) {
   controls.rotateSpeed = 0.54;
   controls.zoomSpeed = -1.0;
 
-  // Direct manipulation should track the pointer immediately. OrbitControls'
-  // damping is useful after keyboard/gamepad motion, but applying it while a
-  // mouse or touch drag is active makes the globe visibly trail the pointer.
-  // Disable damping only for the active gesture, then restore a small amount
-  // of smoothing once the gesture ends.
-  controls.addEventListener("start", () => { controls.enableDamping = false; });
-  controls.addEventListener("end", () => { controls.enableDamping = true; });
-
   const earthMaterial = new THREE.MeshStandardMaterial({
     color: 0x36503c,
     roughness: 0.88,
@@ -68,6 +63,54 @@ export function createGlobePresentation(canvas) {
     new THREE.MeshBasicMaterial({ color: 0x5f9e91, side: THREE.BackSide, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })
   );
   scene.add(atmosphere);
+
+  // Direct manipulation gets a motion-specific presentation budget. Damping
+  // is disabled, large transparent blend passes are suppressed, and only the
+  // WebGL drawing buffer is temporarily reduced. CSS size, camera geometry,
+  // Earth texture detail, simulation state, and resting fidelity do not change.
+  // Rapid re-grabs remain in this cheaper mode until the same 900 ms settle
+  // window used by EarthView expires, then the original drawing-buffer ratio
+  // and atmospheric layers are restored in one redraw.
+  let presentationRestoreTimer = null;
+  let restingPixelRatio = null;
+
+  function enterInteractionPresentation() {
+    if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
+    presentationRestoreTimer = null;
+    clouds.visible = false;
+    atmosphere.visible = false;
+
+    if (restingPixelRatio == null) {
+      restingPixelRatio = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
+      const interactionRatio = Math.min(restingPixelRatio, INTERACTION_PIXEL_RATIO_CAP);
+      if (interactionRatio < restingPixelRatio - 0.02) {
+        canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * interactionRatio));
+        canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * interactionRatio));
+      }
+    }
+  }
+
+  function restoreInteractionPresentation() {
+    if (restingPixelRatio != null) {
+      canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * restingPixelRatio));
+      canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * restingPixelRatio));
+      restingPixelRatio = null;
+    }
+    clouds.visible = true;
+    atmosphere.visible = true;
+    presentationRestoreTimer = null;
+    controls.dispatchEvent({ type: "change" });
+  }
+
+  controls.addEventListener("start", () => {
+    controls.enableDamping = false;
+    enterInteractionPresentation();
+  });
+  controls.addEventListener("end", () => {
+    controls.enableDamping = true;
+    if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
+    presentationRestoreTimer = setTimeout(restoreInteractionPresentation, INTERACTION_PRESENTATION_SETTLE_MS);
+  });
 
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.025, 0.04, 24),
