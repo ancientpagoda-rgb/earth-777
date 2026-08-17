@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
+import { WorkerSurfaceTerrainSystem } from "./WorkerSurfaceTerrainSystem.js";
 
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
@@ -39,7 +39,7 @@ export function createSurfacePresentation(canvas) {
   sun.position.copy(sunDirection).multiplyScalar(70);
   scene.add(sun);
 
-  const terrain = new SurfaceTerrainSystem(scene, { chunkSizeKm: 2, radius: 2, segments: 18, verticalScale: 0.55 });
+  const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 2, radius: 2, segments: 18, verticalScale: 0.55 });
 
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(220, 220),
