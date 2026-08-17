@@ -21,7 +21,7 @@ export function createSurfacePresentation(canvas) {
   controls.maxPolarAngle = Math.PI * 0.499;
   controls.rotateSpeed = 0.42;
   controls.panSpeed = 0.48;
-  controls.zoomSpeed = -1.0;
+  controls.zoomSpeed = 1.0;
 
   const sky = new Sky();
   sky.scale.setScalar(420);
