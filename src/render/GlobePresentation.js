@@ -23,14 +23,14 @@ function createStars(count = 700) {
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   return new THREE.Points(
     geometry,
-    new THREE.PointsMaterial({ color: 0xb8c9c0, size: 0.035, transparent: true, opacity: 0.66, sizeAttenuation: true })
+    new THREE.PointsMaterial({ color: 0xc7d1d9, size: 0.035, transparent: true, opacity: 0.66, sizeAttenuation: true })
   );
 }
 
 export function createGlobePresentation(canvas) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x030907);
-  scene.fog = new THREE.FogExp2(0x030907, 0.004);
+  scene.background = new THREE.Color(0x02060a);
+  scene.fog = new THREE.FogExp2(0x02060a, 0.004);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.001, 500);
   camera.position.set(0, 0.7, 4.25);
   const controls = new OrbitControls(camera, canvas);
@@ -44,24 +44,24 @@ export function createGlobePresentation(canvas) {
   controls.zoomSpeed = 1.0;
 
   const earthMaterial = new THREE.MeshStandardMaterial({
-    color: 0x36503c,
-    roughness: 0.88,
-    metalness: 0.02,
-    emissive: 0x08100c,
-    emissiveIntensity: 0.18
+    color: 0x48545c,
+    roughness: 0.9,
+    metalness: 0.01,
+    emissive: 0x020304,
+    emissiveIntensity: 0.08
   });
   const earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 64, 40), earthMaterial);
   earth.rotation.y = -0.35;
   scene.add(earth);
 
-  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xd2e2d9, transparent: true, opacity: 0.18, depthWrite: false });
+  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xf4f7f8, transparent: true, opacity: 0.2, depthWrite: false });
   const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 40, 28), cloudMaterial);
   clouds.rotation.y = 0.2;
   scene.add(clouds);
 
   const atmosphere = new THREE.Mesh(
     new THREE.SphereGeometry(1.55, 40, 28),
-    new THREE.MeshBasicMaterial({ color: 0x5f9e91, side: THREE.BackSide, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0x4d8fbd, side: THREE.BackSide, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false })
   );
   scene.add(atmosphere);
 
@@ -130,21 +130,21 @@ export function createGlobePresentation(canvas) {
 
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.025, 0.04, 24),
-    new THREE.MeshBasicMaterial({ color: 0xd1a15c, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+    new THREE.MeshBasicMaterial({ color: 0xb7cfdb, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
   );
   marker.visible = false;
   scene.add(marker);
   scene.add(createStars());
 
-  // Keep the entire globe readable while retaining a clear day-side highlight.
-  scene.add(new THREE.AmbientLight(0xb8c9c0, 1.15));
-  scene.add(new THREE.HemisphereLight(0xb8d7c7, 0x30382f, 1.25));
+  // Neutral daylight preserves the raster's own colors instead of adding a green/yellow cast.
+  scene.add(new THREE.AmbientLight(0xe8f0f5, 0.9));
+  scene.add(new THREE.HemisphereLight(0xdcecf5, 0x1c252b, 1.05));
 
-  const sun = new THREE.DirectionalLight(0xffe1a9, 2.35);
+  const sun = new THREE.DirectionalLight(0xffffff, 2.0);
   sun.position.set(-3.5, 2.6, 4.8);
   scene.add(sun);
 
-  const rim = new THREE.DirectionalLight(0x5f9e91, 0.48);
+  const rim = new THREE.DirectionalLight(0x79a8c4, 0.34);
   rim.position.set(4, -1.5, -3);
   scene.add(rim);
 
