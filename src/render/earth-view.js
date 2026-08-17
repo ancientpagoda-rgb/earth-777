@@ -2,8 +2,6 @@ import * as THREE from "three";
 import { RasterTaskClient } from "./RasterTaskClient.js";
 import { AdaptivePerformanceController } from "./AdaptivePerformanceController.js";
 import { createGlobePresentation } from "./GlobePresentation.js";
-import { createSurfacePresentation } from "./SurfacePresentation.js";
-import { beginDescent, updateDescent, updateSurfaceEntry, returnToGlobe } from "./ViewTransitions.js";
 import { requestEarthRaster, requestCloudRaster } from "./RasterRefresh.js";
 import { wireGlobePicking } from "./PointerRaycast.js";
 import { geographicSelection } from "./GeoSelection.js";
@@ -17,6 +15,7 @@ const INTERACTION_SETTLE_MS = 900;
 const SURFACE_PUMP_ACTIVE_MS = 0.9;
 const SURFACE_PUMP_IDLE_MS = 2.3;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
 export class EarthView {
   constructor(canvas, initialState, onSelect, { onInvalidate = null, onModeChange = null } = {}) {
@@ -42,6 +41,14 @@ export class EarthView {
     this.mode = "globe";
     this.descent = null;
     this.surfaceEntry = null;
+    this.surfaceLoading = false;
+    this.surfaceRuntimePromise = null;
+    this.surfaceTransitions = null;
+    this.surfaceScene = null;
+    this.surfaceCamera = null;
+    this.surfaceControls = null;
+    this.terrain = null;
+    this.surfaceWater = null;
     this.continuousUntilMs = 0;
     this.lastRenderMs = 0;
     this.lastFrameDeltaMs = 16.7;
@@ -61,18 +68,13 @@ export class EarthView {
 
     const globe = createGlobePresentation(canvas);
     Object.assign(this, globe);
-    const surface = createSurfacePresentation(canvas);
-    this.surfaceScene = surface.scene;
-    this.surfaceCamera = surface.camera;
-    this.surfaceControls = surface.controls;
-    this.terrain = surface.terrain;
-    this.surfaceWater = surface.water;
     this._wireControls(this.controls, "globe");
-    this._wireControls(this.surfaceControls, "surface");
 
     wireGlobePicking(canvas, () => this.camera, () => this.earth, (hit) => {
       if (this.mode === "globe") this._applySelection(hit);
     });
+    this.resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => this.resize()) : null;
+    this.resizeObserver?.observe(canvas);
     this.resize();
     this.applyPerformanceSettings(true);
     this.updateState(initialState, true, this.spatialDetail);
@@ -92,6 +94,35 @@ export class EarthView {
       this.continuousUntilMs = performance.now() + INTERACTION_SETTLE_MS;
       this.invalidate();
     });
+  }
+
+  async _ensureSurfaceRuntime() {
+    if (this.terrain && this.surfaceTransitions) return true;
+    this.surfaceRuntimePromise ??= Promise.all([
+      import("./SurfacePresentation.js"),
+      import("./ViewTransitions.js")
+    ]).then(([surfaceModule, transitions]) => {
+      if (!this.terrain) {
+        const surface = surfaceModule.createSurfacePresentation(this.canvas);
+        this.surfaceScene = surface.scene;
+        this.surfaceCamera = surface.camera;
+        this.surfaceControls = surface.controls;
+        this.terrain = surface.terrain;
+        this.surfaceWater = surface.water;
+        this._wireControls(this.surfaceControls, "surface");
+        this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
+        this.terrain.setEarthSystemState?.(this.lastState, this.lastState.seed, false);
+        this.applyPerformanceSettings(true);
+        this.resize();
+      }
+      this.surfaceTransitions = transitions;
+      this.diagnosticsCacheAt = -Infinity;
+      return true;
+    }).catch((error) => {
+      this.surfaceRuntimePromise = null;
+      throw error;
+    });
+    return this.surfaceRuntimePromise;
   }
 
   invalidate() { this.onInvalidate?.(); }
@@ -125,38 +156,51 @@ export class EarthView {
     return true;
   }
 
-  selectViewCenter() {
-    return this.selectNormalized(0, 0);
+  selectViewCenter() { return this.selectNormalized(0, 0); }
+
+  async descendToSelection() {
+    if (!this.selectionDirection || !this.selection || this.mode !== "globe") return false;
+    this.surfaceLoading = true;
+    this.onModeChange?.("surface-loading", this.selection);
+    this.invalidate();
+    try {
+      await this._ensureSurfaceRuntime();
+      return this.surfaceTransitions.beginDescent(this);
+    } catch (error) {
+      this.onModeChange?.("globe", this.selection);
+      throw error;
+    } finally {
+      this.surfaceLoading = false;
+    }
   }
 
-  descendToSelection() { return beginDescent(this); }
-  ascendToGlobe() { return returnToGlobe(this); }
+  ascendToGlobe() { return this.surfaceTransitions?.returnToGlobe(this) ?? false; }
 
   setClimate(climate) { this.climate = climate; this.updateState(this.lastState, true, this.spatialDetail); }
   setHydroClimate(hydroClimate, spatialDetail = this.spatialDetail, refresh = true) {
     this.hydroClimate = hydroClimate;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
-    this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
+    this.terrain?.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
   setVegetation(vegetation, spatialDetail = this.spatialDetail, refresh = true) {
     this.vegetation = vegetation;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
-    this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
+    this.terrain?.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
 
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
-    this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
+    this.terrain?.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     const needsSurfaceContext = this.mode !== "globe";
-    this.terrain.setEarthSystemState?.(state, state.seed, needsSurfaceContext);
+    this.terrain?.setEarthSystemState?.(state, state.seed, needsSurfaceContext);
     this.applyPerformanceSettings(false);
     const now = performance.now();
     if ((force || Math.abs(state.yearBP - this.lastTextureYear) >= EARTH_REFRESH_YEARS) && !this.interacting && (force || now - this.lastEarthRefreshMs >= EARTH_INTERVAL_MS)) this._requestEarthRaster(state);
     if ((force || Math.abs(state.yearBP - this.lastCloudYear) >= CLOUD_REFRESH_YEARS) && !this.interacting && (force || now - this.lastCloudRefreshMs >= CLOUD_INTERVAL_MS)) this._requestCloudRaster(state);
-    if (this.mode === "surface" && this.terrain.origin) this.updateSurfaceWater();
+    if (this.mode === "surface" && this.terrain?.origin) this.updateSurfaceWater();
     this.invalidate();
   }
 
@@ -164,7 +208,7 @@ export class EarthView {
   _requestCloudRaster(state) { requestCloudRaster(this, state); }
 
   updateSurfaceWater() {
-    if (!this.terrain.origin) return;
+    if (!this.terrain?.origin || !this.surfaceWater) return;
     const { latitude, longitude } = this.terrain.origin;
     const waterSystem = this.terrain.currentWaterSystem?.()
       ?? this.hydroClimate?.groundwaterLakeSample?.(this.lastState, latitude, longitude, this.spatialDetail)
@@ -191,19 +235,13 @@ export class EarthView {
   applyPerformanceSettings(force = false) {
     const settings = this.performanceController.settings(this.spatialDetail);
     const ratio = Math.min(devicePixelRatio || 1, 1, settings.pixelRatioCap);
-    const signature = [
-      settings.visualLod,
-      ratio.toFixed(3),
-      settings.effectiveTerrainRadius,
-      settings.effectiveTerrainSegments,
-      settings.quality >= 0.55 ? 1 : 0
-    ].join("|");
+    const signature = [settings.visualLod, ratio.toFixed(3), settings.effectiveTerrainRadius, settings.effectiveTerrainSegments, settings.quality >= 0.55 ? 1 : 0].join("|");
     if (!force && signature === this.lastPerformanceSignature) return false;
     this.lastPerformanceSignature = signature;
     if (force || Math.abs(this.renderer.getPixelRatio() - ratio) > 0.02) { this.renderer.setPixelRatio(ratio); this.resize(); }
     this.clouds.visible = settings.quality >= 0.55;
     this.atmosphere.visible = settings.quality >= 0.55;
-    this.terrain.configure({ radius: settings.effectiveTerrainRadius, segments: settings.effectiveTerrainSegments });
+    this.terrain?.configure?.({ radius: settings.effectiveTerrainRadius, segments: settings.effectiveTerrainSegments });
     this.diagnosticsCacheAt = -Infinity;
     return true;
   }
@@ -212,6 +250,7 @@ export class EarthView {
     if (this.mode === "descent" || (!deltaAzimuth && !deltaPolar)) return;
     const camera = this.mode === "surface" ? this.surfaceCamera : this.camera;
     const controls = this.mode === "surface" ? this.surfaceControls : this.controls;
+    if (!camera || !controls) return;
     const offset = camera.position.clone().sub(controls.target);
     const spherical = new THREE.Spherical().setFromVector3(offset);
     const minPolar = Number.isFinite(controls.minPolarAngle) ? Math.max(0.001, controls.minPolarAngle) : 0.18;
@@ -230,6 +269,7 @@ export class EarthView {
     if (this.mode === "descent" || !deltaDistance) return;
     const camera = this.mode === "surface" ? this.surfaceCamera : this.camera;
     const controls = this.mode === "surface" ? this.surfaceControls : this.controls;
+    if (!camera || !controls) return;
     const offset = camera.position.clone().sub(controls.target);
     const currentDistance = Math.max(1e-12, offset.length());
     const zoomScale = Math.exp(Number(deltaDistance) * 0.65);
@@ -245,9 +285,11 @@ export class EarthView {
     const height = this.canvas.clientHeight || innerHeight;
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(1, height);
-    this.surfaceCamera.aspect = this.camera.aspect;
     this.camera.updateProjectionMatrix();
-    this.surfaceCamera.updateProjectionMatrix();
+    if (this.surfaceCamera) {
+      this.surfaceCamera.aspect = this.camera.aspect;
+      this.surfaceCamera.updateProjectionMatrix();
+    }
     this.diagnosticsCacheAt = -Infinity;
     this.invalidate();
   }
@@ -257,15 +299,15 @@ export class EarthView {
     const started = performance.now();
     let continuous = false;
     const needsSurfaceContext = this.mode !== "globe";
-    if (this.terrain.surfaceContextActive !== needsSurfaceContext) this.terrain.setSurfaceContextActive?.(needsSurfaceContext, true);
-    if (this.mode === "descent") continuous = updateDescent(this, now) || continuous;
+    if (this.terrain && this.terrain.surfaceContextActive !== needsSurfaceContext) this.terrain.setSurfaceContextActive?.(needsSurfaceContext, true);
+    if (this.mode === "descent") continuous = this.surfaceTransitions?.updateDescent(this, now) || continuous;
     if (this.mode === "globe" || this.mode === "descent") {
       if (this.mode === "globe") continuous = this.controls.update() === true || continuous;
       if ((this.simulationPlaying && !this.isInteracting(now)) || this.mode === "descent") { this.clouds.rotation.y += deltaSeconds * 0.004; continuous = true; }
       if (this.marker.visible && (this.interacting || now < this.continuousUntilMs || this.mode === "descent")) { this.marker.scale.setScalar(1 + Math.sin(now * 0.004) * 0.16); continuous = true; }
       this.renderer.render(this.scene, this.camera);
-    } else {
-      continuous = updateSurfaceEntry(this, now) || continuous;
+    } else if (this.surfaceScene && this.surfaceCamera && this.surfaceControls && this.terrain) {
+      continuous = this.surfaceTransitions?.updateSurfaceEntry(this, now) || continuous;
       continuous = (this.surfaceControls.enabled && this.surfaceControls.update() === true) || continuous;
       const cameraClearanceKm = Math.max(0.0002, this.surfaceCamera.near * 4);
       const floor = this.terrain.heightAt(this.surfaceCamera.position.x, this.surfaceCamera.position.z) + cameraClearanceKm;
@@ -286,23 +328,25 @@ export class EarthView {
     if (!force && this.isInteracting(now) && this.diagnosticsCache) return this.diagnosticsCache;
     if (!force && this.diagnosticsCache && now - this.diagnosticsCacheAt < DIAGNOSTICS_INTERVAL_MS) return this.diagnosticsCache;
     const info = this.renderer.info.render;
+    const terrain = this.terrain ? { loaded: true, ...this.terrain.diagnostics() } : EMPTY_TERRAIN_DIAGNOSTICS;
     this.diagnosticsCache = Object.freeze({
       mode: this.mode, renderMs: this.lastRenderMs, frameDeltaMs: this.lastFrameDeltaMs,
       pixelRatio: this.renderer.getPixelRatio(), drawCalls: info.calls, triangles: info.triangles,
       geometries: this.renderer.info.memory.geometries, textures: this.renderer.info.memory.textures,
       earthBuildInFlight: this.earthBuildInFlight, cloudBuildInFlight: this.cloudBuildInFlight,
-      raster: this.rasterWorker.diagnostics(), performance: this.performanceController.diagnostics(), terrain: this.terrain.diagnostics()
+      surfaceLoaded: Boolean(this.terrain), surfaceLoading: this.surfaceLoading,
+      raster: this.rasterWorker.diagnostics(), performance: this.performanceController.diagnostics(), terrain
     });
     this.diagnosticsCacheAt = now;
     return this.diagnosticsCache;
   }
 
   dispose() {
-    this.resizeObserver.disconnect();
+    this.resizeObserver?.disconnect();
     this.rasterWorker.dispose();
-    this.terrain.dispose();
+    this.terrain?.dispose?.();
     this.controls.dispose();
-    this.surfaceControls.dispose();
+    this.surfaceControls?.dispose?.();
     this.renderer.dispose();
   }
 }
