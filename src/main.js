@@ -41,6 +41,7 @@ let earthView = null;
 let regionPanelPromise = null;
 let regionRenderVersion = 0;
 let regionalSciencePromise = null;
+let regionalScienceStage = "empty";
 const SIMULATION_INTERVAL_MS = 100;
 const UI_UPDATE_INTERVAL_MS = 250;
 const REGION_UPDATE_INTERVAL_MS = 5_000;
@@ -114,9 +115,7 @@ const gamepad = new GamepadDriver({
     if (isSourcesOpen()) closeSources();
     else if (earthView.mode === "surface") earthView.toggleSurface();
   },
-  onToggleSources() {
-    toggleSources();
-  },
+  onToggleSources() { toggleSources(); },
   onPreviousSpeed() {
     if (isSourcesOpen()) return;
     stepSpeed(-1);
@@ -204,9 +203,7 @@ function updateInterface(state, forceTexture = false, forceRegion = false) {
   earthView.updateState(state, forceTexture, surfaceDetail);
 }
 
-function isSourcesOpen() {
-  return ui.sourcesModal.classList.contains("is-open");
-}
+function isSourcesOpen() { return ui.sourcesModal.classList.contains("is-open"); }
 
 function openSources(trigger = document.activeElement) {
   lastSourcesTrigger = trigger instanceof HTMLElement ? trigger : null;
@@ -250,8 +247,9 @@ function handleRegionSelect(region) {
   ui.surface.disabled = false;
   if (ui.locationPanel) ui.locationPanel.open = true;
   renderRegion(currentState, region.latitude, region.longitude);
-  // If regional science has not arrived yet, demand it immediately rather
-  // than waiting for the background-idle deadline, then refresh this region.
+  // Demand regional science immediately after selection. The runtime publishes
+  // climate, hydrology, and vegetation stages independently, so this panel gets
+  // progressively more precise without a single large main-thread initialization.
   ensureRegionalScience().then(() => {
     if (selected === region) renderRegion(currentState, region.latitude, region.longitude);
   }).catch(() => {});
@@ -259,7 +257,11 @@ function handleRegionSelect(region) {
 }
 
 function handleModeChange(mode) {
-  if (mode === "descent") {
+  if (mode === "surface-loading") {
+    ui.surface.textContent = "PREPARING SURFACE…";
+    ui.surface.disabled = true;
+    updateInteractionHint("LOADING TERRAIN · FULL SCIENTIFIC DETAIL");
+  } else if (mode === "descent") {
     ui.surface.textContent = "DESCENDING…";
     ui.surface.disabled = true;
     updateInteractionHint("DESCENDING · TERRAIN STREAMING");
@@ -286,6 +288,7 @@ function renderRegion(state, latitude, longitude) {
     if (requestVersion !== regionRenderVersion) return;
     const regionalDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"), 0.82);
     renderRegionPanel(ui, state, latitude, longitude, { climateLayer: climate777, hydroClimate, vegetation: spatialVegetation, spatialDetail: regionalDetail });
+    if (ui.locationDetail) ui.locationDetail.dataset.scienceStage = regionalScienceStage;
   }).catch((error) => console.warn("Regional observation panel unavailable.", error));
 }
 
@@ -479,53 +482,31 @@ function updatePerformanceHud(now, force = false) {
   ui.perfTriangles.textContent = Math.round(view.triangles).toLocaleString();
   ui.perfWorker.textContent = `${view.raster.status} · E ${view.raster.lastEarthMs.toFixed(0)} / C ${view.raster.lastCloudMs.toFixed(0)} ms`;
   ui.perfLod.textContent = view.performance.visualLod;
-  ui.perfChunks.textContent = `${view.terrain.loadedChunks}/${view.terrain.loadedChunks + view.terrain.queuedChunks}`;
+  ui.perfChunks.textContent = view.terrain.loaded ? `${view.terrain.loadedChunks}/${view.terrain.loadedChunks + view.terrain.queuedChunks}` : "deferred";
   ui.perfDpr.textContent = view.pixelRatio.toFixed(2);
-  ui.perfMode.textContent = view.mode;
+  ui.perfMode.textContent = view.surfaceLoading ? "surface loading" : view.mode;
   ui.perfHud.dataset.pressure = view.performance.visualLod === "low" ? "high" : view.performance.visualLod === "balanced" ? "medium" : "low";
 }
 
 async function loadRegionalScience() {
-  const [
-    { loadKrapp777Climate },
-    { loadKrapp777Vegetation },
-    { loadBiome4Soil },
-    { loadBiome4PftDrivers },
-    { SpatialHydroClimate },
-    { EarthSystemHydrology },
-    { SpatialVegetation }
-  ] = await Promise.all([
-    import("./data/krapp-777-climate.js"),
-    import("./data/krapp-777-vegetation.js"),
-    import("./data/biome4-soil.js"),
-    import("./data/biome4-pft-drivers.js"),
-    import("./sim/SpatialHydroClimate.js"),
-    import("./sim/EarthSystemHydrology.js"),
-    import("./sim/SpatialVegetation.js")
-  ]);
-
-  const climateLayer = await loadKrapp777Climate();
-  climate777 = climateLayer;
-  const [soilResult, pftResult] = await Promise.allSettled([loadBiome4Soil(), loadBiome4PftDrivers()]);
-  const soilLayer = soilResult.status === "fulfilled" ? soilResult.value : null;
-  const pftDrivers = pftResult.status === "fulfilled" ? pftResult.value : null;
-  if (soilResult.status === "rejected") console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", soilResult.reason);
-  if (pftResult.status === "rejected") console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", pftResult.reason);
-
-  hydroClimate = new EarthSystemHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
-  const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
-  earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
-  try {
-    const vegetationLayer = await loadKrapp777Vegetation();
-    hydroClimate.climate?.setCheckpointVegetation?.(vegetationLayer);
-    spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers);
-    earthView.setVegetation(spatialVegetation, surfaceDetail, true);
-  } catch (error) {
-    console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);
-    earthView.updateState(currentState, true, surfaceDetail);
-  }
-  if (selected) renderRegion(currentState, selected.latitude, selected.longitude);
-  requestFrame();
+  const { loadRegionalScienceProgressively } = await import("./sim/RegionalScienceRuntime.js");
+  return loadRegionalScienceProgressively({
+    onStage(next) {
+      regionalScienceStage = next.stage;
+      if (next.climate) climate777 = next.climate;
+      const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
+      if (next.hydrology && next.hydrology !== hydroClimate) {
+        hydroClimate = next.hydrology;
+        earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
+      }
+      if (next.vegetation !== spatialVegetation) {
+        spatialVegetation = next.vegetation ?? null;
+        earthView.setVegetation(spatialVegetation, surfaceDetail, false);
+      }
+      if (selected) renderRegion(currentState, selected.latitude, selected.longitude);
+      requestFrame();
+    }
+  });
 }
 
 function ensureRegionalScience() {
@@ -544,7 +525,7 @@ function scheduleRegionalScienceLoad() {
 }
 
 ui.play.addEventListener("click", () => setPlaying(!playing));
-ui.surface.addEventListener("click", () => earthView.toggleSurface());
+ui.surface.addEventListener("click", () => Promise.resolve(earthView.toggleSurface()).catch((error) => console.error("Surface runtime failed to load.", error)));
 ui.branch.addEventListener("click", () => setSeed(crypto.getRandomValues(new Uint32Array(1))[0]));
 ui.range.addEventListener("input", () => {
   const previewYear = 777_000 - Number(ui.range.value);
@@ -552,9 +533,7 @@ ui.range.addEventListener("input", () => {
   ui.elapsed.textContent = "release to seek";
   ui.range.style.setProperty("--progress", `${Number(ui.range.value) / 777_000 * 100}%`);
 });
-ui.range.addEventListener("change", () => {
-  seekTimeline(Number(ui.range.value));
-});
+ui.range.addEventListener("change", () => { seekTimeline(Number(ui.range.value)); });
 ui.speedSelect.addEventListener("change", () => { setSpeed(Number(ui.speedSelect.value) || 100); });
 ui.perfHud?.addEventListener("toggle", () => { if (ui.perfHud.open) updatePerformanceHud(performance.now(), true); });
 ui.sourcesButton.addEventListener("click", (event) => openSources(event.currentTarget));
