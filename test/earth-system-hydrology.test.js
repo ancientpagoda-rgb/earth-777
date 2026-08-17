@@ -167,12 +167,15 @@ test("runtime river network closes soil-evolved groundwater, lakes, routed water
   assert.ok(patch.meanDischargeM3s > 0.08);
 });
 
-test("browser runtime constructs EarthSystemHydrology directly", () => {
+test("browser runtime constructs real EarthSystemHydrology in the lazy regional owner", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const bootstrap = readFileSync(new URL("../src/bootstrap.js", import.meta.url), "utf8");
   const main = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
+  const regionalRuntime = readFileSync(new URL("../src/sim/RegionalScienceRuntime.js", import.meta.url), "utf8");
   assert.match(html, /src\/bootstrap\.js/);
   assert.doesNotMatch(bootstrap, /installEarthSystemHydrologyCoupling\(\)/);
   assert.match(bootstrap, /import\("\.\/main\.js"\)/);
-  assert.match(main, /new EarthSystemHydrology\(/);
+  assert.match(main, /import\("\.\/sim\/RegionalScienceRuntime\.js"\)/);
+  assert.match(regionalRuntime, /import\("\.\/EarthSystemHydrology\.js"\)/);
+  assert.match(regionalRuntime, /new EarthSystemHydrology\(/);
 });
