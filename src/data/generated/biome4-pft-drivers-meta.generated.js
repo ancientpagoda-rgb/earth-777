@@ -19,6 +19,7 @@ export const BIOME4_PFT_DRIVERS_META = Object.freeze({
   "asset": "data/biome4-pft-drivers.bin.gz",
   "assetCompression": "gzip",
   "assetSha256": "084b7ac85ea60888acfe647a6315fce68acf376f8ac5d470d0a1f55e5a0d78c9",
+  "uncompressedSha256": "995b6c33a13436c84c945041f0ee8db904f7452ba1e28738d135e9d44ca4138e",
   "compressedBytes": 90813,
   "uncompressedBytes": 518400,
   "license": "GPL-2.0-only (transformed input data from upstream BIOME4 4.1 package)",
