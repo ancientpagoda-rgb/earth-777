@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+const INTERACTION_PRESENTATION_SETTLE_MS = 900;
+
 function createStars(count = 700) {
   const positions = new Float32Array(count * 3);
   let state = 0x777001;
@@ -39,14 +41,6 @@ export function createGlobePresentation(canvas) {
   controls.rotateSpeed = 0.54;
   controls.zoomSpeed = -1.0;
 
-  // Direct manipulation should track the pointer immediately. OrbitControls'
-  // damping is useful after keyboard/gamepad motion, but applying it while a
-  // mouse or touch drag is active makes the globe visibly trail the pointer.
-  // Disable damping only for the active gesture, then restore a small amount
-  // of smoothing once the gesture ends.
-  controls.addEventListener("start", () => { controls.enableDamping = false; });
-  controls.addEventListener("end", () => { controls.enableDamping = true; });
-
   const earthMaterial = new THREE.MeshStandardMaterial({
     color: 0x36503c,
     roughness: 0.88,
@@ -68,6 +62,32 @@ export function createGlobePresentation(canvas) {
     new THREE.MeshBasicMaterial({ color: 0x5f9e91, side: THREE.BackSide, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false })
   );
   scene.add(atmosphere);
+
+  // Direct manipulation should track the pointer immediately. Damping is useful
+  // after keyboard/gamepad motion, but applying it while a mouse or touch drag
+  // is active makes the globe trail the pointer. The two transparent globe
+  // shells are also temporarily hidden during motion: they cause large-area
+  // blend overdraw while contributing little detail to a moving image. Full
+  // clouds and atmosphere return after the same 900 ms interaction settle used
+  // by EarthView, so resting fidelity is unchanged and rapid re-grabs do not
+  // repeatedly toggle the expensive layers.
+  let presentationRestoreTimer = null;
+  controls.addEventListener("start", () => {
+    controls.enableDamping = false;
+    if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
+    presentationRestoreTimer = null;
+    clouds.visible = false;
+    atmosphere.visible = false;
+  });
+  controls.addEventListener("end", () => {
+    controls.enableDamping = true;
+    if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
+    presentationRestoreTimer = setTimeout(() => {
+      clouds.visible = true;
+      atmosphere.visible = true;
+      presentationRestoreTimer = null;
+    }, INTERACTION_PRESENTATION_SETTLE_MS);
+  });
 
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.025, 0.04, 24),
