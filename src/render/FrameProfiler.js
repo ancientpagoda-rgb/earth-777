@@ -1,5 +1,3 @@
-import "../sim/install-worker-advance.js";
-
 export class FrameProfiler {
   constructor() {
     this.samples = new Map();
