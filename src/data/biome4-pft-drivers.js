@@ -21,6 +21,31 @@ async function gunzip(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+async function resolvePftPayload(received, verifyChecksum) {
+  let raw;
+  if (received.byteLength === BIOME4_PFT_DRIVERS_META.compressedBytes) {
+    if (verifyChecksum) {
+      const digest = await sha256Hex(received);
+      if (digest !== BIOME4_PFT_DRIVERS_META.assetSha256) throw new Error(`BIOME4 PFT driver compressed SHA-256 mismatch: ${digest}`);
+    }
+    raw = await gunzip(received);
+  } else if (received.byteLength === BIOME4_PFT_DRIVERS_META.uncompressedBytes) {
+    raw = received;
+  } else {
+    throw new Error(
+      `BIOME4 PFT driver response length ${received.byteLength} matches neither compressed metadata ${BIOME4_PFT_DRIVERS_META.compressedBytes} nor uncompressed metadata ${BIOME4_PFT_DRIVERS_META.uncompressedBytes}.`
+    );
+  }
+  if (raw.byteLength !== BIOME4_PFT_DRIVERS_META.uncompressedBytes) {
+    throw new Error(`BIOME4 PFT driver payload length ${raw.byteLength} does not match metadata ${BIOME4_PFT_DRIVERS_META.uncompressedBytes}.`);
+  }
+  if (verifyChecksum) {
+    const digest = await sha256Hex(raw);
+    if (digest !== BIOME4_PFT_DRIVERS_META.uncompressedSha256) throw new Error(`BIOME4 PFT driver uncompressed SHA-256 mismatch: ${digest}`);
+  }
+  return raw;
+}
+
 export class Biome4PftDriverLayer {
   constructor(rawBytes, meta = BIOME4_PFT_DRIVERS_META) {
     const bytes = rawBytes instanceof Uint8Array
@@ -69,15 +94,8 @@ export async function loadBiome4PftDrivers({ fetchImpl = globalThis.fetch, url =
   const assetUrl = url ?? `${base.replace(/\/?$/, "/")}${BIOME4_PFT_DRIVERS_META.asset.replace(/^\/+/, "")}`;
   const response = await fetchImpl(assetUrl);
   if (!response.ok) throw new Error(`Failed to load BIOME4 PFT driver asset: HTTP ${response.status}`);
-  const compressed = new Uint8Array(await response.arrayBuffer());
-  if (compressed.byteLength !== BIOME4_PFT_DRIVERS_META.compressedBytes) {
-    throw new Error(`BIOME4 PFT driver compressed length ${compressed.byteLength} does not match metadata ${BIOME4_PFT_DRIVERS_META.compressedBytes}.`);
-  }
-  if (verifyChecksum) {
-    const digest = await sha256Hex(compressed);
-    if (digest !== BIOME4_PFT_DRIVERS_META.assetSha256) throw new Error(`BIOME4 PFT driver SHA-256 mismatch: ${digest}`);
-  }
-  return new Biome4PftDriverLayer(await gunzip(compressed), BIOME4_PFT_DRIVERS_META);
+  const received = new Uint8Array(await response.arrayBuffer());
+  return new Biome4PftDriverLayer(await resolvePftPayload(received, verifyChecksum), BIOME4_PFT_DRIVERS_META);
 }
 
 export { BIOME4_PFT_DRIVERS_META };
