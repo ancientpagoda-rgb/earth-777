@@ -12,6 +12,7 @@ export default defineConfig(({ command }) => ({
   base: command === "build" ? "/earth-777/" : "/",
   build: {
     target: "es2022",
+    manifest: true,
     rollupOptions: {
       output: { manualChunks: scienceChunks }
     }
