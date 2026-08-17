@@ -1,17 +1,8 @@
 import { SOURCES } from "./data/provenance.js";
 import { GamepadDriver, GAMEPAD_HINT, KEYBOARD_HINT, POINTER_HINT, clamp } from "./input/gamepad.js";
-import { loadKrapp777Climate } from "./data/krapp-777-climate.js";
-import { loadKrapp777Vegetation } from "./data/krapp-777-vegetation.js";
-import { loadBiome4Soil } from "./data/biome4-soil.js";
-import { loadBiome4PftDrivers } from "./data/biome4-pft-drivers.js";
-import { FreeEarthEngine } from "./sim/free-earth.js";
 import { SimulationWorkerClient } from "./sim/SimulationWorkerClient.js";
-import { SpatialHydroClimate } from "./sim/SpatialHydroClimate.js";
-import { EarthSystemHydrology } from "./sim/EarthSystemHydrology.js";
-import { SpatialVegetation } from "./sim/SpatialVegetation.js";
 import { EarthView } from "./render/earth-view.js";
 import { FrameProfiler } from "./render/FrameProfiler.js";
-import { renderRegionPanel } from "./render/RegionPanel.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -44,16 +35,23 @@ let lastSourcesTrigger = null;
 let gamepadConnected = false;
 let hintBase = "DRAG · ZOOM · SELECT";
 let deferredSimulationResult = null;
+let currentState = null;
+let fidelityDiagnostics = { targets: [] };
+let earthView = null;
+let regionPanelPromise = null;
+let regionRenderVersion = 0;
+let regionalSciencePromise = null;
 const SIMULATION_INTERVAL_MS = 100;
 const UI_UPDATE_INTERVAL_MS = 250;
 const REGION_UPDATE_INTERVAL_MS = 5_000;
 const PERF_HUD_INTERVAL_MS = 400;
+const REGIONAL_SCIENCE_IDLE_TIMEOUT_MS = 750;
 const profiler = new FrameProfiler();
 
-let bootstrapEngine = new FreeEarthEngine(seed);
-let currentState = bootstrapEngine.snapshot();
-let fidelityDiagnostics = bootstrapEngine.fidelityDiagnostics();
-bootstrapEngine = null;
+ui.play.disabled = true;
+ui.branch.disabled = true;
+ui.range.disabled = true;
+ui.elapsed.textContent = "initializing…";
 
 const simulation = new SimulationWorkerClient({
   seed,
@@ -71,10 +69,23 @@ function requestFrame() {
   rafId = requestAnimationFrame(frame);
 }
 
-const earthView = new EarthView($("#earth"), currentState, handleRegionSelect, {
+// The simulation worker is the sole normal-path owner of FreeEarthEngine.
+// Waiting for its deterministic checkpoint avoids parsing/constructing a second
+// full engine on the UI thread just to paint the first frame.
+const initialSimulation = await simulation.ready;
+if (!initialSimulation?.state) throw new Error("Simulation worker did not provide the initial Earth checkpoint");
+currentState = initialSimulation.state;
+fidelityDiagnostics = initialSimulation.fidelity ?? fidelityDiagnostics;
+profiler.record("simMs", initialSimulation.durationMs);
+
+earthView = new EarthView($("#earth"), currentState, handleRegionSelect, {
   onInvalidate: requestFrame,
   onModeChange: handleModeChange
 });
+ui.play.disabled = false;
+ui.branch.disabled = false;
+ui.range.disabled = false;
+
 const speedPresets = [...ui.speedSelect.options].map((option) => Number(option.value)).filter(Number.isFinite).sort((a, b) => a - b);
 const gamepad = new GamepadDriver({
   onConnectionChange(connected) {
@@ -239,6 +250,11 @@ function handleRegionSelect(region) {
   ui.surface.disabled = false;
   if (ui.locationPanel) ui.locationPanel.open = true;
   renderRegion(currentState, region.latitude, region.longitude);
+  // If regional science has not arrived yet, demand it immediately rather
+  // than waiting for the background-idle deadline, then refresh this region.
+  ensureRegionalScience().then(() => {
+    if (selected === region) renderRegion(currentState, region.latitude, region.longitude);
+  }).catch(() => {});
   lastRegionUpdate = performance.now();
 }
 
@@ -264,8 +280,13 @@ function handleModeChange(mode) {
 }
 
 function renderRegion(state, latitude, longitude) {
-  const regionalDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"), 0.82);
-  renderRegionPanel(ui, state, latitude, longitude, { climateLayer: climate777, hydroClimate, vegetation: spatialVegetation, spatialDetail: regionalDetail });
+  const requestVersion = ++regionRenderVersion;
+  regionPanelPromise ??= import("./render/RegionPanel.js");
+  regionPanelPromise.then(({ renderRegionPanel }) => {
+    if (requestVersion !== regionRenderVersion) return;
+    const regionalDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"), 0.82);
+    renderRegionPanel(ui, state, latitude, longitude, { climateLayer: climate777, hydroClimate, vegetation: spatialVegetation, spatialDetail: regionalDetail });
+  }).catch((error) => console.warn("Regional observation panel unavailable.", error));
 }
 
 function setPlaying(next) {
@@ -294,13 +315,10 @@ function stepSpeed(direction) {
 function setSeed(nextSeed) {
   seed = Number(nextSeed) >>> 0;
   simulation.clearPendingAdvance();
-  simulation.reset(seed).catch(() => {});
-  const bootstrap = new FreeEarthEngine(seed);
-  currentState = bootstrap.snapshot();
-  fidelityDiagnostics = bootstrap.fidelityDiagnostics();
   deferredSimulationResult = null;
   if (earthView.mode === "surface") earthView.ascendToGlobe();
   selected = null;
+  regionRenderVersion += 1;
   ui.surface.disabled = true;
   ui.surface.textContent = "DESCEND TO REGION";
   ui.locationTitle.textContent = "Global view";
@@ -309,7 +327,12 @@ function setSeed(nextSeed) {
   if (ui.locationPanel) ui.locationPanel.open = false;
   ui.seed.textContent = `SEED ${seed}`;
   setPlaying(false);
-  updateInterface(currentState, true, true);
+  ui.elapsed.textContent = "resetting…";
+  simulation.reset(seed).catch((error) => {
+    console.error("Simulation reset failed.", error);
+    ui.elapsed.textContent = "reset failed";
+  });
+  requestFrame();
 }
 
 function seekTimeline(elapsedYears) {
@@ -325,7 +348,7 @@ function handleSimulationResult(result) {
   if (!result?.state) return;
   if (result.fidelity) fidelityDiagnostics = result.fidelity;
   profiler.record("simMs", result.durationMs);
-  if (result.type === "advance" && earthView.isInteracting()) {
+  if (result.type === "advance" && earthView?.isInteracting()) {
     deferredSimulationResult = result;
     requestFrame();
     return;
@@ -334,7 +357,7 @@ function handleSimulationResult(result) {
 }
 
 function applySimulationResult(result) {
-  if (!result?.state) return;
+  if (!result?.state || !earthView) return;
   if (deferredSimulationResult?.requestId === result.requestId) deferredSimulationResult = null;
   const state = result.state;
   const now = performance.now();
@@ -462,6 +485,64 @@ function updatePerformanceHud(now, force = false) {
   ui.perfHud.dataset.pressure = view.performance.visualLod === "low" ? "high" : view.performance.visualLod === "balanced" ? "medium" : "low";
 }
 
+async function loadRegionalScience() {
+  const [
+    { loadKrapp777Climate },
+    { loadKrapp777Vegetation },
+    { loadBiome4Soil },
+    { loadBiome4PftDrivers },
+    { SpatialHydroClimate },
+    { EarthSystemHydrology },
+    { SpatialVegetation }
+  ] = await Promise.all([
+    import("./data/krapp-777-climate.js"),
+    import("./data/krapp-777-vegetation.js"),
+    import("./data/biome4-soil.js"),
+    import("./data/biome4-pft-drivers.js"),
+    import("./sim/SpatialHydroClimate.js"),
+    import("./sim/EarthSystemHydrology.js"),
+    import("./sim/SpatialVegetation.js")
+  ]);
+
+  const climateLayer = await loadKrapp777Climate();
+  climate777 = climateLayer;
+  const [soilResult, pftResult] = await Promise.allSettled([loadBiome4Soil(), loadBiome4PftDrivers()]);
+  const soilLayer = soilResult.status === "fulfilled" ? soilResult.value : null;
+  const pftDrivers = pftResult.status === "fulfilled" ? pftResult.value : null;
+  if (soilResult.status === "rejected") console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", soilResult.reason);
+  if (pftResult.status === "rejected") console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", pftResult.reason);
+
+  hydroClimate = new EarthSystemHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
+  const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
+  earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
+  try {
+    const vegetationLayer = await loadKrapp777Vegetation();
+    hydroClimate.climate?.setCheckpointVegetation?.(vegetationLayer);
+    spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers);
+    earthView.setVegetation(spatialVegetation, surfaceDetail, true);
+  } catch (error) {
+    console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);
+    earthView.updateState(currentState, true, surfaceDetail);
+  }
+  if (selected) renderRegion(currentState, selected.latitude, selected.longitude);
+  requestFrame();
+}
+
+function ensureRegionalScience() {
+  regionalSciencePromise ??= loadRegionalScience().catch((error) => {
+    regionalSciencePromise = null;
+    console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error);
+    throw error;
+  });
+  return regionalSciencePromise;
+}
+
+function scheduleRegionalScienceLoad() {
+  const start = () => ensureRegionalScience().catch(() => {});
+  if (typeof requestIdleCallback === "function") requestIdleCallback(start, { timeout: REGIONAL_SCIENCE_IDLE_TIMEOUT_MS });
+  else setTimeout(start, 0);
+}
+
 ui.play.addEventListener("click", () => setPlaying(!playing));
 ui.surface.addEventListener("click", () => earthView.toggleSurface());
 ui.branch.addEventListener("click", () => setSeed(crypto.getRandomValues(new Uint32Array(1))[0]));
@@ -529,31 +610,5 @@ updateInteractionHint("DRAG · ZOOM · SELECT");
 setSpeed(speed);
 updateInterface(currentState, true);
 updatePerformanceHud(performance.now(), true);
-
-loadKrapp777Climate()
-  .then(async (climateLayer) => {
-    climate777 = climateLayer;
-    let soilLayer = null;
-    let pftDrivers = null;
-    try { soilLayer = await loadBiome4Soil(); }
-    catch (error) { console.warn("BIOME4 static soil layer unavailable; using the transparent uniform fallback water bucket.", error); }
-    try { pftDrivers = await loadBiome4PftDrivers(); }
-    catch (error) { console.warn("BIOME4 PFT absolute-minimum-temperature driver unavailable; PFT eligibility will use the documented coldest-month fallback.", error); }
-    hydroClimate = new EarthSystemHydrology(new SpatialHydroClimate(climateLayer), soilLayer);
-    const surfaceDetail = Math.max(spatialDetailFor("hydrology"), spatialDetailFor("vegetation"));
-    earthView.setHydroClimate(hydroClimate, surfaceDetail, false);
-    try {
-      const vegetationLayer = await loadKrapp777Vegetation();
-      hydroClimate.climate?.setCheckpointVegetation?.(vegetationLayer);
-      spatialVegetation = new SpatialVegetation(vegetationLayer, hydroClimate, pftDrivers);
-      earthView.setVegetation(spatialVegetation, surfaceDetail, true);
-    } catch (error) {
-      console.warn("Krapp 777 ka BIOME4 vegetation layer unavailable; using hydroclimate vegetation fallback.", error);
-      earthView.updateState(currentState, true, surfaceDetail);
-    }
-    if (selected) renderRegion(currentState, selected.latitude, selected.longitude);
-    requestFrame();
-  })
-  .catch((error) => console.warn("Krapp 777 ka climate layer unavailable; using regional emulator.", error));
-
 requestFrame();
+scheduleRegionalScienceLoad();
