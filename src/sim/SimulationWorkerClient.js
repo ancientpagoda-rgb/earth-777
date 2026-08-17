@@ -10,6 +10,10 @@ export class SimulationWorkerClient {
     this.pendingAdvanceYears = 0;
     this.advanceInFlight = null;
     this.pendingRequests = new Map();
+    this.latestState = null;
+    this.latestFidelity = { targets: [] };
+    this.lastStateMode = "none";
+    this.lastPatchKeys = 0;
 
     this.ready = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
@@ -51,7 +55,7 @@ export class SimulationWorkerClient {
 
     if (message.type === "ready") {
       this.readyResolved = true;
-      const result = this._normalizeResult(message);
+      const result = this._normalizeResult(message, true);
       this.resolveReady?.(result);
       this.onFidelity?.(result.fidelity);
       this._flushAdvance();
@@ -59,15 +63,19 @@ export class SimulationWorkerClient {
     }
 
     if (message.type === "fidelity") {
-      if (message.version === this.version) this.onFidelity?.(message.fidelity ?? { targets: [] });
+      if (message.version === this.version) {
+        this.latestFidelity = message.fidelity ?? this.latestFidelity;
+        this.onFidelity?.(this.latestFidelity);
+      }
       this._resolveRequest(message);
       return;
     }
 
     if (["advance", "seek", "reset"].includes(message.type)) {
-      const result = this._normalizeResult(message);
-      if (message.version === this.version) {
-        this.onFidelity?.(result.fidelity);
+      const current = message.version === this.version;
+      const result = this._normalizeResult(message, current);
+      if (current) {
+        if (message.fidelity) this.onFidelity?.(result.fidelity);
         this.onState?.(result);
       }
       this._resolveRequest(message, result);
@@ -78,13 +86,22 @@ export class SimulationWorkerClient {
     }
   }
 
-  _normalizeResult(message) {
+  _normalizeResult(message, applyState = true) {
+    if (applyState) {
+      if (message.state) this.latestState = message.state;
+      else if (message.statePatch) this.latestState = Object.freeze({ ...(this.latestState ?? {}), ...message.statePatch });
+      if (message.fidelity) this.latestFidelity = message.fidelity;
+      this.lastStateMode = message.stateMode ?? (message.statePatch ? "delta" : message.state ? "full" : this.lastStateMode);
+      this.lastPatchKeys = Number(message.patchKeys) || (message.statePatch ? Object.keys(message.statePatch).length : 0);
+    }
     return {
       type: message.type,
       requestId: message.requestId,
       version: message.version,
-      state: message.state,
-      fidelity: message.fidelity ?? { targets: [] },
+      state: applyState ? this.latestState : null,
+      fidelity: applyState ? this.latestFidelity : (message.fidelity ?? this.latestFidelity),
+      stateMode: message.stateMode ?? null,
+      patchKeys: Number(message.patchKeys) || 0,
       durationMs: Number(message.durationMs) || 0
     };
   }
@@ -146,7 +163,9 @@ export class SimulationWorkerClient {
       version: this.version,
       ready: this.readyResolved,
       advanceInFlight: Boolean(this.advanceInFlight),
-      pendingAdvanceYears: this.pendingAdvanceYears
+      pendingAdvanceYears: this.pendingAdvanceYears,
+      lastStateMode: this.lastStateMode,
+      lastPatchKeys: this.lastPatchKeys
     };
   }
 

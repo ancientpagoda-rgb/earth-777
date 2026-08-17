@@ -99,6 +99,7 @@ def main() -> None:
         raw_bytes = np.asarray(standard, dtype="<i2").tobytes(order="C")
         if len(raw_bytes) != CELLS * 2:
             raise ValueError("Unexpected tmin payload size")
+        raw_sha = hashlib.sha256(raw_bytes).hexdigest()
         compressed = gzip.compress(raw_bytes, compresslevel=9, mtime=0)
         ASSET_PATH.write_bytes(compressed)
         asset_sha = hashlib.sha256(compressed).hexdigest()
@@ -113,7 +114,8 @@ def main() -> None:
             "tmin": {"dtype": "int16le", "byteOffset": 0, "byteLength": len(raw_bytes), "missingValue": missing,
                      "sourceDeclaredUnits": declared_units, "operationalScaleCelsius": 0.1},
             "asset": "data/biome4-pft-drivers.bin.gz", "assetCompression": "gzip",
-            "assetSha256": asset_sha, "compressedBytes": len(compressed), "uncompressedBytes": len(raw_bytes),
+            "assetSha256": asset_sha, "uncompressedSha256": raw_sha,
+            "compressedBytes": len(compressed), "uncompressedBytes": len(raw_bytes),
             "license": "GPL-2.0-only (transformed input data from upstream BIOME4 4.1 package)",
             "epistemicStatus": "study-constrained static BIOME4 PFT climate driver; source int16 preserved exactly; BIOME4 operationally divides tmin by 10 before climatic constraints"
         }
@@ -130,11 +132,13 @@ def main() -> None:
             "preprocessing": "source int16 preserved without quantization; grid reordered north-to-south and longitude -180..180",
             "license": "GPL-2.0-only transformed input data; see data/licenses/BIOME4-GPL-2.0.txt and BIOME4-SOIL-NOTICE.md",
             "output": {"asset": str(ASSET_PATH.relative_to(ROOT)), "assetSha256": asset_sha,
+                       "uncompressedSha256": raw_sha,
                        "compressedBytes": len(compressed), "uncompressedBytes": len(raw_bytes)}
         }
         MANIFEST_PATH.write_text(json.dumps(manifest, indent=2)+"\n")
         print(json.dumps(manifest["validStats"], indent=2))
         print("asset", asset_sha, len(compressed), len(raw_bytes))
+        print("raw", raw_sha, len(raw_bytes))
 
 if __name__ == "__main__":
     main()

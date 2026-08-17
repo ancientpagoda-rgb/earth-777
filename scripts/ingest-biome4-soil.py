@@ -200,6 +200,7 @@ def main() -> None:
         expected_raw = CELLS * (1 + 4 * 4)
         if len(raw) != expected_raw:
             raise ValueError(f"Unexpected raw soil asset size {len(raw)} != {expected_raw}")
+        raw_sha = hashlib.sha256(raw).hexdigest()
         compressed = gzip.compress(raw, compresslevel=9, mtime=0)
         ASSET_PATH.write_bytes(compressed)
         asset_sha = hashlib.sha256(compressed).hexdigest()
@@ -226,6 +227,7 @@ def main() -> None:
             "asset": "data/biome4-soil.bin.gz",
             "assetCompression": "gzip",
             "assetSha256": asset_sha,
+            "uncompressedSha256": raw_sha,
             "uncompressedBytes": len(raw),
             "compressedBytes": len(compressed),
             "license": "GPL-2.0-only (upstream BIOME4 4.1 package)",
@@ -265,6 +267,7 @@ def main() -> None:
             "output": {
                 "asset": str(ASSET_PATH.relative_to(ROOT)),
                 "assetSha256": asset_sha,
+                "uncompressedSha256": raw_sha,
                 "compressedBytes": len(compressed),
                 "uncompressedBytes": len(raw),
             },
@@ -272,6 +275,7 @@ def main() -> None:
         MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n")
         print(f"Wrote {ASSET_PATH.relative_to(ROOT)}: {len(compressed):,} compressed bytes ({len(raw):,} raw)")
         print("Asset SHA-256:", asset_sha)
+        print("Raw SHA-256:", raw_sha)
         print("Status counts:", status_counts)
         print("Soil stats:", manifest["soilStats"])
         print("COPYING SHA-256:", sha256_file(copying_path))

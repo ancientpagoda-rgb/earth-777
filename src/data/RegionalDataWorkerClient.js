@@ -4,6 +4,7 @@ export class RegionalDataWorkerClient {
     this.nextId = 1;
     this.pending = new Map();
     this.cache = new Map();
+    this.cacheSources = new Map();
     this.worker.addEventListener("message", (event) => this._handleMessage(event.data));
     this.worker.addEventListener("error", (event) => this._failAll(event.error ?? new Error(event.message || "Regional data worker failed")));
   }
@@ -13,7 +14,10 @@ export class RegionalDataWorkerClient {
     if (!pending) return;
     this.pending.delete(message.id);
     if (message.error) pending.reject(new Error(message.error));
-    else pending.resolve(message.buffer);
+    else {
+      this.cacheSources.set(message.asset, message.cacheSource ?? "unknown");
+      pending.resolve(message.buffer);
+    }
   }
 
   _failAll(error) {
@@ -36,12 +40,20 @@ export class RegionalDataWorkerClient {
   }
 
   diagnostics() {
-    return Object.freeze({ cachedAssets: this.cache.size, pendingAssets: this.pending.size });
+    const sources = Object.fromEntries(this.cacheSources);
+    return Object.freeze({
+      cachedAssets: this.cache.size,
+      pendingAssets: this.pending.size,
+      persistentHits: [...this.cacheSources.values()].filter((source) => source === "persistent").length,
+      networkLoads: [...this.cacheSources.values()].filter((source) => source === "network").length,
+      sources: Object.freeze(sources)
+    });
   }
 
   dispose() {
     this._failAll(new Error("Regional data worker disposed"));
     this.cache.clear();
+    this.cacheSources.clear();
     this.worker.terminate();
   }
 }

@@ -27,6 +27,13 @@ const evaluate = async (expression) => {
   const response = await send("Runtime.evaluate", { expression, returnByValue: true });
   return response.result?.result?.value;
 };
+const refreshPerfHud = () => evaluate(`(() => {
+  const hud = document.querySelector("#perf-hud");
+  if (!hud) return false;
+  hud.open = true;
+  hud.dispatchEvent(new Event("toggle"));
+  return true;
+})()`);
 
 await send("Runtime.enable");
 await send("Log.enable");
@@ -34,17 +41,12 @@ await send("Page.enable");
 await send("Page.reload", { ignoreCache: true });
 await wait(2_500);
 
-// Keep the performance HUD live so the smoke test can prove that WebGL and
-// the raster worker did real work instead of merely loading static HTML.
-await evaluate(`(() => {
-  const hud = document.querySelector("#perf-hud");
-  if (hud) hud.open = true;
-  return Boolean(hud);
-})()`);
+await refreshPerfHud();
 
 let renderDiagnostics = null;
 for (let attempt = 0; attempt < 20; attempt += 1) {
   await wait(500);
+  await refreshPerfHud();
   renderDiagnostics = await evaluate(`(() => {
     const calls = Number(document.querySelector("#perf-calls")?.textContent?.replace(/,/g, "")) || 0;
     const triangles = Number(document.querySelector("#perf-triangles")?.textContent?.replace(/,/g, "")) || 0;
@@ -75,6 +77,47 @@ const canvasAfterFirstClick = await evaluate(`(() => {
 })()`);
 const firstClickBufferStable = canvasBeforeFirstClick.width === canvasAfterFirstClick.width
   && canvasBeforeFirstClick.height === canvasAfterFirstClick.height;
+const regionSelectedBeforeSurface = await evaluate(`document.querySelector("#surface-button")?.disabled === false`);
+
+// Exercise the actual deferred surface bundle and worker-backed terrain path.
+await evaluate(`document.querySelector("#surface-button")?.click()`);
+let surfaceState = null;
+for (let attempt = 0; attempt < 50; attempt += 1) {
+  await wait(400);
+  surfaceState = await evaluate(`(() => ({
+    button: document.querySelector("#surface-button")?.textContent ?? "",
+    hint: document.querySelector("#interaction-hint")?.textContent ?? ""
+  }))()`);
+  if (surfaceState?.button === "RETURN TO GLOBE") break;
+}
+const surfaceEntered = surfaceState?.button === "RETURN TO GLOBE";
+let surfaceDiagnostics = null;
+for (let attempt = 0; attempt < 30; attempt += 1) {
+  await wait(300);
+  await refreshPerfHud();
+  surfaceDiagnostics = await evaluate(`(() => ({
+    mode: document.querySelector("#perf-mode")?.textContent ?? "",
+    chunks: document.querySelector("#perf-chunks")?.textContent ?? "deferred",
+    calls: Number(document.querySelector("#perf-calls")?.textContent?.replace(/,/g, "")) || 0,
+    triangles: Number(document.querySelector("#perf-triangles")?.textContent?.replace(/,/g, "")) || 0
+  }))()`);
+  if (surfaceDiagnostics?.mode === "surface" && /^\d+\/\d+$/.test(surfaceDiagnostics?.chunks ?? "") && !surfaceDiagnostics.chunks.startsWith("0/")) break;
+}
+const surfaceChunksLoaded = surfaceDiagnostics?.mode === "surface"
+  && /^\d+\/\d+$/.test(surfaceDiagnostics?.chunks ?? "")
+  && !surfaceDiagnostics.chunks.startsWith("0/");
+await evaluate(`document.querySelector("#surface-button")?.click()`);
+for (let attempt = 0; attempt < 15; attempt += 1) {
+  await wait(200);
+  const returned = await evaluate(`document.querySelector("#surface-button")?.textContent === "DESCEND TO REGION"`);
+  if (returned) break;
+}
+const returnedToGlobe = await evaluate(`document.querySelector("#surface-button")?.textContent === "DESCEND TO REGION"`);
+
+// Returning from surface mode intentionally keeps the view in its interaction
+// settle window for 900 ms. Wait past that before testing simulation advance so
+// the smoke gate measures playback rather than the deliberate interaction pause.
+await wait(1_150);
 
 await evaluate(`document.querySelector("#sources-button").click()`);
 await wait(80);
@@ -82,7 +125,7 @@ const sourcesOpened = await evaluate(`document.querySelector("#sources-modal").c
 await evaluate(`document.querySelector("#sources-close").click()`);
 
 await evaluate(`document.querySelector("#play-button").click()`);
-await wait(450);
+await wait(650);
 await evaluate(`document.querySelector("#play-button").click()`);
 
 const page = await evaluate(`({
@@ -128,7 +171,12 @@ const checks = [
   [page.sourceCount >= 10, "source ledger did not populate"],
   [page.integratedSourceCount >= 4, "integrated-source statuses missing"],
   [page.sourcesOpened, "sources modal did not open"],
-  [page.regionSelected, "globe region selection failed"],
+  [regionSelectedBeforeSurface, "globe region selection failed before surface test"],
+  [surfaceEntered, "deferred surface runtime did not enter surface mode"],
+  [surfaceChunksLoaded, `surface terrain worker produced no visible terrain chunks (${surfaceDiagnostics?.chunks ?? "unknown"})`],
+  [surfaceDiagnostics?.calls > 0 && surfaceDiagnostics?.triangles > 0, "surface renderer produced no geometry"],
+  [returnedToGlobe, "surface mode did not return to globe"],
+  [page.regionSelected, "globe region selection was lost after surface round trip"],
   [page.yearAdvanced, "timeline did not advance"],
   [page.orbitReadout.includes("tilt"), "orbital forcing readout missing"],
   [page.seaLevelProvenance.includes("Spratt–Lisiecki"), "sea-level provenance missing"],
@@ -141,6 +189,7 @@ console.log(JSON.stringify({
   page,
   firstClick: { before: canvasBeforeFirstClick, after: canvasAfterFirstClick, bufferStable: firstClickBufferStable },
   renderDiagnostics,
+  surface: { entered: surfaceEntered, diagnostics: surfaceDiagnostics, returnedToGlobe },
   fallbackMessages,
   messages: runtimeMessages
 }, null, 2));

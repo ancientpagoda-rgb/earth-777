@@ -49,10 +49,13 @@ collectStatic(mainKey);
 const files = [...new Set([...includedKeys].map((key) => manifest[key]?.file).filter(Boolean))];
 let rawBytes = 0;
 let gzipBytes = 0;
+const fileSizes = {};
 for (const file of files) {
   const bytes = readFileSync(resolve(dist, file));
+  const gzip = gzipSync(bytes, { level: 9 }).byteLength;
   rawBytes += bytes.byteLength;
-  gzipBytes += gzipSync(bytes, { level: 9 }).byteLength;
+  gzipBytes += gzip;
+  fileSizes[file] = { rawBytes: bytes.byteLength, gzipBytes: gzip };
 }
 
 const surfaceKey = findKey({
@@ -61,6 +64,16 @@ const surfaceKey = findKey({
 });
 if (!surfaceKey || !manifest[surfaceKey]) throw new Error("SurfacePresentation is missing from the Vite manifest.");
 const surfaceDeferred = !includedKeys.has(surfaceKey);
+
+const vendorThreeKey = findKey({ filePattern: /(?:^|\/)vendor-three-[^/]+\.js$/ });
+if (!vendorThreeKey || !manifest[vendorThreeKey]) throw new Error("Stable vendor-three chunk is missing from the Vite manifest.");
+const vendorThreeFile = manifest[vendorThreeKey].file;
+const vendorThreeEager = includedKeys.has(vendorThreeKey);
+const vendorThreeSize = fileSizes[vendorThreeFile] ?? (() => {
+  const bytes = readFileSync(resolve(dist, vendorThreeFile));
+  return { rawBytes: bytes.byteLength, gzipBytes: gzipSync(bytes, { level: 9 }).byteLength };
+})();
+
 const report = {
   entry: bootstrapKey,
   app: mainKey,
@@ -69,10 +82,12 @@ const report = {
   gzipBytes,
   rawLimit: MAX_EAGER_RAW_BYTES,
   gzipLimit: MAX_EAGER_GZIP_BYTES,
-  surfaceDeferred
+  surfaceDeferred,
+  vendorThree: { file: vendorThreeFile, eager: vendorThreeEager, ...vendorThreeSize }
 };
 console.log(`EARTH_777_BUNDLE_BUDGET ${JSON.stringify(report)}`);
 
 if (rawBytes > MAX_EAGER_RAW_BYTES) throw new Error(`Eager JS ${rawBytes} bytes exceeds ${MAX_EAGER_RAW_BYTES}-byte budget.`);
 if (gzipBytes > MAX_EAGER_GZIP_BYTES) throw new Error(`Eager gzip JS ${gzipBytes} bytes exceeds ${MAX_EAGER_GZIP_BYTES}-byte budget.`);
 if (!surfaceDeferred) throw new Error("SurfacePresentation is no longer a deferred main-thread import.");
+if (!vendorThreeEager) throw new Error("Three.js is not isolated in the expected stable eager vendor chunk.");

@@ -7,10 +7,7 @@
   "inputdataNcBytes": 23334032,
   "sourceVariable": {
     "name": "tmin",
-    "shape": [
-      360,
-      720
-    ],
+    "shape": [360, 720],
     "dtype": "int16",
     "declaredUnits": "degC",
     "missingValue": -9999,
@@ -29,6 +26,7 @@
   "output": {
     "asset": "public/data/biome4-pft-drivers.bin.gz",
     "assetSha256": "084b7ac85ea60888acfe647a6315fce68acf376f8ac5d470d0a1f55e5a0d78c9",
+    "uncompressedSha256": "995b6c33627d34ed27eb6df88d35b3ddaceba11c4a4335bffa37417f3ca4138e",
     "compressedBytes": 90813,
     "uncompressedBytes": 518400
   }
