@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const earthView = readFileSync(new URL("../src/render/earth-view.js", import.meta.url), "utf8");
 const globePresentation = readFileSync(new URL("../src/render/GlobePresentation.js", import.meta.url), "utf8");
+const surfacePresentation = readFileSync(new URL("../src/render/SurfacePresentation.js", import.meta.url), "utf8");
 const rasterRefresh = readFileSync(new URL("../src/render/RasterRefresh.js", import.meta.url), "utf8");
 const surfaceTerrain = readFileSync(new URL("../src/render/SurfaceTerrainSystem.js", import.meta.url), "utf8");
 
@@ -45,7 +46,24 @@ test("interaction prioritizes smooth frames before rebuilding all surface detail
   assert.match(earthView, /this\.interacting \? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS/);
 });
 
-test("globe drag uses a cheaper motion presentation and restores full fidelity", () => {
+test("mouse-wheel zoom follows the conventional direction in globe and surface views", () => {
+  assert.match(globePresentation, /controls\.zoomSpeed = 1\.0/);
+  assert.match(surfacePresentation, /controls\.zoomSpeed = 1\.0/);
+  assert.doesNotMatch(globePresentation, /zoomSpeed = -/);
+  assert.doesNotMatch(surfacePresentation, /zoomSpeed = -/);
+});
+
+test("a plain first click does not enter the cheaper drag presentation", () => {
+  const start = globePresentation.indexOf('controls.addEventListener("start"');
+  const change = globePresentation.indexOf('controls.addEventListener("change"');
+  const end = globePresentation.indexOf('controls.addEventListener("end"');
+  assert.ok(start >= 0 && change > start && end > change);
+  assert.doesNotMatch(globePresentation.slice(start, change), /enterInteractionPresentation/);
+  assert.match(globePresentation.slice(change, end), /enterInteractionPresentation/);
+  assert.match(globePresentation, /if \(controlGestureActive\) enterInteractionPresentation\(\)/);
+});
+
+test("globe drag uses a cheaper motion presentation and restores the previous resting fidelity", () => {
   assert.match(globePresentation, /dampingFactor = 0\.09/);
   assert.match(globePresentation, /INTERACTION_PRESENTATION_SETTLE_MS = 900/);
   assert.match(globePresentation, /INTERACTION_PIXEL_RATIO_CAP = 0\.65/);
@@ -56,8 +74,10 @@ test("globe drag uses a cheaper motion presentation and restores full fidelity",
   assert.match(globePresentation, /canvas\.height = Math\.max/);
   assert.match(globePresentation, /controls\.enableDamping = true/);
   assert.match(globePresentation, /setTimeout\(restoreInteractionPresentation, INTERACTION_PRESENTATION_SETTLE_MS\)/);
-  assert.match(globePresentation, /clouds\.visible = true/);
-  assert.match(globePresentation, /atmosphere\.visible = true/);
+  assert.match(globePresentation, /restingCloudVisibility/);
+  assert.match(globePresentation, /restingAtmosphereVisibility/);
+  assert.match(globePresentation, /clouds\.visible = restingCloudVisibility/);
+  assert.match(globePresentation, /atmosphere\.visible = restingAtmosphereVisibility/);
   assert.match(globePresentation, /controls\.dispatchEvent\(\{ type: "change" \}\)/);
 });
 
