@@ -20,6 +20,24 @@ if (!prototype[INSTALL]) {
     return typeof Worker === "function";
   }
 
+  function withoutBridge(engine, fn) {
+    const bridge = engine[BRIDGE] ?? null;
+    if (bridge) engine[BRIDGE] = null;
+    try {
+      return fn();
+    } finally {
+      if (bridge) engine[BRIDGE] = bridge;
+    }
+  }
+
+  function localSnapshot(engine) {
+    return withoutBridge(engine, () => originalSnapshot.call(engine));
+  }
+
+  function localFidelity(engine) {
+    return withoutBridge(engine, () => originalFidelityDiagnostics.call(engine));
+  }
+
   function ensureBridge(engine) {
     if (!canUseWorker()) return null;
     if (engine[BRIDGE]) return engine[BRIDGE];
@@ -28,8 +46,8 @@ if (!prototype[INSTALL]) {
       client: null,
       ready: false,
       pendingBeforeReady: 0,
-      latestSnapshot: originalSnapshot.call(engine),
-      fidelity: originalFidelityDiagnostics.call(engine),
+      latestSnapshot: localSnapshot(engine),
+      fidelity: localFidelity(engine),
       observerRelevance: {},
       lastWorkerMs: 0
     };
@@ -91,7 +109,7 @@ if (!prototype[INSTALL]) {
   };
 
   prototype.setObserverRelevance = function workerAwareObserverRelevance(observerRelevance = {}) {
-    const result = originalSetObserverRelevance.call(this, observerRelevance);
+    const result = withoutBridge(this, () => originalSetObserverRelevance.call(this, observerRelevance));
     const bridge = ensureBridge(this);
     if (bridge) {
       bridge.observerRelevance = { ...observerRelevance };
@@ -103,12 +121,12 @@ if (!prototype[INSTALL]) {
 
   prototype.reset = function workerAwareReset(seed = this.seed) {
     const bridge = this[BRIDGE] ?? null;
-    const state = originalReset.call(this, seed);
+    const state = withoutBridge(this, () => originalReset.call(this, seed));
     if (bridge) {
       bridge.pendingBeforeReady = 0;
       bridge.client.clearPendingAdvance();
       bridge.latestSnapshot = state;
-      bridge.fidelity = originalFidelityDiagnostics.call(this);
+      bridge.fidelity = localFidelity(this);
       bridge.observerRelevance = {};
       bridge.client.reset(seed).catch(() => {});
     }
@@ -123,14 +141,16 @@ if (!prototype[INSTALL]) {
     // Keep seeking deterministic and immediately visible. It is a deliberate
     // user action rather than the continuous Play hot path, so recomputing from
     // the seed on the main thread is acceptable here and avoids stale PRNG state.
-    originalReset.call(this, this.seed);
-    const state = originalAdvance.call(this, target);
+    const state = withoutBridge(this, () => {
+      originalReset.call(this, this.seed);
+      return originalAdvance.call(this, target);
+    });
 
     if (bridge) {
       bridge.pendingBeforeReady = 0;
       bridge.client.clearPendingAdvance();
       bridge.latestSnapshot = state;
-      bridge.fidelity = originalFidelityDiagnostics.call(this);
+      bridge.fidelity = localFidelity(this);
       bridge.client.reset(this.seed)
         .then(() => bridge.client.seek(target))
         .catch(() => {});
