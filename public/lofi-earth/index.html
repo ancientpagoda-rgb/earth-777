@@ -45,7 +45,6 @@ try{
   const earth=new THREE.Mesh(baseGeom,earthMat);root.add(earth);
   const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.012,64,32),new THREE.MeshBasicMaterial({color:0x62aaff,transparent:true,opacity:.075,side:THREE.BackSide,depthWrite:false}));atmosphere.scale.y=FY;root.add(atmosphere);
 
-  // Progressive texture LOD: nothing extra is downloaded until the user zooms in.
   const lodTextures={2:null,4:null},lodLoading={2:false,4:false},lodFailed={2:false,4:false};
   const maxTex=renderer.capabilities.maxTextureSize;
   const texLoader=new THREE.TextureLoader();texLoader.setCrossOrigin('anonymous');
@@ -76,6 +75,7 @@ try{
   function pairState(){const a=[...pointers.values()];if(a.length!==2)return null;return{d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y),ang:Math.atan2(a[1].y-a[0].y,a[1].x-a[0].x)}}
   el.addEventListener('pointerdown',e=>{el.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===2){const p=pairState();pinch=p.d;twist=p.ang}});
   el.addEventListener('pointermove',e=>{const old=pointers.get(e.pointerId);if(!old)return;const now={x:e.clientX,y:e.clientY};pointers.set(e.pointerId,now);const a=[...pointers.values()];if(a.length===1){const va=arcVec(old.x,old.y),vb=arcVec(now.x,now.y);axis.crossVectors(va,vb);if(axis.lengthSq()>1e-10){const angle=Math.acos(clamp(va.dot(vb),-1,1));qDrag.setFromAxisAngle(axis.normalize(),angle*1.35);root.quaternion.premultiply(qDrag).normalize()}}else if(a.length===2){const p=pairState();if(pinch){camera.position.z=clamp(camera.position.z-(p.d-pinch)*.008,2.05,5.5);applyLod()}if(twist!==null){let da=p.ang-twist;if(da>Math.PI)da-=Math.PI*2;if(da<-Math.PI)da+=Math.PI*2;qDrag.setFromAxisAngle(new THREE.Vector3(0,0,1),-da);root.quaternion.premultiply(qDrag).normalize()}pinch=p.d;twist=p.ang}});
+  el.addEventListener('wheel',e=>{e.preventDefault();camera.position.z=clamp(camera.position.z*Math.exp(e.deltaY*.00115),1.08,5.5);applyLod()},{passive:false});
   function end(e){pointers.delete(e.pointerId);if(pointers.size<2){pinch=0;twist=null;applyLod()}}el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
   document.getElementById('reset').onclick=()=>{root.quaternion.copy(RESET_Q);camera.position.set(0,.12,3.25);applyLod()};document.getElementById('spin').onclick=e=>{auto=!auto;e.currentTarget.classList.toggle('on',auto)};
   status.textContent='';let last=performance.now();function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(auto){qSpin.setFromAxisAngle(spinAxis,dt*.13);root.quaternion.multiply(qSpin).normalize()}const d=new Date();light.position.copy(solar(d));document.getElementById('utc').textContent=d.toISOString().replace('.000',' UTC');renderer.render(scene,camera);requestAnimationFrame(frame)}requestAnimationFrame(frame);
