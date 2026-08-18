@@ -5,19 +5,18 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Lo‑Fi Earth — Terrain + Bathymetry</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#010307;color:#dbeaf3;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}#stage{position:fixed;inset:0}canvas{display:block;width:100%;height:100%;touch-action:none}#hud{position:fixed;z-index:10;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));width:min(430px,calc(100vw - 20px));padding:10px 11px;border:1px solid #9fc7dc44;border-radius:10px;background:#020810d9;backdrop-filter:blur(8px)}.title{font-weight:900;letter-spacing:.075em;font-size:12px}.dim{color:#849aa7}.good{color:#b7efc5}.warn{color:#ffd18a}.row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:7px}button{font:inherit;color:#dcebf4;background:#0b1822;border:1px solid #aed7eb44;border-radius:7px;padding:6px 8px}button:active,button.on{background:#314b5c}#foot{position:fixed;z-index:10;left:50%;bottom:max(10px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:6px 9px;max-width:calc(100vw - 20px);text-align:center;border:1px solid #9fc7dc33;border-radius:9px;background:#020810bd;color:#8198a5;font-size:9px}@media(max-width:600px){#hud{font-size:10px}button{padding:5px 7px}}
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#010307;color:#dbeaf3;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}#stage{position:fixed;inset:0}canvas{display:block;width:100%;height:100%;touch-action:none}#hud{position:fixed;z-index:10;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));padding:9px 10px;border:1px solid #9fc7dc33;border-radius:9px;background:#020810c9;backdrop-filter:blur(8px)}.title{font-weight:900;letter-spacing:.075em;font-size:12px}.dim{color:#849aa7}.warn{color:#ffd18a}.row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px}button{font:inherit;color:#dcebf4;background:#0b1822;border:1px solid #aed7eb44;border-radius:7px;padding:6px 8px}button:active,button.on{background:#314b5c}#status:empty{display:none}@media(max-width:600px){#hud{font-size:10px}button{padding:5px 7px}}
 </style>
 </head>
 <body>
 <div id="stage"></div>
 <div id="hud">
-  <div class="title">LO‑FI EARTH // ETOPO TERRAIN + BATHY</div>
+  <div class="title">LO‑FI EARTH</div>
   <div id="utc" class="dim"></div>
-  <div id="status" class="warn">loading NOAA ETOPO 2022 grid…</div>
+  <div id="status" class="warn"></div>
   <div class="row"><button id="reset">RESET VIEW</button><button id="spin">AUTO ROTATE</button></div>
-  <div class="dim" style="margin-top:6px">drag = free 3D arcball · two-finger twist = roll · pinch = zoom</div>
+  <div class="dim" style="margin-top:5px">drag · twist · pinch</div>
 </div>
-<div id="foot">numeric terrain: NOAA NCEI ETOPO 2022 · 720×360 compact grid · ocean at dataset 0 m datum</div>
 <script type="module">
 const status=document.getElementById('status');
 try{
@@ -31,74 +30,28 @@ try{
   root.quaternion.copy(RESET_Q);scene.add(root);
   const light=new THREE.DirectionalLight(0xffffff,2.25);scene.add(light);scene.add(new THREE.AmbientLight(0x193048,.08));
 
-  const gridText=await fetch('https://raw.githubusercontent.com/ancientpagoda-rgb/earth-777/main/src/data/generated/etopo-2022.generated.js',{cache:'force-cache'}).then(r=>{if(!r.ok)throw Error('ETOPO '+r.status);return r.text()});
-  const b64=gridText.match(/const ELEVATION_BASE64 = \"([A-Za-z0-9+/=]+)\"/);
-  if(!b64)throw Error('ETOPO payload not found');
-  const bin=atob(b64[1]),elev=new Int16Array(bin.length/2);
-  for(let i=0,j=0;i<elev.length;i++,j+=2){let v=bin.charCodeAt(j)|(bin.charCodeAt(j+1)<<8);if(v&0x8000)v-=65536;elev[i]=v}
-  const GW=720,GH=360;
-  if(elev.length!==GW*GH)throw Error('unexpected ETOPO grid size '+elev.length);
-
-  const mapCanvas=document.createElement('canvas');mapCanvas.width=GW;mapCanvas.height=GH;const mx=mapCanvas.getContext('2d',{alpha:false});const image=mx.createImageData(GW,GH);const data=image.data;
-  function mix(a,b,t){return a+(b-a)*t}function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
-  function colorize(){
-    for(let i=0;i<elev.length;i++){
-      const z=elev[i],k=i*4;let r,g,b;
-      if(z<0){const depth=-z,t=clamp(depth/7500,0,1),shelf=clamp(depth/250,0,1);r=mix(31,4,t);g=mix(157,28,t);b=mix(183,74,t);r=mix(72,r,shelf);g=mix(191,g,shelf);b=mix(196,b,shelf)}
-      else if(z<1200){const t=z/1200;r=mix(63,126,t);g=mix(132,118,t);b=mix(74,72,t)}
-      else if(z<3500){const t=(z-1200)/2300;r=mix(126,180,t);g=mix(118,151,t);b=mix(72,112,t)}
-      else{const t=clamp((z-3500)/2800,0,1);r=mix(180,238,t);g=mix(151,240,t);b=mix(112,242,t)}
-      data[k]=r;data[k+1]=g;data[k+2]=b;data[k+3]=255;
-    }
-    mx.putImageData(image,0,0);texture.needsUpdate=true;
-  }
+  const gridText=await fetch('https://raw.githubusercontent.com/ancientpagoda-rgb/earth-777/main/src/data/generated/etopo-2022.generated.js',{cache:'force-cache'}).then(r=>{if(!r.ok)throw Error('terrain '+r.status);return r.text()});
+  const b64=gridText.match(/const ELEVATION_BASE64 = \"([A-Za-z0-9+/=]+)\"/);if(!b64)throw Error('terrain payload missing');
+  const bin=atob(b64[1]),elev=new Int16Array(bin.length/2);for(let i=0,j=0;i<elev.length;i++,j+=2){let v=bin.charCodeAt(j)|(bin.charCodeAt(j+1)<<8);if(v&0x8000)v-=65536;elev[i]=v}
+  const GW=720,GH=360;if(elev.length!==GW*GH)throw Error('terrain grid mismatch');
+  const mapCanvas=document.createElement('canvas');mapCanvas.width=GW;mapCanvas.height=GH;const mx=mapCanvas.getContext('2d',{alpha:false});const image=mx.createImageData(GW,GH),data=image.data;
+  const mix=(a,b,t)=>a+(b-a)*t,clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+  for(let i=0;i<elev.length;i++){const z=elev[i],k=i*4;let r,g,b;if(z<0){const d=-z,t=clamp(d/7500,0,1),s=clamp(d/250,0,1);r=mix(mix(72,31,s),4,t);g=mix(mix(191,157,s),28,t);b=mix(mix(196,183,s),74,t)}else if(z<1200){const t=z/1200;r=mix(63,126,t);g=mix(132,118,t);b=mix(74,72,t)}else if(z<3500){const t=(z-1200)/2300;r=mix(126,180,t);g=mix(118,151,t);b=mix(72,112,t)}else{const t=clamp((z-3500)/2800,0,1);r=mix(180,238,t);g=mix(151,240,t);b=mix(112,242,t)}data[k]=r;data[k+1]=g;data[k+2]=b;data[k+3]=255}mx.putImageData(image,0,0);
   const texture=new THREE.CanvasTexture(mapCanvas);texture.colorSpace=THREE.SRGBColorSpace;texture.minFilter=THREE.LinearFilter;texture.magFilter=THREE.LinearFilter;
-  const geom=new THREE.SphereGeometry(1,64,32);geom.scale(1,6356.752314245/6378.137,1);
-  const earth=new THREE.Mesh(geom,new THREE.MeshLambertMaterial({map:texture}));root.add(earth);
+  const geom=new THREE.SphereGeometry(1,64,32);geom.scale(1,6356.752314245/6378.137,1);root.add(new THREE.Mesh(geom,new THREE.MeshLambertMaterial({map:texture})));
   const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.012,64,32),new THREE.MeshBasicMaterial({color:0x62aaff,transparent:true,opacity:.075,side:THREE.BackSide,depthWrite:false}));atmosphere.scale.y=6356.752314245/6378.137;root.add(atmosphere);
-  colorize();
-
   {let s=1234567;const rnd=()=>((s=Math.imul(1664525,s)+1013904223)>>>0)/4294967296,n=700,p=new Float32Array(n*3);for(let i=0;i<n;i++){const z=rnd()*2-1,a=rnd()*Math.PI*2,r=14+rnd()*22,q=Math.sqrt(1-z*z);p[i*3]=r*q*Math.cos(a);p[i*3+1]=r*z;p[i*3+2]=r*q*Math.sin(a)}const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(p,3));scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xb9c9d2,size:.025,transparent:true,opacity:.7})))}
-
   function solar(date){const JD=date.getTime()/86400000+2440587.5,n=JD-2451545,L=(280.460+.9856474*n)%360,g=((357.528+.9856003*n)%360)*Math.PI/180,lam=(L+1.915*Math.sin(g)+.020*Math.sin(2*g))*Math.PI/180,eps=(23.439-.0000004*n)*Math.PI/180,ra=Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam)),dec=Math.asin(Math.sin(eps)*Math.sin(lam)),T=(JD-2451545)/36525,gmst=280.46061837+360.98564736629*(JD-2451545)+.000387933*T*T-T*T*T/38710000;let lon=ra*180/Math.PI-gmst;lon=((lon+180)%360+360)%360-180;const l=lon*Math.PI/180;return new THREE.Vector3(Math.cos(dec)*Math.cos(l),Math.sin(dec),-Math.cos(dec)*Math.sin(l)).multiplyScalar(8)}
   function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false)}addEventListener('resize',resize);resize();
-
-  let pointers=new Map(),pinch=0,twist=null,auto=false;const el=renderer.domElement;
-  const qDrag=new THREE.Quaternion(),qSpin=new THREE.Quaternion(),axis=new THREE.Vector3(),spinAxis=new THREE.Vector3(0,1,0);
-  function arcVec(x,y){
-    const r=el.getBoundingClientRect(),s=Math.min(r.width,r.height),cx=r.left+r.width*.5,cy=r.top+r.height*.5;
-    let nx=(x-cx)/(s*.5),ny=(cy-y)/(s*.5),d=nx*nx+ny*ny;
-    if(d<=1)return new THREE.Vector3(nx,ny,Math.sqrt(1-d)).normalize();
-    const inv=1/Math.sqrt(d);return new THREE.Vector3(nx*inv,ny*inv,0);
-  }
-  function pairState(){
-    const a=[...pointers.values()];if(a.length!==2)return null;
-    return {d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y),ang:Math.atan2(a[1].y-a[0].y,a[1].x-a[0].x)};
-  }
-  el.addEventListener('pointerdown',e=>{
-    el.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    if(pointers.size===2){const p=pairState();pinch=p.d;twist=p.ang}
-  });
-  el.addEventListener('pointermove',e=>{
-    const old=pointers.get(e.pointerId);if(!old)return;
-    const now={x:e.clientX,y:e.clientY};pointers.set(e.pointerId,now);const a=[...pointers.values()];
-    if(a.length===1){
-      const va=arcVec(old.x,old.y),vb=arcVec(now.x,now.y);axis.crossVectors(va,vb);const ls=axis.lengthSq();
-      if(ls>1e-10){const angle=Math.acos(clamp(va.dot(vb),-1,1));qDrag.setFromAxisAngle(axis.normalize(),angle*1.35);root.quaternion.premultiply(qDrag).normalize()}
-    }else if(a.length===2){
-      const p=pairState();
-      if(pinch)camera.position.z=clamp(camera.position.z-(p.d-pinch)*.008,2.05,5.5);
-      if(twist!==null){let da=p.ang-twist;if(da>Math.PI)da-=Math.PI*2;if(da<-Math.PI)da+=Math.PI*2;qDrag.setFromAxisAngle(new THREE.Vector3(0,0,1),-da);root.quaternion.premultiply(qDrag).normalize()}
-      pinch=p.d;twist=p.ang;
-    }
-  });
-  function end(e){pointers.delete(e.pointerId);if(pointers.size<2){pinch=0;twist=null}}
-  el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
-  document.getElementById('reset').onclick=()=>{root.quaternion.copy(RESET_Q);camera.position.set(0,.12,3.25)};
-  document.getElementById('spin').onclick=e=>{auto=!auto;e.currentTarget.classList.toggle('on',auto)};
-  status.className='good';status.textContent='NOAA ETOPO 2022 loaded ✓ · free 3D rotation enabled';
-  let last=performance.now();function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(auto){qSpin.setFromAxisAngle(spinAxis,dt*.13);root.quaternion.multiply(qSpin).normalize()}const d=new Date();light.position.copy(solar(d));document.getElementById('utc').textContent='UTC '+d.toISOString().replace('.000','');renderer.render(scene,camera);requestAnimationFrame(frame)}requestAnimationFrame(frame);
-}catch(err){status.className='warn';status.textContent='load error: '+err.message;console.error(err)}
+  let pointers=new Map(),pinch=0,twist=null,auto=false;const el=renderer.domElement,qDrag=new THREE.Quaternion(),qSpin=new THREE.Quaternion(),axis=new THREE.Vector3(),spinAxis=new THREE.Vector3(0,1,0);
+  function arcVec(x,y){const r=el.getBoundingClientRect(),s=Math.min(r.width,r.height),cx=r.left+r.width*.5,cy=r.top+r.height*.5;let nx=(x-cx)/(s*.5),ny=(cy-y)/(s*.5),d=nx*nx+ny*ny;if(d<=1)return new THREE.Vector3(nx,ny,Math.sqrt(1-d)).normalize();const inv=1/Math.sqrt(d);return new THREE.Vector3(nx*inv,ny*inv,0)}
+  function pairState(){const a=[...pointers.values()];if(a.length!==2)return null;return{d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y),ang:Math.atan2(a[1].y-a[0].y,a[1].x-a[0].x)}}
+  el.addEventListener('pointerdown',e=>{el.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===2){const p=pairState();pinch=p.d;twist=p.ang}});
+  el.addEventListener('pointermove',e=>{const old=pointers.get(e.pointerId);if(!old)return;const now={x:e.clientX,y:e.clientY};pointers.set(e.pointerId,now);const a=[...pointers.values()];if(a.length===1){const va=arcVec(old.x,old.y),vb=arcVec(now.x,now.y);axis.crossVectors(va,vb);if(axis.lengthSq()>1e-10){const angle=Math.acos(clamp(va.dot(vb),-1,1));qDrag.setFromAxisAngle(axis.normalize(),angle*1.35);root.quaternion.premultiply(qDrag).normalize()}}else if(a.length===2){const p=pairState();if(pinch)camera.position.z=clamp(camera.position.z-(p.d-pinch)*.008,2.05,5.5);if(twist!==null){let da=p.ang-twist;if(da>Math.PI)da-=Math.PI*2;if(da<-Math.PI)da+=Math.PI*2;qDrag.setFromAxisAngle(new THREE.Vector3(0,0,1),-da);root.quaternion.premultiply(qDrag).normalize()}pinch=p.d;twist=p.ang}});
+  function end(e){pointers.delete(e.pointerId);if(pointers.size<2){pinch=0;twist=null}}el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+  document.getElementById('reset').onclick=()=>{root.quaternion.copy(RESET_Q);camera.position.set(0,.12,3.25)};document.getElementById('spin').onclick=e=>{auto=!auto;e.currentTarget.classList.toggle('on',auto)};
+  status.textContent='';let last=performance.now();function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(auto){qSpin.setFromAxisAngle(spinAxis,dt*.13);root.quaternion.multiply(qSpin).normalize()}const d=new Date();light.position.copy(solar(d));document.getElementById('utc').textContent=d.toISOString().replace('.000',' UTC');renderer.render(scene,camera);requestAnimationFrame(frame)}requestAnimationFrame(frame);
+}catch(err){status.textContent='load error';console.error(err)}
 </script>
 </body>
 </html>
