@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lo‑Fi Earth — Sea Level</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#010307;color:#dbeaf3;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}#stage{position:fixed;inset:0}canvas{display:block;width:100%;height:100%;touch-action:none}#hud{position:fixed;z-index:10;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));width:min(430px,calc(100vw - 20px));padding:10px 11px;border:1px solid #9fc7dc44;border-radius:10px;background:#020810d9;backdrop-filter:blur(8px)}.title{font-weight:900;letter-spacing:.075em;font-size:12px}.dim{color:#849aa7}.good{color:#b7efc5}.warn{color:#ffd18a}.row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:7px}button{font:inherit;color:#dcebf4;background:#0b1822;border:1px solid #aed7eb44;border-radius:7px;padding:6px 8px}button:active,button.on{background:#314b5c}#sea{font-weight:900;color:#b7efc5;min-width:76px}#foot{position:fixed;z-index:10;left:50%;bottom:max(10px,env(safe-area-inset-bottom));transform:translateX(-50%);padding:6px 9px;max-width:calc(100vw - 20px);text-align:center;border:1px solid #9fc7dc33;border-radius:9px;background:#020810bd;color:#8198a5;font-size:9px}@media(max-width:600px){#hud{font-size:10px}button{padding:5px 7px}}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud">
+  <div class="title">LO‑FI EARTH // ETOPO TERRAIN + BATHY</div>
+  <div id="utc" class="dim"></div>
+  <div id="status" class="warn">loading NOAA ETOPO 2022 grid…</div>
+  <div class="row"><span class="dim">SEA LEVEL</span><span id="sea">+0.0 m</span></div>
+  <div class="row">
+    <button data-d="-100">−100m</button><button data-d="-10">−10m</button><button data-d="-1">−1m</button><button id="zero">0m</button>
+    <button data-d="1">+1m</button><button data-d="10">+10m</button><button data-d="100">+100m</button>
+  </div>
+  <div class="row"><button id="reset">RESET VIEW</button><button id="spin">AUTO ROTATE</button></div>
+  <div class="dim" style="margin-top:6px">drag = rotate · pinch = zoom · waterline is elevation &lt; simulated sea level</div>
+</div>
+<div id="foot">numeric terrain: NOAA NCEI ETOPO 2022 · 720×360 compact grid · no weather clutter</div>
+<script type="module">
+const status=document.getElementById('status');
+try{
+  const THREE=await import('https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js');
+  const stage=document.getElementById('stage'),seaEl=document.getElementById('sea');
+  const scene=new THREE.Scene();scene.background=new THREE.Color(0x010307);
+  const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.01,100);camera.position.set(0,.12,3.25);
+  const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setPixelRatio(Math.min(1.25,devicePixelRatio));stage.appendChild(renderer.domElement);
+  const root=new THREE.Group();root.rotation.x=-.08;root.rotation.y=-.45;scene.add(root);
+  const light=new THREE.DirectionalLight(0xffffff,2.25);scene.add(light);scene.add(new THREE.AmbientLight(0x193048,.08));
+
+  const gridText=await fetch('../src/data/generated/etopo-2022.generated.js',{cache:'force-cache'}).then(r=>{if(!r.ok)throw Error('ETOPO '+r.status);return r.text()});
+  const b64=gridText.match(/const ELEVATION_BASE64 = "([A-Za-z0-9+/=]+)"/);
+  if(!b64)throw Error('ETOPO payload not found');
+  const bin=atob(b64[1]),elev=new Int16Array(bin.length/2);
+  for(let i=0,j=0;i<elev.length;i++,j+=2){let v=bin.charCodeAt(j)|(bin.charCodeAt(j+1)<<8);if(v&0x8000)v-=65536;elev[i]=v}
+  const GW=720,GH=360;
+  if(elev.length!==GW*GH)throw Error('unexpected ETOPO grid size '+elev.length);
+
+  let sea=0;
+  const mapCanvas=document.createElement('canvas');mapCanvas.width=GW;mapCanvas.height=GH;const mx=mapCanvas.getContext('2d',{alpha:false});const image=mx.createImageData(GW,GH);const data=image.data;
+  function mix(a,b,t){return a+(b-a)*t}function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
+  function colorize(){
+    for(let i=0;i<elev.length;i++){
+      const z=elev[i],k=i*4;let r,g,b;
+      if(z<sea){const depth=sea-z,t=clamp(depth/7500,0,1),shelf=clamp(depth/250,0,1);r=mix(31,4,t);g=mix(157,28,t);b=mix(183,74,t);r=mix(72,r,shelf);g=mix(191,g,shelf);b=mix(196,b,shelf)}
+      else if(z<0){const t=clamp((-z)/600,0,1);r=mix(126,92,t);g=mix(151,83,t);b=mix(88,52,t)}
+      else if(z<1200){const t=z/1200;r=mix(63,126,t);g=mix(132,118,t);b=mix(74,72,t)}
+      else if(z<3500){const t=(z-1200)/2300;r=mix(126,180,t);g=mix(118,151,t);b=mix(72,112,t)}
+      else{const t=clamp((z-3500)/2800,0,1);r=mix(180,238,t);g=mix(151,240,t);b=mix(112,242,t)}
+      data[k]=r;data[k+1]=g;data[k+2]=b;data[k+3]=255;
+    }
+    mx.putImageData(image,0,0);texture.needsUpdate=true;seaEl.textContent=(sea>=0?'+':'')+sea.toFixed(Math.abs(sea)<10?1:0)+' m';
+  }
+  const texture=new THREE.CanvasTexture(mapCanvas);texture.colorSpace=THREE.SRGBColorSpace;texture.minFilter=THREE.LinearFilter;texture.magFilter=THREE.LinearFilter;
+  const geom=new THREE.SphereGeometry(1,64,32);geom.scale(1,6356.752314245/6378.137,1);
+  const earth=new THREE.Mesh(geom,new THREE.MeshLambertMaterial({map:texture}));root.add(earth);
+  const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.012,64,32),new THREE.MeshBasicMaterial({color:0x62aaff,transparent:true,opacity:.075,side:THREE.BackSide,depthWrite:false}));atmosphere.scale.y=6356.752314245/6378.137;root.add(atmosphere);
+  colorize();
+
+  // sparse deterministic stars
+  {let s=1234567;const rnd=()=>((s=Math.imul(1664525,s)+1013904223)>>>0)/4294967296,n=700,p=new Float32Array(n*3);for(let i=0;i<n;i++){const z=rnd()*2-1,a=rnd()*Math.PI*2,r=14+rnd()*22,q=Math.sqrt(1-z*z);p[i*3]=r*q*Math.cos(a);p[i*3+1]=r*z;p[i*3+2]=r*q*Math.sin(a)}const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(p,3));scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xb9c9d2,size:.025,transparent:true,opacity:.7})))}
+
+  function solar(date){const JD=date.getTime()/86400000+2440587.5,n=JD-2451545,L=(280.460+.9856474*n)%360,g=((357.528+.9856003*n)%360)*Math.PI/180,lam=(L+1.915*Math.sin(g)+.020*Math.sin(2*g))*Math.PI/180,eps=(23.439-.0000004*n)*Math.PI/180,ra=Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam)),dec=Math.asin(Math.sin(eps)*Math.sin(lam)),T=(JD-2451545)/36525,gmst=280.46061837+360.98564736629*(JD-2451545)+.000387933*T*T-T*T*T/38710000;let lon=ra*180/Math.PI-gmst;lon=((lon+180)%360+360)%360-180;const l=lon*Math.PI/180;return new THREE.Vector3(Math.cos(dec)*Math.cos(l),Math.sin(dec),-Math.cos(dec)*Math.sin(l)).multiplyScalar(8)}
+
+  function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false)}addEventListener('resize',resize);resize();
+  let pointers=new Map(),pinch=0,auto=false;
+  const el=renderer.domElement;el.addEventListener('pointerdown',e=>{el.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY})});
+  el.addEventListener('pointermove',e=>{const old=pointers.get(e.pointerId);if(!old)return;const now={x:e.clientX,y:e.clientY};pointers.set(e.pointerId,now);const a=[...pointers.values()];if(a.length===1){root.rotation.y+=(now.x-old.x)*.008;root.rotation.x=clamp(root.rotation.x+(now.y-old.y)*.008,-1.35,1.35)}else if(a.length===2){const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinch)camera.position.z=clamp(camera.position.z-(d-pinch)*.008,2.05,5.5);pinch=d}});
+  function end(e){pointers.delete(e.pointerId);if(pointers.size<2)pinch=0}el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+  document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{sea=clamp(sea+Number(b.dataset.d),-500,1500);colorize()});
+  document.getElementById('zero').onclick=()=>{sea=0;colorize()};
+  document.getElementById('reset').onclick=()=>{root.rotation.set(-.08,-.45,0);camera.position.set(0,.12,3.25)};
+  document.getElementById('spin').onclick=e=>{auto=!auto;e.currentTarget.classList.toggle('on',auto)};
+  status.className='good';status.textContent='NOAA ETOPO 2022 elevation/bathymetry loaded ✓';
+  let last=performance.now();function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(auto)root.rotation.y+=dt*.13;const d=new Date();light.position.copy(solar(d));document.getElementById('utc').textContent='UTC '+d.toISOString().replace('.000','');renderer.render(scene,camera);requestAnimationFrame(frame)}requestAnimationFrame(frame);
+}catch(err){status.className='warn';status.textContent='load error: '+err.message;console.error(err)}
+</script>
+</body>
+</html>
