@@ -20,9 +20,9 @@
     <button data-d="1">+1m</button><button data-d="10">+10m</button><button data-d="100">+100m</button>
   </div>
   <div class="row"><button id="reset">RESET VIEW</button><button id="spin">AUTO ROTATE</button></div>
-  <div class="dim" style="margin-top:6px">drag = rotate · pinch = zoom · waterline is elevation &lt; simulated sea level</div>
+  <div class="dim" style="margin-top:6px">drag = free 3D arcball · two-finger twist = roll · pinch = zoom</div>
 </div>
-<div id="foot">numeric terrain: NOAA NCEI ETOPO 2022 · 720×360 compact grid · no weather clutter</div>
+<div id="foot">numeric terrain: NOAA NCEI ETOPO 2022 · 720×360 compact grid · free rotation about globe center</div>
 <script type="module">
 const status=document.getElementById('status');
 try{
@@ -31,7 +31,9 @@ try{
   const scene=new THREE.Scene();scene.background=new THREE.Color(0x010307);
   const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.01,100);camera.position.set(0,.12,3.25);
   const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setPixelRatio(Math.min(1.25,devicePixelRatio));stage.appendChild(renderer.domElement);
-  const root=new THREE.Group();root.rotation.x=-.08;root.rotation.y=-.45;scene.add(root);
+  const root=new THREE.Group();
+  const RESET_Q=new THREE.Quaternion().setFromEuler(new THREE.Euler(-.08,-.45,0,'XYZ'));
+  root.quaternion.copy(RESET_Q);scene.add(root);
   const light=new THREE.DirectionalLight(0xffffff,2.25);scene.add(light);scene.add(new THREE.AmbientLight(0x193048,.08));
 
   const gridText=await fetch('https://raw.githubusercontent.com/ancientpagoda-rgb/earth-777/main/src/data/generated/etopo-2022.generated.js',{cache:'force-cache'}).then(r=>{if(!r.ok)throw Error('ETOPO '+r.status);return r.text()});
@@ -67,14 +69,44 @@ try{
 
   function solar(date){const JD=date.getTime()/86400000+2440587.5,n=JD-2451545,L=(280.460+.9856474*n)%360,g=((357.528+.9856003*n)%360)*Math.PI/180,lam=(L+1.915*Math.sin(g)+.020*Math.sin(2*g))*Math.PI/180,eps=(23.439-.0000004*n)*Math.PI/180,ra=Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam)),dec=Math.asin(Math.sin(eps)*Math.sin(lam)),T=(JD-2451545)/36525,gmst=280.46061837+360.98564736629*(JD-2451545)+.000387933*T*T-T*T*T/38710000;let lon=ra*180/Math.PI-gmst;lon=((lon+180)%360+360)%360-180;const l=lon*Math.PI/180;return new THREE.Vector3(Math.cos(dec)*Math.cos(l),Math.sin(dec),-Math.cos(dec)*Math.sin(l)).multiplyScalar(8)}
   function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false)}addEventListener('resize',resize);resize();
-  let pointers=new Map(),pinch=0,auto=false;const el=renderer.domElement;
-  el.addEventListener('pointerdown',e=>{el.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY})});
-  el.addEventListener('pointermove',e=>{const old=pointers.get(e.pointerId);if(!old)return;const now={x:e.clientX,y:e.clientY};pointers.set(e.pointerId,now);const a=[...pointers.values()];if(a.length===1){root.rotation.y+=(now.x-old.x)*.008;root.rotation.x=clamp(root.rotation.x+(now.y-old.y)*.008,-1.35,1.35)}else if(a.length===2){const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinch)camera.position.z=clamp(camera.position.z-(d-pinch)*.008,2.05,5.5);pinch=d}});
-  function end(e){pointers.delete(e.pointerId);if(pointers.size<2)pinch=0}el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+
+  let pointers=new Map(),pinch=0,twist=null,auto=false;const el=renderer.domElement;
+  const qDrag=new THREE.Quaternion(),qSpin=new THREE.Quaternion(),axis=new THREE.Vector3(),spinAxis=new THREE.Vector3(0,1,0);
+  function arcVec(x,y){
+    const r=el.getBoundingClientRect(),s=Math.min(r.width,r.height),cx=r.left+r.width*.5,cy=r.top+r.height*.5;
+    let nx=(x-cx)/(s*.5),ny=(cy-y)/(s*.5),d=nx*nx+ny*ny;
+    if(d<=1)return new THREE.Vector3(nx,ny,Math.sqrt(1-d)).normalize();
+    const inv=1/Math.sqrt(d);return new THREE.Vector3(nx*inv,ny*inv,0);
+  }
+  function pairState(){
+    const a=[...pointers.values()];if(a.length!==2)return null;
+    return {d:Math.hypot(a[1].x-a[0].x,a[1].y-a[0].y),ang:Math.atan2(a[1].y-a[0].y,a[1].x-a[0].x)};
+  }
+  el.addEventListener('pointerdown',e=>{
+    el.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pointers.size===2){const p=pairState();pinch=p.d;twist=p.ang}
+  });
+  el.addEventListener('pointermove',e=>{
+    const old=pointers.get(e.pointerId);if(!old)return;
+    const now={x:e.clientX,y:e.clientY};pointers.set(e.pointerId,now);const a=[...pointers.values()];
+    if(a.length===1){
+      const va=arcVec(old.x,old.y),vb=arcVec(now.x,now.y);axis.crossVectors(va,vb);const ls=axis.lengthSq();
+      if(ls>1e-10){const angle=Math.acos(clamp(va.dot(vb),-1,1));qDrag.setFromAxisAngle(axis.normalize(),angle*1.35);root.quaternion.premultiply(qDrag).normalize()}
+    }else if(a.length===2){
+      const p=pairState();
+      if(pinch)camera.position.z=clamp(camera.position.z-(p.d-pinch)*.008,2.05,5.5);
+      if(twist!==null){let da=p.ang-twist;if(da>Math.PI)da-=Math.PI*2;if(da<-Math.PI)da+=Math.PI*2;qDrag.setFromAxisAngle(new THREE.Vector3(0,0,1),-da);root.quaternion.premultiply(qDrag).normalize()}
+      pinch=p.d;twist=p.ang;
+    }
+  });
+  function end(e){pointers.delete(e.pointerId);if(pointers.size<2){pinch=0;twist=null}}
+  el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
   document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{sea=clamp(sea+Number(b.dataset.d),-500,1500);colorize()});
-  document.getElementById('zero').onclick=()=>{sea=0;colorize()};document.getElementById('reset').onclick=()=>{root.rotation.set(-.08,-.45,0);camera.position.set(0,.12,3.25)};document.getElementById('spin').onclick=e=>{auto=!auto;e.currentTarget.classList.toggle('on',auto)};
-  status.className='good';status.textContent='NOAA ETOPO 2022 elevation/bathymetry loaded ✓';
-  let last=performance.now();function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(auto)root.rotation.y+=dt*.13;const d=new Date();light.position.copy(solar(d));document.getElementById('utc').textContent='UTC '+d.toISOString().replace('.000','');renderer.render(scene,camera);requestAnimationFrame(frame)}requestAnimationFrame(frame);
+  document.getElementById('zero').onclick=()=>{sea=0;colorize()};
+  document.getElementById('reset').onclick=()=>{root.quaternion.copy(RESET_Q);camera.position.set(0,.12,3.25)};
+  document.getElementById('spin').onclick=e=>{auto=!auto;e.currentTarget.classList.toggle('on',auto)};
+  status.className='good';status.textContent='NOAA ETOPO 2022 loaded ✓ · free 3D rotation enabled';
+  let last=performance.now();function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(auto){qSpin.setFromAxisAngle(spinAxis,dt*.13);root.quaternion.multiply(qSpin).normalize()}const d=new Date();light.position.copy(solar(d));document.getElementById('utc').textContent='UTC '+d.toISOString().replace('.000','');renderer.render(scene,camera);requestAnimationFrame(frame)}requestAnimationFrame(frame);
 }catch(err){status.className='warn';status.textContent='load error: '+err.message;console.error(err)}
 </script>
 </body>
