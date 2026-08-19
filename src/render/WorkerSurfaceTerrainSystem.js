@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { loadRuntimeRegionalTerrainPatch } from "../reconstruction/RuntimeRegionalTerrainPatch.js";
 import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 import { SurfaceComputeClient } from "./SurfaceComputeClient.js";
 import { WorkerSurfaceEcologyManager } from "./WorkerSurfaceEcologyManager.js";
@@ -20,6 +21,10 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.terrainCompleted = [];
     this.maxTerrainInFlight = 3;
     this.computeContextSignature = "";
+    this.regionalTerrainPatch = null;
+    this.regionalTerrainPatchStatus = "idle";
+    this.regionalTerrainPatchError = null;
+    this.regionalTerrainRequestToken = 0;
   }
 
   _surfaceVisualDrivers() {
@@ -47,6 +52,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
   _contextSignature() {
     if (!this.origin) return "none";
     const drivers = this._surfaceVisualDrivers();
+    const patch = this.regionalTerrainPatch;
     return [
       this.origin.latitude.toFixed(6),
       this.origin.longitude.toFixed(6),
@@ -65,7 +71,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       rounded(drivers.treeDensity),
       rounded(drivers.lakeSurfaceElevationMeters, 1),
       rounded(drivers.lakeCoverageFraction, 3),
-      rounded(drivers.lakeAreaKm2, 1)
+      rounded(drivers.lakeAreaKm2, 1),
+      patch ? `${patch.sourceId}:${patch.west}:${patch.south}:${patch.ncols}:${patch.nrows}:${patch.resolutionMeters}` : "regional-patch:none"
     ].join("|");
   }
 
@@ -83,6 +90,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       earthState: this.earthState,
       branchSeed: this.branchSeed,
       geomorphologyPatch: this.geomorphologyPatch,
+      regionalTerrainPatch: this.regionalTerrainPatch,
       chunkSizeKm: this.chunkSizeKm,
       radius: this.radius,
       segments: this.segments,
@@ -92,6 +100,39 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     });
     this.surfaceEcology.invalidateComputeContext();
     return true;
+  }
+
+  setOrigin(latitude, longitude) {
+    super.setOrigin(latitude, longitude);
+    this.regionalTerrainPatch = null;
+    this.regionalTerrainPatchError = null;
+    this.regionalTerrainPatchStatus = "loading";
+    const token = ++this.regionalTerrainRequestToken;
+    const origin = { latitude: this.origin.latitude, longitude: this.origin.longitude };
+
+    // Progressive refinement: never block descent on a remote terrain request.
+    // The compact ETOPO surface renders first; when the regional modern relief
+    // patch arrives, workers rebuild the visible terrain using only its
+    // high-frequency residual over the 777 ka reconstruction.
+    loadRuntimeRegionalTerrainPatch(origin.latitude, origin.longitude)
+      .then((patch) => {
+        if (token !== this.regionalTerrainRequestToken || !this.origin) return;
+        this.regionalTerrainPatch = patch;
+        this.regionalTerrainPatchStatus = "ready";
+        this.regionalTerrainPatchError = null;
+        this.clear();
+        this.lastCenter = { x: Number.NaN, z: Number.NaN };
+        this._syncComputeContext(true);
+      })
+      .catch((error) => {
+        if (token !== this.regionalTerrainRequestToken) return;
+        this.regionalTerrainPatch = null;
+        this.regionalTerrainPatchStatus = "fallback";
+        this.regionalTerrainPatchError = error?.message ?? String(error);
+        // A failed external refinement is intentionally non-fatal: the compact
+        // global ETOPO reconstruction remains the complete offline fallback.
+        console.info("Regional terrain refinement unavailable; retaining compact ETOPO fallback.", error);
+      });
   }
 
   update(cameraPosition) {
@@ -227,6 +268,18 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       terrainQueuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length,
       surfaceCompute: this.computeClient?.diagnostics?.() ?? { available: false, status: "unavailable" },
       regionalSurfacePresentation: "science-driven-natural-mosaic-v1",
+      regionalTerrainRefinement: Object.freeze({
+        status: this.regionalTerrainPatchStatus,
+        sourceId: this.regionalTerrainPatch?.sourceId ?? null,
+        resolutionMeters: this.regionalTerrainPatch?.resolutionMeters ?? null,
+        bounds: this.regionalTerrainPatch ? Object.freeze({
+          west: this.regionalTerrainPatch.west,
+          east: this.regionalTerrainPatch.east,
+          south: this.regionalTerrainPatch.south,
+          north: this.regionalTerrainPatch.north
+        }) : null,
+        error: this.regionalTerrainPatchError
+      }),
       worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v1", lastPump: this.lastSurfacePump })
     });
   }
@@ -240,8 +293,10 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
   }
 
   dispose() {
+    this.regionalTerrainRequestToken += 1;
     super.dispose();
     this.computeClient?.dispose();
     this.computeClient = null;
+    this.regionalTerrainPatch = null;
   }
 }
