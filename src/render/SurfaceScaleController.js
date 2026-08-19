@@ -12,6 +12,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     contourOpacity: 0.09,
     fogNearKm: 110,
     fogFarKm: 360,
+    earthLayers: true,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
     faunaIndividual: false
@@ -27,6 +28,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     contourOpacity: 0.12,
     fogNearKm: 18,
     fogFarKm: 130,
+    earthLayers: true,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
     faunaIndividual: false
@@ -42,6 +44,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     contourOpacity: 0.18,
     fogNearKm: 3.5,
     fogFarKm: 52,
+    earthLayers: false,
     ecology: Object.freeze({ grass: false, trunk: false, crown: true, shrub: false, rock: false }),
     faunaGroup: true,
     faunaIndividual: false
@@ -57,6 +60,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     contourOpacity: 0.28,
     fogNearKm: 0.8,
     fogFarKm: 22,
+    earthLayers: false,
     ecology: Object.freeze({ grass: true, trunk: true, crown: true, shrub: true, rock: true }),
     faunaGroup: true,
     faunaIndividual: true
@@ -91,10 +95,6 @@ export function surfaceFrameForBand({
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov * 0.5) * safeAspect);
   const elevation = clamp(elevationDegrees, 28, 78) * Math.PI / 180;
   const azimuth = Number(azimuthDegrees) * Math.PI / 180;
-
-  // Fit the square terrain footprint in both axes. Its depth is foreshortened
-  // by the aerial elevation angle, which is why this remains closer than a
-  // bounding-sphere fit while still keeping every edge inside the viewport.
   const widthDistance = halfSpanKm / (Math.tan(horizontalFov * 0.5) * safeFill);
   const depthDistance = halfSpanKm * Math.sin(elevation) / (Math.tan(verticalFov * 0.5) * safeFill);
   const distanceKm = Math.max(spanKm * 0.62, widthDistance, depthDistance);
@@ -159,11 +159,12 @@ function ecologyVisible(band) {
 }
 
 class SurfaceScaleController {
-  constructor({ scene, terrain, controls, water }) {
+  constructor({ scene, terrain, controls, water, earthLayers = null }) {
     this.scene = scene;
     this.terrain = terrain;
     this.controls = controls;
     this.water = water;
+    this.earthLayers = earthLayers;
     this.band = null;
     this.distanceKm = 0;
     this.lastConfigurationSignature = "";
@@ -177,6 +178,7 @@ class SurfaceScaleController {
     this._configureTerrain(nextBand);
     this._configureAtmosphere(nextBand);
     this._resolveWaterPolicy(nextBand);
+    this._configureEarthLayers(nextBand);
     this._applyVisibility(nextBand);
     this._fitWaterToTerrain(nextBand);
     this.terrain.viewScaleBand = nextBand.id;
@@ -233,6 +235,21 @@ class SurfaceScaleController {
     return this.waterPolicy;
   }
 
+  _configureEarthLayers(band = this.band) {
+    if (!this.earthLayers || !band) return null;
+    const spanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+    const groundY = this.terrain.origin ? this.terrain.heightAt(0, 0) : 0;
+    const layout = this.earthLayers.configure({
+      spanKm,
+      groundY,
+      baseElevationMeters: this.terrain.baseElevationMeters,
+      seaLevelMeters: this.terrain.earthState?.seaLevel,
+      visible: Boolean(band.earthLayers)
+    });
+    this.terrain.surfaceEarthLayerLayout = layout;
+    return layout;
+  }
+
   _applyVisibility(band = this.band) {
     if (!band) return;
     const ecology = this.terrain.surfaceEcology;
@@ -246,6 +263,7 @@ class SurfaceScaleController {
     }
 
     if (this.water) this.water.visible = Boolean(this.waterPolicy.visible);
+    if (this.earthLayers?.group) this.earthLayers.group.visible = Boolean(band.earthLayers);
   }
 
   _fitWaterToTerrain(band = this.band) {
@@ -258,11 +276,12 @@ class SurfaceScaleController {
   }
 }
 
-export function installSurfaceScaleController({ scene, terrain, controls, water }) {
-  const controller = new SurfaceScaleController({ scene, terrain, controls, water });
+export function installSurfaceScaleController({ scene, terrain, controls, water, earthLayers = null }) {
+  const controller = new SurfaceScaleController({ scene, terrain, controls, water, earthLayers });
   const baseUpdate = terrain.update.bind(terrain);
   const basePump = terrain.pump.bind(terrain);
   const baseDiagnostics = terrain.diagnostics.bind(terrain);
+  const baseDispose = terrain.dispose?.bind(terrain);
   const ecology = terrain.surfaceEcology;
   const fauna = terrain.surfaceFauna;
   const baseEcologyHasWork = ecology?.hasWork?.bind(ecology);
@@ -288,9 +307,18 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
     ...baseDiagnostics(),
     viewScaleBand: controller.band?.id ?? "unresolved",
     viewDistanceKm: controller.distanceKm,
-    waterPresentation: Object.freeze({ ...controller.waterPolicy })
+    waterPresentation: Object.freeze({ ...controller.waterPolicy }),
+    earthLayers: earthLayers?.diagnostics?.() ?? Object.freeze({ visible: false })
   });
 
+  if (baseDispose) {
+    terrain.dispose = () => {
+      earthLayers?.dispose?.();
+      baseDispose();
+    };
+  }
+
   terrain.surfaceScaleController = controller;
+  terrain.surfaceEarthLayers = earthLayers;
   return controller;
 }
