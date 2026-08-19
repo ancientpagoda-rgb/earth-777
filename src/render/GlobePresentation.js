@@ -61,16 +61,11 @@ export function createGlobePresentation(canvas) {
   );
   scene.add(atmosphere);
 
-  // Keep renderer resolution and transparent layers stable throughout wheel/pinch
-  // zooms. EarthView already owns adaptive pixel ratio / LOD decisions; changing
-  // the canvas backing-store size here caused a visible zoom pop and briefly put
-  // OrbitControls and the renderer on different viewport assumptions.
-  controls.addEventListener("start", () => {
-    controls.enableDamping = false;
-  });
-  controls.addEventListener("end", () => {
-    controls.enableDamping = true;
-  });
+  // Keep one damping model for the entire gesture. Switching damping off on a
+  // wheel/pinch start can flush OrbitControls' remaining rotational delta in a
+  // single update, which makes the globe appear to jump sideways on first zoom.
+  // EarthView already keeps rendering through the interaction settle window, so
+  // damping can stay enabled without sacrificing responsiveness.
 
   const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.025, 0.04, 24),
