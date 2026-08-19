@@ -56,6 +56,11 @@ export function createSurfacePresentation(canvas) {
   // cutaway is compressed vertically, but its metadata preserves the real
   // atmosphere, crust, mantle, outer-core and inner-core boundaries.
   const earthLayers = new SurfaceEarthLayers(scene);
+  const baseConfigureEarthLayers = earthLayers.configure.bind(earthLayers);
+  earthLayers.configure = (options = {}) => baseConfigureEarthLayers({
+    ...options,
+    cameraPosition: camera.position
+  });
 
   installSurfaceScaleController({ scene, terrain, controls, water, earthLayers });
 
