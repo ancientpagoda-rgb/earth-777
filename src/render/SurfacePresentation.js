@@ -4,6 +4,7 @@ import { Sky } from "three/addons/objects/Sky.js";
 import { WorkerSurfaceTerrainSystem } from "./WorkerSurfaceTerrainSystem.js";
 import { installSurfaceScaleController } from "./SurfaceScaleController.js";
 import { SurfaceEarthLayers } from "./SurfaceEarthLayers.js";
+import { createRegionalAerialMaterial } from "./RegionalAerialMaterial.js";
 
 function createSeaLevelOutline() {
   const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -64,22 +65,17 @@ export function createSurfacePresentation(canvas) {
 
   const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 28, radius: 1, segments: 32, verticalScale: 0.90 });
 
-  // The regional/landscape product is an aerial reconstruction, not a ground
-  // mesh seen from far away. Use an unlit vertex-color material at those scales
-  // so neighboring chunks cannot reveal their independently calculated edge
-  // normals as dark seams. Local ecology/ground meshes keep the lit material.
-  const aerialMaterial = new THREE.MeshBasicMaterial({
-    vertexColors: true,
-    side: THREE.FrontSide,
-    fog: true,
-    toneMapped: false
-  });
+  // Regional/landscape rendering is an aerial reconstruction. Broad color comes
+  // from simulated vegetation, hydrology and elevation vertex data; this shared
+  // world-coordinate fragment material adds continuous sub-kilometer texture
+  // without exposing chunk borders or pretending modern satellite imagery exists.
+  const aerialMaterial = createRegionalAerialMaterial();
   const baseMeshFromResult = terrain._meshFromResult.bind(terrain);
   terrain._meshFromResult = (result, candidate) => {
     const mesh = baseMeshFromResult(result, candidate);
     if (terrain.chunkSizeKm >= 8) {
       mesh.material = aerialMaterial;
-      mesh.userData.surfacePresentation = "science-colored-aerial";
+      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v2";
     }
     return mesh;
   };
@@ -105,7 +101,19 @@ export function createSurfacePresentation(canvas) {
     cameraPosition: camera.position
   });
 
-  installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
+  const surfaceScale = installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
+
+  // A routed river that is scientifically meaningful at local scale is far
+  // narrower than one regional mesh cell. Drawing that ribbon from orbit aliases
+  // into long trench-like lines. Keep regional drainage in the aerial color field
+  // and reveal explicit river geometry only once the ecology/local bands are active.
+  const baseApplyVisibility = surfaceScale._applyVisibility.bind(surfaceScale);
+  surfaceScale._applyVisibility = (band = surfaceScale.band) => {
+    baseApplyVisibility(band);
+    if (terrain.surfaceEcology?.river) {
+      terrain.surfaceEcology.river.visible = band?.id === "ecology" || band?.id === "ground";
+    }
+  };
 
   // Satellite-style landscape is the normal view. Press L while the regional
   // surface controls are active to inspect atmosphere + deep-Earth cutaway.
