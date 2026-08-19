@@ -69,6 +69,45 @@ export function surfaceScaleBandForDistance(distanceKm) {
     ?? SURFACE_SCALE_BANDS[SURFACE_SCALE_BANDS.length - 1];
 }
 
+export function surfaceWaterPolicy({
+  bandId,
+  waterBody,
+  baseElevationMeters = 0,
+  seaLevelMeters = 0,
+  lakeCoverageFraction = 0
+} = {}) {
+  const body = String(waterBody || "none");
+  const base = Number(baseElevationMeters);
+  const sea = Number(seaLevelMeters);
+  const coverage = clamp(lakeCoverageFraction, 0, 1);
+
+  if (body === "lake") {
+    // A groundwater/network lake sample describes the selected local basin; it
+    // is not a regional shoreline mask. Never inflate it into a 40–100 km flat
+    // sheet. Materialize it only once the observer reaches ecology/local scale.
+    if (bandId === "regional" || bandId === "landscape") {
+      return Object.freeze({ visible: false, spanFraction: 0, reason: "local-lake-deferred" });
+    }
+    const maxFraction = bandId === "ground" ? 0.58 : 0.36;
+    const inferredFraction = clamp(0.10 + Math.sqrt(coverage) * 0.38, 0.10, maxFraction);
+    return Object.freeze({ visible: true, spanFraction: inferredFraction, reason: "local-lake" });
+  }
+
+  if (body === "ocean") {
+    // The fallback ocean plane is only a valid proxy when the selected terrain
+    // is actually oceanic or coastal. Inland selections must not inherit a sea-
+    // level sheet merely because no lake was returned by the local hydrology.
+    const coastalOrOcean = Number.isFinite(base) && Number.isFinite(sea) && base <= sea + 120;
+    return Object.freeze({
+      visible: coastalOrOcean,
+      spanFraction: coastalOrOcean ? 1.08 : 0,
+      reason: coastalOrOcean ? "coastal-ocean" : "inland-ocean-suppressed"
+    });
+  }
+
+  return Object.freeze({ visible: false, spanFraction: 0, reason: "no-water" });
+}
+
 function cameraDistanceKm(cameraPosition, target) {
   if (!cameraPosition || !target) return 0;
   const dx = (Number(cameraPosition.x) || 0) - (Number(target.x) || 0);
@@ -90,6 +129,7 @@ class SurfaceScaleController {
     this.band = null;
     this.distanceKm = 0;
     this.lastConfigurationSignature = "";
+    this.waterPolicy = Object.freeze({ visible: false, spanFraction: 0, reason: "unresolved" });
   }
 
   apply(cameraPosition) {
@@ -98,6 +138,7 @@ class SurfaceScaleController {
     this.band = nextBand;
     this._configureTerrain(nextBand);
     this._configureAtmosphere(nextBand);
+    this._resolveWaterPolicy(nextBand);
     this._applyVisibility(nextBand);
     this._fitWaterToTerrain(nextBand);
     this.terrain.viewScaleBand = nextBand.id;
@@ -143,6 +184,17 @@ class SurfaceScaleController {
     this.scene.fog.far = band.fogFarKm;
   }
 
+  _resolveWaterPolicy(band = this.band) {
+    this.waterPolicy = surfaceWaterPolicy({
+      bandId: band?.id,
+      waterBody: this.water?.userData?.waterBody,
+      baseElevationMeters: this.terrain.baseElevationMeters,
+      seaLevelMeters: this.terrain.earthState?.seaLevel,
+      lakeCoverageFraction: this.water?.userData?.lakeCoverageFraction
+    });
+    return this.waterPolicy;
+  }
+
   _applyVisibility(band = this.band) {
     if (!band) return;
     const ecology = this.terrain.surfaceEcology;
@@ -156,13 +208,16 @@ class SurfaceScaleController {
       const visible = name === "group" ? band.faunaGroup : band.faunaIndividual;
       for (const page of pool.pages ?? []) page.visible = visible;
     }
+
+    if (this.water) this.water.visible = Boolean(this.waterPolicy.visible);
   }
 
   _fitWaterToTerrain(band = this.band) {
-    if (!this.water || !band || this.water.userData?.waterBody === "lake") return;
+    if (!this.water || !band || !this.waterPolicy.visible) return;
     const geometryWidthKm = Number(this.water.geometry?.parameters?.width) || 220;
-    const terrainSpanKm = band.chunkSizeKm * (band.radius * 2 + 1) * 1.08;
-    const scale = clamp(terrainSpanKm / geometryWidthKm, 0.025, 1);
+    const terrainSpanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+    const targetSpanKm = terrainSpanKm * this.waterPolicy.spanFraction;
+    const scale = clamp(targetSpanKm / geometryWidthKm, 0.0015, 1);
     this.water.scale.set(scale, scale, scale);
   }
 }
@@ -200,7 +255,8 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
   terrain.diagnostics = () => Object.freeze({
     ...baseDiagnostics(),
     viewScaleBand: controller.band?.id ?? "unresolved",
-    viewDistanceKm: controller.distanceKm
+    viewDistanceKm: controller.distanceKm,
+    waterPresentation: Object.freeze({ ...controller.waterPolicy })
   });
 
   terrain.surfaceScaleController = controller;
