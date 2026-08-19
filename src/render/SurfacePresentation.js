@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Sky } from "three/addons/objects/Sky.js";
 import { WorkerSurfaceTerrainSystem } from "./WorkerSurfaceTerrainSystem.js";
 import { installSurfaceScaleController } from "./SurfaceScaleController.js";
+import { SurfaceEarthLayers } from "./SurfaceEarthLayers.js";
 
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
@@ -33,9 +34,6 @@ export function createSurfacePresentation(canvas) {
   uniforms.mieDirectionalG.value = 0.78;
   const sunDirection = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(58), THREE.MathUtils.degToRad(238));
   uniforms.sunPosition.value.copy(sunDirection);
-  // The previous aerial sky repeatedly blew out to white under ACES. Keep the
-  // physically styled sky available for a later exposure pass, but use the
-  // deterministic blue scene background for the regional descent today.
   sky.visible = false;
   scene.add(sky);
 
@@ -44,9 +42,6 @@ export function createSurfacePresentation(canvas) {
   sun.position.copy(sunDirection).multiplyScalar(90);
   scene.add(sun);
 
-  // Same ~84 km regional footprint as before, but only 3×3 worker chunks rather
-  // than 7×7. The larger chunks eliminate the long-lived postage-stamp state
-  // where one tiny center tile was visible while 48 neighbors were still queued.
   const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 28, radius: 1, segments: 32, verticalScale: 0.90 });
 
   const water = new THREE.Mesh(
@@ -57,7 +52,12 @@ export function createSurfacePresentation(canvas) {
   water.renderOrder = 1;
   scene.add(water);
 
-  installSurfaceScaleController({ scene, terrain, controls, water });
+  // Regional/landscape views deliberately expose vertical structure. The
+  // cutaway is compressed vertically, but its metadata preserves the real
+  // atmosphere, crust, mantle, outer-core and inner-core boundaries.
+  const earthLayers = new SurfaceEarthLayers(scene);
 
-  return { scene, camera, controls, terrain, water, sky, sun };
+  installSurfaceScaleController({ scene, terrain, controls, water, earthLayers });
+
+  return { scene, camera, controls, terrain, water, sky, sun, earthLayers };
 }
