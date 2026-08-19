@@ -4,13 +4,13 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
   Object.freeze({
     id: "regional",
     minDistanceKm: 6,
-    chunkSizeKm: 12,
-    radius: 3,
-    segments: 18,
-    verticalScale: 0.86,
+    chunkSizeKm: 28,
+    radius: 1,
+    segments: 32,
+    verticalScale: 0.90,
     contourIntervalMeters: 200,
-    contourOpacity: 0.11,
-    fogNearKm: 70,
+    contourOpacity: 0.09,
+    fogNearKm: 110,
     fogFarKm: 360,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
@@ -19,14 +19,14 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
   Object.freeze({
     id: "landscape",
     minDistanceKm: 1.6,
-    chunkSizeKm: 6,
-    radius: 3,
-    segments: 18,
+    chunkSizeKm: 8,
+    radius: 2,
+    segments: 24,
     verticalScale: 0.76,
     contourIntervalMeters: 100,
     contourOpacity: 0.12,
-    fogNearKm: 12,
-    fogFarKm: 120,
+    fogNearKm: 18,
+    fogFarKm: 130,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
     faunaIndividual: false
@@ -69,6 +69,50 @@ export function surfaceScaleBandForDistance(distanceKm) {
     ?? SURFACE_SCALE_BANDS[SURFACE_SCALE_BANDS.length - 1];
 }
 
+export function surfaceScaleBandById(id = "regional") {
+  return SURFACE_SCALE_BANDS.find((band) => band.id === id) ?? SURFACE_SCALE_BANDS[0];
+}
+
+export function surfaceFrameForBand({
+  bandId = "regional",
+  fovDegrees = 58,
+  aspect = 16 / 9,
+  fill = 0.76,
+  elevationDegrees = 52,
+  azimuthDegrees = 8,
+  groundY = 0
+} = {}) {
+  const band = surfaceScaleBandById(bandId);
+  const spanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+  const halfSpanKm = spanKm * 0.5;
+  const safeFill = clamp(fill, 0.42, 0.90);
+  const verticalFov = Math.max(0.1, Number(fovDegrees) || 58) * Math.PI / 180;
+  const safeAspect = Math.max(0.45, Number(aspect) || 1);
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov * 0.5) * safeAspect);
+  const elevation = clamp(elevationDegrees, 28, 78) * Math.PI / 180;
+  const azimuth = Number(azimuthDegrees) * Math.PI / 180;
+
+  // Fit the square terrain footprint in both axes. Its depth is foreshortened
+  // by the aerial elevation angle, which is why this remains closer than a
+  // bounding-sphere fit while still keeping every edge inside the viewport.
+  const widthDistance = halfSpanKm / (Math.tan(horizontalFov * 0.5) * safeFill);
+  const depthDistance = halfSpanKm * Math.sin(elevation) / (Math.tan(verticalFov * 0.5) * safeFill);
+  const distanceKm = Math.max(spanKm * 0.62, widthDistance, depthDistance);
+  const horizontalKm = distanceKm * Math.cos(elevation);
+
+  return Object.freeze({
+    bandId: band.id,
+    spanKm,
+    distanceKm,
+    position: Object.freeze({
+      x: Math.sin(azimuth) * horizontalKm,
+      y: Number(groundY) + distanceKm * Math.sin(elevation),
+      z: Math.cos(azimuth) * horizontalKm
+    }),
+    target: Object.freeze({ x: 0, y: Number(groundY) + 0.02, z: 0 })
+  });
+}
+
 export function surfaceWaterPolicy({
   bandId,
   waterBody,
@@ -82,9 +126,6 @@ export function surfaceWaterPolicy({
   const coverage = clamp(lakeCoverageFraction, 0, 1);
 
   if (body === "lake") {
-    // A groundwater/network lake sample describes the selected local basin; it
-    // is not a regional shoreline mask. Never inflate it into a 40–100 km flat
-    // sheet. Materialize it only once the observer reaches ecology/local scale.
     if (bandId === "regional" || bandId === "landscape") {
       return Object.freeze({ visible: false, spanFraction: 0, reason: "local-lake-deferred" });
     }
@@ -94,9 +135,6 @@ export function surfaceWaterPolicy({
   }
 
   if (body === "ocean") {
-    // The fallback ocean plane is only a valid proxy when the selected terrain
-    // is actually oceanic or coastal. Inland selections must not inherit a sea-
-    // level sheet merely because no lake was returned by the local hydrology.
     const coastalOrOcean = Number.isFinite(base) && Number.isFinite(sea) && base <= sea + 120;
     return Object.freeze({
       visible: coastalOrOcean,
@@ -198,9 +236,7 @@ class SurfaceScaleController {
   _applyVisibility(band = this.band) {
     if (!band) return;
     const ecology = this.terrain.surfaceEcology;
-    for (const [name, mesh] of Object.entries(ecology?.pools ?? {})) {
-      mesh.visible = Boolean(band.ecology[name]);
-    }
+    for (const [name, mesh] of Object.entries(ecology?.pools ?? {})) mesh.visible = Boolean(band.ecology[name]);
     if (ecology?.river) ecology.river.visible = true;
 
     const fauna = this.terrain.surfaceFauna;
@@ -232,12 +268,8 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
   const baseEcologyHasWork = ecology?.hasWork?.bind(ecology);
   const baseFaunaHasWork = fauna?.hasWork?.bind(fauna);
 
-  if (baseEcologyHasWork) {
-    ecology.hasWork = () => ecologyVisible(controller.band) && baseEcologyHasWork();
-  }
-  if (baseFaunaHasWork) {
-    fauna.hasWork = () => Boolean(controller.band?.faunaGroup || controller.band?.faunaIndividual) && baseFaunaHasWork();
-  }
+  if (baseEcologyHasWork) ecology.hasWork = () => ecologyVisible(controller.band) && baseEcologyHasWork();
+  if (baseFaunaHasWork) fauna.hasWork = () => Boolean(controller.band?.faunaGroup || controller.band?.faunaIndividual) && baseFaunaHasWork();
 
   terrain.update = (cameraPosition) => {
     controller.apply(cameraPosition);
