@@ -50,6 +50,9 @@ export function enterSurface(view, now) {
   view.terrain.setOrigin(latitude, longitude);
   view.refreshSurfaceContext?.(true);
   view.applyPerformanceSettings(false);
+  // Regional entry is a clean landscape by default. Geological/atmospheric
+  // structure remains available as an explicit inspection overlay.
+  view.terrain.setEarthLayerInspection?.(false);
 
   const ground = view.terrain.heightAt(0, 0);
   const aspect = Math.max(0.5, Number(view.surfaceCamera.aspect) || 16 / 9);
@@ -57,24 +60,23 @@ export function enterSurface(view, now) {
     bandId: "regional",
     fovDegrees: view.surfaceCamera.fov,
     aspect,
-    fill: 0.56,
-    elevationDegrees: 55,
-    azimuthDegrees: 8,
+    fill: 0.62,
+    elevationDegrees: 73,
+    azimuthDegrees: 3,
     groundY: ground
   });
   const toFrame = surfaceFrameForBand({
     bandId: "regional",
     fovDegrees: view.surfaceCamera.fov,
     aspect,
-    fill: 0.78,
-    elevationDegrees: 51,
-    azimuthDegrees: 8,
+    fill: 0.91,
+    elevationDegrees: 78,
+    azimuthDegrees: 3,
     groundY: ground
   });
 
-  // Camera distance is now derived from the active regional footprint and FOV.
-  // This keeps the landscape at a stable screen size across desktop/mobile
-  // aspect ratios instead of oscillating between a wall and a postage stamp.
+  // The regional view now deliberately resembles a satellite/map inspection:
+  // nearly overhead, continuously filled, with enough obliquity left for relief.
   view.surfaceCamera.position.copy(framePosition(fromFrame));
   view.surfaceControls.target.copy(frameTarget(fromFrame));
   view.surfaceControls.enabled = false;
