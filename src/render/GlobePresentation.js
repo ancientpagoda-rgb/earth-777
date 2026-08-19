@@ -1,9 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const INTERACTION_PRESENTATION_SETTLE_MS = 900;
-const INTERACTION_PIXEL_RATIO_CAP = 0.65;
-
 function createStars(count = 700) {
   const positions = new Float32Array(count * 3);
   let state = 0x777001;
@@ -40,7 +37,6 @@ export function createGlobePresentation(canvas) {
   controls.minDistance = 1.425;
   controls.maxDistance = 120;
   controls.rotateSpeed = 0.54;
-  // OrbitControls' normal convention is wheel-up = zoom in and wheel-down = zoom out.
   controls.zoomSpeed = 1.0;
 
   const earthMaterial = new THREE.MeshStandardMaterial({
@@ -65,67 +61,15 @@ export function createGlobePresentation(canvas) {
   );
   scene.add(atmosphere);
 
-  // Direct manipulation gets a motion-specific presentation budget, but a plain
-  // click must remain visually inert. OrbitControls emits `start` on pointer-down,
-  // so entering the cheaper presentation there caused the first selection click
-  // to resize the drawing buffer and blink transparent layers. We now wait for a
-  // real camera `change`, which occurs on an actual drag/zoom but not a click.
-  let presentationRestoreTimer = null;
-  let restingPixelRatio = null;
-  let restingCloudVisibility = null;
-  let restingAtmosphereVisibility = null;
-  let controlGestureActive = false;
-  let interactionPresentationActive = false;
-
-  function enterInteractionPresentation() {
-    if (interactionPresentationActive) return;
-    interactionPresentationActive = true;
-    if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
-    presentationRestoreTimer = null;
-    restingCloudVisibility = clouds.visible;
-    restingAtmosphereVisibility = atmosphere.visible;
-    clouds.visible = false;
-    atmosphere.visible = false;
-
-    if (restingPixelRatio == null) {
-      restingPixelRatio = canvas.width / Math.max(1, canvas.clientWidth || canvas.width);
-      const interactionRatio = Math.min(restingPixelRatio, INTERACTION_PIXEL_RATIO_CAP);
-      if (interactionRatio < restingPixelRatio - 0.02) {
-        canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * interactionRatio));
-        canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * interactionRatio));
-      }
-    }
-  }
-
-  function restoreInteractionPresentation() {
-    if (!interactionPresentationActive) return;
-    if (restingPixelRatio != null) {
-      canvas.width = Math.max(1, Math.round((canvas.clientWidth || canvas.width) * restingPixelRatio));
-      canvas.height = Math.max(1, Math.round((canvas.clientHeight || canvas.height) * restingPixelRatio));
-      restingPixelRatio = null;
-    }
-    if (restingCloudVisibility != null) clouds.visible = restingCloudVisibility;
-    if (restingAtmosphereVisibility != null) atmosphere.visible = restingAtmosphereVisibility;
-    restingCloudVisibility = null;
-    restingAtmosphereVisibility = null;
-    interactionPresentationActive = false;
-    presentationRestoreTimer = null;
-    controls.dispatchEvent({ type: "change" });
-  }
-
+  // Keep renderer resolution and transparent layers stable throughout wheel/pinch
+  // zooms. EarthView already owns adaptive pixel ratio / LOD decisions; changing
+  // the canvas backing-store size here caused a visible zoom pop and briefly put
+  // OrbitControls and the renderer on different viewport assumptions.
   controls.addEventListener("start", () => {
-    controlGestureActive = true;
     controls.enableDamping = false;
   });
-  controls.addEventListener("change", () => {
-    if (controlGestureActive) enterInteractionPresentation();
-  });
   controls.addEventListener("end", () => {
-    controlGestureActive = false;
     controls.enableDamping = true;
-    if (!interactionPresentationActive) return;
-    if (presentationRestoreTimer != null) clearTimeout(presentationRestoreTimer);
-    presentationRestoreTimer = setTimeout(restoreInteractionPresentation, INTERACTION_PRESENTATION_SETTLE_MS);
   });
 
   const marker = new THREE.Mesh(
