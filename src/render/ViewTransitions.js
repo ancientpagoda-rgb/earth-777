@@ -44,12 +44,11 @@ export function enterSurface(view, now) {
 
   const ground = view.terrain.heightAt(0, 0);
 
-  // “Descend to region” should first reveal the selected landscape as a region,
-  // not drop the observer almost directly onto the ground. Start several km out
-  // and settle into an oblique aerial view; OrbitControls still allow a seamless
-  // continuation all the way down to local/surface scale afterwards.
-  view.surfaceCamera.position.set(0.18, ground + 2.4, 3.4);
-  view.surfaceControls.target.set(0, ground + 0.04, 0);
+  // Land at a genuine regional scale first. The regional terrain LOD spans
+  // roughly 100 km, then swaps progressively to landscape, ecology, and
+  // human-scale terrain as the observer zooms toward the selected point.
+  view.surfaceCamera.position.set(5.0, ground + 31, 46);
+  view.surfaceControls.target.set(0, ground + 0.06, 0);
   view.surfaceControls.enabled = false;
   view.updateSurfaceWater();
   view.terrain.update(view.surfaceCamera.position);
@@ -59,11 +58,11 @@ export function enterSurface(view, now) {
 
   view.surfaceEntry = {
     started: now,
-    duration: 1_650,
+    duration: 1_850,
     fromPosition: view.surfaceCamera.position.clone(),
-    toPosition: new THREE.Vector3(0.08, ground + 1.15, 1.75),
+    toPosition: new THREE.Vector3(3.2, ground + 23, 35),
     fromTarget: view.surfaceControls.target.clone(),
-    toTarget: new THREE.Vector3(0, ground + 0.015, 0)
+    toTarget: new THREE.Vector3(0, ground + 0.025, 0)
   };
   view.onModeChange?.("surface", view.selection);
   view.invalidate();
