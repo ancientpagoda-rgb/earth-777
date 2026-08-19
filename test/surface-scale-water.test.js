@@ -1,12 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { surfaceScaleBandForDistance, surfaceWaterPolicy } from "../src/render/SurfaceScaleController.js";
+import { SURFACE_SCALE_BANDS, surfaceScaleBandForDistance, surfaceWaterPolicy } from "../src/render/SurfaceScaleController.js";
 
 test("surface scale bands descend from region to ground", () => {
   assert.equal(surfaceScaleBandForDistance(42).id, "regional");
   assert.equal(surfaceScaleBandForDistance(3).id, "landscape");
   assert.equal(surfaceScaleBandForDistance(0.8).id, "ecology");
   assert.equal(surfaceScaleBandForDistance(0.08).id, "ground");
+});
+
+test("regional overview stays bounded and sufficiently tessellated", () => {
+  const regional = SURFACE_SCALE_BANDS.find((band) => band.id === "regional");
+  assert.ok(regional);
+  const spanKm = regional.chunkSizeKm * (regional.radius * 2 + 1);
+  assert.ok(spanKm <= 90, `regional footprint should stay aerially frameable, got ${spanKm} km`);
+  assert.ok(regional.segments >= 18, `regional chunks should avoid giant facets, got ${regional.segments} segments`);
 });
 
 test("local branch lakes are suppressed at regional and landscape scale", () => {
