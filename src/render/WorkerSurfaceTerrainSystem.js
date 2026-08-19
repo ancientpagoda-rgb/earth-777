@@ -49,6 +49,24 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     };
   }
 
+  _regionalTerrainSmoothingRadiusCells() {
+    const patch = this.regionalTerrainPatch;
+    if (!patch || Number(this.chunkSizeKm) < 8) return 0;
+    const sourceResolutionMeters = Math.max(50, Number(patch.resolutionMeters) || 400);
+    const vertexSpacingMeters = Math.max(1, Number(this.chunkSizeKm) * 1000 / Math.max(1, Number(this.segments) || 1));
+    // Keep at least ~2 source samples across one coarse regional vertex spacing.
+    // Landscape/ecology bands return zero and therefore keep raw high-resolution relief.
+    return Math.max(1, Math.min(16, Math.round(vertexSpacingMeters / sourceResolutionMeters * 0.42)));
+  }
+
+  _regionalTerrainPatchForCompute() {
+    if (!this.regionalTerrainPatch) return null;
+    return {
+      ...this.regionalTerrainPatch,
+      smoothingRadiusCells: this._regionalTerrainSmoothingRadiusCells()
+    };
+  }
+
   _contextSignature() {
     if (!this.origin) return "none";
     const drivers = this._surfaceVisualDrivers();
@@ -72,7 +90,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       rounded(drivers.lakeSurfaceElevationMeters, 1),
       rounded(drivers.lakeCoverageFraction, 3),
       rounded(drivers.lakeAreaKm2, 1),
-      patch ? `${patch.sourceId}:${patch.west}:${patch.south}:${patch.ncols}:${patch.nrows}:${patch.resolutionMeters}` : "regional-patch:none"
+      patch ? `${patch.sourceId}:${patch.west}:${patch.south}:${patch.ncols}:${patch.nrows}:${patch.resolutionMeters}:smooth-${this._regionalTerrainSmoothingRadiusCells()}` : "regional-patch:none"
     ].join("|");
   }
 
@@ -90,7 +108,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       earthState: this.earthState,
       branchSeed: this.branchSeed,
       geomorphologyPatch: this.geomorphologyPatch,
-      regionalTerrainPatch: this.regionalTerrainPatch,
+      regionalTerrainPatch: this._regionalTerrainPatchForCompute(),
       chunkSizeKm: this.chunkSizeKm,
       radius: this.radius,
       segments: this.segments,
@@ -100,6 +118,27 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     });
     this.surfaceEcology.invalidateComputeContext();
     return true;
+  }
+
+  _queueVisibleTerrainRefresh() {
+    const centerX = Number(this.lastCenter?.x);
+    const centerZ = Number(this.lastCenter?.z);
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerZ)) return false;
+    this.queue = [];
+    this.queuedKeys.clear();
+    const candidates = [];
+    for (let dz = -this.radius; dz <= this.radius; dz += 1) {
+      for (let dx = -this.radius; dx <= this.radius; dx += 1) {
+        const x = centerX + dx;
+        const z = centerZ + dz;
+        const key = `${x}:${z}`;
+        candidates.push({ x, z, key, distance: dx * dx + dz * dz, replaceExisting: true });
+        this.queuedKeys.add(key);
+      }
+    }
+    candidates.sort((a, b) => a.distance - b.distance);
+    this.queue.push(...candidates);
+    return candidates.length > 0;
   }
 
   setOrigin(latitude, longitude) {
@@ -120,9 +159,14 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         this.regionalTerrainPatch = patch;
         this.regionalTerrainPatchStatus = "ready";
         this.regionalTerrainPatchError = null;
-        this.clear();
-        this.lastCenter = { x: Number.NaN, z: Number.NaN };
+
+        // Keep the old generation visible while the refined one is computed.
+        // Each completed replacement chunk removes its predecessor and is added
+        // in the same pump turn, preventing holes or overlapping generations.
+        this.queue = [];
+        this.queuedKeys.clear();
         this._syncComputeContext(true);
+        this._queueVisibleTerrainRefresh();
       })
       .catch((error) => {
         if (token !== this.regionalTerrainRequestToken) return;
@@ -169,8 +213,14 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     while (this.terrainCompleted.length && performance.now() - started < budgetMs) {
       const { candidate, result } = this.terrainCompleted.shift();
       this.queuedKeys.delete(candidate.key);
-      if (!result || this.chunks.has(candidate.key) || !this._candidateStillWanted(candidate)) continue;
+      if (!result || !this._candidateStillWanted(candidate)) continue;
+      const previous = this.chunks.get(candidate.key);
+      if (previous && !candidate.replaceExisting) continue;
       const mesh = this._meshFromResult(result, candidate);
+      if (previous) {
+        this.scene.remove(previous);
+        previous.geometry.dispose();
+      }
       this.chunks.set(candidate.key, mesh);
       this.scene.add(mesh);
       work += 1;
@@ -272,6 +322,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         status: this.regionalTerrainPatchStatus,
         sourceId: this.regionalTerrainPatch?.sourceId ?? null,
         resolutionMeters: this.regionalTerrainPatch?.resolutionMeters ?? null,
+        smoothingRadiusCells: this._regionalTerrainSmoothingRadiusCells(),
         bounds: this.regionalTerrainPatch ? Object.freeze({
           west: this.regionalTerrainPatch.west,
           east: this.regionalTerrainPatch.east,
