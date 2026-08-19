@@ -9,6 +9,7 @@ const wrapLongitudeDelta = (value) => ((Number(value) + 540) % 360) - 180;
 const fract = (value) => value - Math.floor(value);
 const random01 = (seed) => fract(Math.sin(seed * 12.9898 + 78.233) * 43758.5453123);
 const seedFor = (latitude, longitude, x, z, salt = 0) => (latitude + 90) * 197.3 + (longitude + 180) * 389.7 + x * 911.1 + z * 617.3 + salt * 131.9;
+const smoothstep01 = (value) => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
 
 function geographicAt(config, xKm, zKm) {
   const latitude = config.origin.latitude + zKm / KM_PER_DEGREE_LATITUDE;
@@ -77,6 +78,58 @@ function microreliefKm(config, xKm, zKm, elevationMeters) {
   return wave * amplitudeMeters / 1000 * config.verticalScale;
 }
 
+function organicField(config, xKm, zKm, salt = 0) {
+  const phase = ((Number(config.branchSeed) || 0) % 10007) * 0.00071 + salt * 1.731;
+  const macro = Math.sin((xKm * 0.105 + phase) + Math.sin(zKm * 0.057 - phase) * 1.45);
+  const cross = Math.cos((zKm * 0.132 - phase * 0.7) + Math.sin(xKm * 0.071 + phase) * 1.15);
+  const meso = Math.sin((xKm + zKm * 0.72) * 0.34 + phase * 1.9);
+  const fine = Math.cos((xKm * 0.81 - zKm * 0.53) + phase * 2.7);
+  return clamp(0.5 + macro * 0.22 + cross * 0.17 + meso * 0.08 + fine * 0.03, 0, 1);
+}
+
+function surfaceDrivers(config) {
+  const drivers = config.surfaceVisualDrivers ?? {};
+  return {
+    lai: clamp((Number(drivers.lai) || 0) / 7.12, 0, 1),
+    npp: clamp(Math.log1p(Math.max(0, Number(drivers.npp) || 0)) / Math.log1p(2214), 0, 1),
+    runoff: clamp(Math.log1p(Math.max(0, Number(drivers.runoffMmPerYear) || 0)) / Math.log1p(1400), 0, 1),
+    treeDensity: clamp(Number(drivers.treeDensity), 0, 1.15),
+    grassDensity: clamp(Number(drivers.grassDensity), 0, 1.15),
+    shrubDensity: clamp(Number(drivers.shrubDensity), 0, 1.15),
+    lakeSurfaceElevationMeters: Number(drivers.lakeSurfaceElevationMeters),
+    lakeCoverageFraction: clamp(Number(drivers.lakeCoverageFraction), 0, 1),
+    lakeAreaKm2: Math.max(0, Number(drivers.lakeAreaKm2) || 0),
+    lakeCenterXKm: Number(drivers.lakeCenterXKm) || 0,
+    lakeCenterZKm: Number(drivers.lakeCenterZKm) || 0,
+    meanDischargeM3s: Math.max(0, Number(drivers.meanDischargeM3s) || 0)
+  };
+}
+
+function regionalLakePresence(config, xKm, zKm, elevationMeters) {
+  if (Number(config.chunkSizeKm) < 8) return 0;
+  const drivers = surfaceDrivers(config);
+  if (!Number.isFinite(drivers.lakeSurfaceElevationMeters) || drivers.lakeCoverageFraction <= 0.005 || drivers.lakeAreaKm2 <= 0) return 0;
+  if (elevationMeters > drivers.lakeSurfaceElevationMeters + 18) return 0;
+
+  const nominalRadiusKm = Math.sqrt(drivers.lakeAreaKm2 / Math.PI);
+  const radiusKm = clamp(nominalRadiusKm, 0.35, Math.max(1, config.chunkSizeKm * (config.radius + 0.65)));
+  const angle = ((Number(config.branchSeed) || 0) % 2048) / 2048 * TAU;
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const dx = xKm - drivers.lakeCenterXKm;
+  const dz = zKm - drivers.lakeCenterZKm;
+  const rx = dx * cosA - dz * sinA;
+  const rz = dx * sinA + dz * cosA;
+  const aspect = 0.72 + organicField(config, 0, 0, 9) * 0.52;
+  const boundaryNoise = 0.84
+    + organicField(config, xKm * 0.78, zKm * 0.78, 11) * 0.25
+    + Math.sin(Math.atan2(rz, rx) * 5 + angle) * 0.055;
+  const normalized = Math.hypot(rx / (radiusKm * aspect), rz / (radiusKm / aspect)) / Math.max(0.55, boundaryNoise);
+  const shoreline = smoothstep01((1.08 - normalized) / 0.18);
+  const basinFit = smoothstep01((drivers.lakeSurfaceElevationMeters + 18 - elevationMeters) / 34);
+  return shoreline * basinFit;
+}
+
 export function surfaceHeightAt(config, xKm, zKm) {
   const { latitude, longitude } = geographicAt(config, xKm, zKm);
   const elevationMeters = elevationAt(config, latitude, longitude);
@@ -85,21 +138,59 @@ export function surfaceHeightAt(config, xKm, zKm) {
     + microreliefKm(config, xKm, zKm, elevationMeters);
 }
 
-function terrainColor(latitude, elevationMeters, reliefMeters, groundTint = null) {
+function mixColor(a, b, t) {
+  const amount = clamp(t, 0, 1);
+  return [mix(a[0], b[0], amount), mix(a[1], b[1], amount), mix(a[2], b[2], amount)];
+}
+
+function baseTerrainColor(latitude, elevationMeters, reliefMeters) {
   const absLat = Math.abs(latitude);
-  let base;
-  if (elevationMeters < 0) base = [0.07, 0.16, 0.17];
-  else if (absLat > 68 || elevationMeters > 3200) base = [0.57, 0.62, 0.57];
-  else if (elevationMeters > 1900) base = [0.36, 0.34, 0.25];
-  else {
-    const relief = clamp(Math.abs(reliefMeters) / 900, 0, 1);
-    if (absLat < 25) base = [0.24 + relief * 0.08, 0.36 + relief * 0.04, 0.18];
-    else if (absLat < 48) base = [0.28 + relief * 0.08, 0.38, 0.2];
-    else base = [0.31 + relief * 0.06, 0.36, 0.24];
-  }
-  if (!groundTint || elevationMeters < 0) return base;
-  const blend = 0.38;
-  return [mix(base[0], groundTint[0], blend), mix(base[1], groundTint[1], blend), mix(base[2], groundTint[2], blend)];
+  if (elevationMeters < 0) return [0.07, 0.16, 0.17];
+  if (absLat > 68 || elevationMeters > 3200) return [0.57, 0.62, 0.57];
+  if (elevationMeters > 1900) return [0.36, 0.34, 0.25];
+  const relief = clamp(Math.abs(reliefMeters) / 900, 0, 1);
+  if (absLat < 25) return [0.24 + relief * 0.08, 0.36 + relief * 0.04, 0.18];
+  if (absLat < 48) return [0.28 + relief * 0.08, 0.38, 0.2];
+  return [0.31 + relief * 0.06, 0.36, 0.24];
+}
+
+export function regionalLandCoverColorAt(config, xKm, zKm, latitude, elevationMeters, reliefMeters, groundTint = null, lakePresence = 0) {
+  if (elevationMeters < -120 && lakePresence <= 0.05) return [0.055, 0.135, 0.16];
+
+  const base = baseTerrainColor(latitude, elevationMeters, reliefMeters);
+  const drivers = surfaceDrivers(config);
+  const macro = organicField(config, xKm, zKm, 1);
+  const meso = organicField(config, xKm * 1.8, zKm * 1.8, 2);
+  const drainage = organicField(config, xKm * 0.62 + zKm * 0.18, zKm * 0.62 - xKm * 0.18, 4);
+  const vigor = clamp(drivers.lai * 0.48 + drivers.npp * 0.28 + drivers.treeDensity * 0.24, 0, 1);
+  const lowland = clamp(0.58 - Math.max(-250, reliefMeters) / 1100, 0, 1);
+  const moisture = clamp(drivers.runoff * 0.60 + lowland * 0.22 + (drainage - 0.5) * 0.36, 0, 1);
+  const forestWeight = smoothstep01((macro + vigor * 0.82 - 0.68) / 0.52) * clamp(0.22 + drivers.treeDensity * 0.9, 0, 1);
+  const wetlandWeight = smoothstep01((moisture + meso * 0.28 - 0.72) / 0.38) * lowland;
+  const dryOpeningWeight = smoothstep01((0.48 - moisture + (0.48 - macro) * 0.22) / 0.42);
+  const sedimentWeight = smoothstep01((0.39 - vigor + (0.5 - meso) * 0.18) / 0.38) * (1 - wetlandWeight);
+
+  const forest = [0.095, 0.235, 0.105];
+  const woodland = [0.18, 0.315, 0.14];
+  const grassland = [0.31, 0.39, 0.19];
+  const wetland = [0.115, 0.275, 0.235];
+  const dryGround = [0.46, 0.385, 0.235];
+  const sediment = [0.50, 0.43, 0.29];
+  const water = [0.075, 0.245, 0.285];
+
+  let color = mixColor(base, grassland, 0.44 + drivers.grassDensity * 0.14);
+  color = mixColor(color, woodland, clamp(vigor * 0.34, 0, 0.34));
+  color = mixColor(color, forest, forestWeight * 0.74);
+  color = mixColor(color, wetland, wetlandWeight * 0.78);
+  color = mixColor(color, dryGround, dryOpeningWeight * 0.48);
+  color = mixColor(color, sediment, sedimentWeight * 0.36);
+
+  if (groundTint && elevationMeters >= 0) color = mixColor(color, groundTint, 0.18);
+
+  const tonalVariation = (meso - 0.5) * 0.10 + (macro - 0.5) * 0.05;
+  color = color.map((channel) => clamp(channel + tonalVariation, 0.025, 0.78));
+  if (lakePresence > 0) color = mixColor(color, water, smoothstep01(lakePresence) * 0.96);
+  return color;
 }
 
 function computeNormals(positions, indices) {
@@ -142,6 +233,7 @@ export function buildTerrainChunkData(config, chunkX, chunkZ) {
   const half = config.chunkSizeKm / 2;
   const centerX = chunkX * config.chunkSizeKm;
   const centerZ = chunkZ * config.chunkSizeKm;
+  const visualDrivers = surfaceDrivers(config);
   let vertexOffset = 0;
   for (let z = 0; z <= segments; z += 1) {
     const localZ = centerZ + (z / segments) * config.chunkSizeKm - half;
@@ -153,13 +245,28 @@ export function buildTerrainChunkData(config, chunkX, chunkZ) {
       const visualElevationMeters = elevationMeters - channel;
       const microKm = microreliefKm(config, localX, localZ, elevationMeters);
       const microMeters = config.verticalScale > 0 ? microKm / config.verticalScale * 1000 : 0;
-      const displayedElevationMeters = visualElevationMeters + microMeters;
-      const y = (visualElevationMeters - config.baseElevationMeters) / 1000 * config.verticalScale + microKm;
+      const landDisplayedElevationMeters = visualElevationMeters + microMeters;
+      const lakePresence = regionalLakePresence(config, localX, localZ, landDisplayedElevationMeters);
+      const lakeSurface = visualDrivers.lakeSurfaceElevationMeters;
+      const flattenLake = lakePresence > 0.56 && Number.isFinite(lakeSurface) && Number(config.chunkSizeKm) >= 8;
+      const displayedElevationMeters = flattenLake ? lakeSurface : landDisplayedElevationMeters;
+      const y = flattenLake
+        ? (lakeSurface - config.baseElevationMeters) / 1000 * config.verticalScale + 0.00025
+        : (visualElevationMeters - config.baseElevationMeters) / 1000 * config.verticalScale + microKm;
       positions[vertexOffset * 3] = localX;
       positions[vertexOffset * 3 + 1] = y;
       positions[vertexOffset * 3 + 2] = localZ;
       elevations[vertexOffset] = displayedElevationMeters;
-      const [r, g, b] = terrainColor(latitude, displayedElevationMeters, displayedElevationMeters - config.baseElevationMeters, config.biomeGroundColor);
+      const [r, g, b] = regionalLandCoverColorAt(
+        config,
+        localX,
+        localZ,
+        latitude,
+        landDisplayedElevationMeters,
+        landDisplayedElevationMeters - config.baseElevationMeters,
+        config.biomeGroundColor,
+        lakePresence
+      );
       colors[vertexOffset * 3] = r;
       colors[vertexOffset * 3 + 1] = g;
       colors[vertexOffset * 3 + 2] = b;
