@@ -9,10 +9,10 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     segments: 32,
     verticalScale: 0.90,
     contourIntervalMeters: 200,
-    contourOpacity: 0.09,
+    contourOpacity: 0.025,
     fogNearKm: 110,
     fogFarKm: 360,
-    earthLayers: true,
+    earthLayersAllowed: true,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
     faunaIndividual: false
@@ -25,10 +25,10 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     segments: 24,
     verticalScale: 0.76,
     contourIntervalMeters: 100,
-    contourOpacity: 0.12,
+    contourOpacity: 0.06,
     fogNearKm: 18,
     fogFarKm: 130,
-    earthLayers: true,
+    earthLayersAllowed: true,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
     faunaIndividual: false
@@ -44,7 +44,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     contourOpacity: 0.18,
     fogNearKm: 3.5,
     fogFarKm: 52,
-    earthLayers: false,
+    earthLayersAllowed: false,
     ecology: Object.freeze({ grass: false, trunk: false, crown: true, shrub: false, rock: false }),
     faunaGroup: true,
     faunaIndividual: false
@@ -60,7 +60,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     contourOpacity: 0.28,
     fogNearKm: 0.8,
     fogFarKm: 22,
-    earthLayers: false,
+    earthLayersAllowed: false,
     ecology: Object.freeze({ grass: true, trunk: true, crown: true, shrub: true, rock: true }),
     faunaGroup: true,
     faunaIndividual: true
@@ -89,11 +89,11 @@ export function surfaceFrameForBand({
   const band = surfaceScaleBandById(bandId);
   const spanKm = band.chunkSizeKm * (band.radius * 2 + 1);
   const halfSpanKm = spanKm * 0.5;
-  const safeFill = clamp(fill, 0.42, 0.90);
+  const safeFill = clamp(fill, 0.42, 0.96);
   const verticalFov = Math.max(0.1, Number(fovDegrees) || 58) * Math.PI / 180;
   const safeAspect = Math.max(0.45, Number(aspect) || 1);
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov * 0.5) * safeAspect);
-  const elevation = clamp(elevationDegrees, 28, 78) * Math.PI / 180;
+  const elevation = clamp(elevationDegrees, 28, 86) * Math.PI / 180;
   const azimuth = Number(azimuthDegrees) * Math.PI / 180;
   const widthDistance = halfSpanKm / (Math.tan(horizontalFov * 0.5) * safeFill);
   const depthDistance = halfSpanKm * Math.sin(elevation) / (Math.tan(verticalFov * 0.5) * safeFill);
@@ -171,10 +171,26 @@ class SurfaceScaleController {
     this.water = water;
     this.seaLevelOutline = seaLevelOutline;
     this.earthLayers = earthLayers;
+    this.earthLayerInspectionEnabled = false;
     this.band = null;
     this.distanceKm = 0;
     this.lastConfigurationSignature = "";
     this.waterPolicy = Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "unresolved" });
+  }
+
+  _earthLayersVisible(band = this.band) {
+    return Boolean(this.earthLayerInspectionEnabled && band?.earthLayersAllowed);
+  }
+
+  setEarthLayerInspection(enabled) {
+    this.earthLayerInspectionEnabled = Boolean(enabled);
+    this._configureEarthLayers(this.band);
+    this._applyVisibility(this.band);
+    return this.earthLayerInspectionEnabled;
+  }
+
+  toggleEarthLayerInspection() {
+    return this.setEarthLayerInspection(!this.earthLayerInspectionEnabled);
   }
 
   apply(cameraPosition) {
@@ -251,7 +267,7 @@ class SurfaceScaleController {
       groundY,
       baseElevationMeters: this.terrain.baseElevationMeters,
       seaLevelMeters: this.terrain.earthState?.seaLevel,
-      visible: Boolean(band.earthLayers)
+      visible: this._earthLayersVisible(band)
     });
     this.terrain.surfaceEarthLayerLayout = layout;
     return layout;
@@ -271,7 +287,7 @@ class SurfaceScaleController {
 
     if (this.water) this.water.visible = Boolean(this.waterPolicy.visible && this.waterPolicy.presentation === "surface");
     if (this.seaLevelOutline) this.seaLevelOutline.visible = Boolean(this.waterPolicy.visible && this.waterPolicy.presentation === "reference-outline");
-    if (this.earthLayers?.group) this.earthLayers.group.visible = Boolean(band.earthLayers);
+    if (this.earthLayers?.group) this.earthLayers.group.visible = this._earthLayersVisible(band);
   }
 
   _fitWaterToTerrain(band = this.band) {
@@ -323,6 +339,8 @@ export function installSurfaceScaleController({ scene, terrain, controls, water,
     ...baseDiagnostics(),
     viewScaleBand: controller.band?.id ?? "unresolved",
     viewDistanceKm: controller.distanceKm,
+    defaultRegionalPresentation: "continuous-landscape",
+    earthLayerInspectionEnabled: controller.earthLayerInspectionEnabled,
     waterPresentation: Object.freeze({ ...controller.waterPolicy }),
     earthLayers: earthLayers?.diagnostics?.() ?? Object.freeze({ visible: false })
   });
@@ -339,5 +357,7 @@ export function installSurfaceScaleController({ scene, terrain, controls, water,
   terrain.surfaceScaleController = controller;
   terrain.surfaceEarthLayers = earthLayers;
   terrain.surfaceSeaLevelOutline = seaLevelOutline;
+  terrain.setEarthLayerInspection = (enabled) => controller.setEarthLayerInspection(enabled);
+  terrain.toggleEarthLayerInspection = () => controller.toggleEarthLayerInspection();
   return controller;
 }
