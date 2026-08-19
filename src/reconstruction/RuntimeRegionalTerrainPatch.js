@@ -4,9 +4,11 @@ const GMRT_GRIDSERVER_BASE = "https://www.gmrt.org/services/GridServer";
 const DEFAULT_SPAN_DEGREES = 1.5;
 const DEFAULT_RESOLUTION_METERS = 400;
 const MAX_GRID_CELLS = 900_000;
+const MAX_ABS_RESIDUAL_METERS = 6000;
 const requestCache = new Map();
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
+const smoothstep01 = (value) => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 
 function headerNumber(headers, key) {
@@ -99,11 +101,55 @@ export function regionalTerrainValueAt(patch, latitude, longitude) {
   return north + (south - north) * ty;
 }
 
+export function regionalTerrainFeatherWeightAt(patch, latitude, longitude, edgeFraction = 0.14) {
+  if (!patch?.values || !finite(latitude) || !finite(longitude)) return 0;
+  const lat = Number(latitude);
+  const lon = wrapLongitude(longitude);
+  if (lat <= patch.south || lat >= patch.north || lon <= patch.west || lon >= patch.east) return 0;
+  const latitudeSpan = Math.max(patch.cellsizeDegrees, patch.north - patch.south);
+  const longitudeSpan = Math.max(patch.cellsizeDegrees, patch.east - patch.west);
+  const latitudeFeather = Math.max(patch.cellsizeDegrees * 2, latitudeSpan * clamp(edgeFraction, 0.04, 0.35));
+  const longitudeFeather = Math.max(patch.cellsizeDegrees * 2, longitudeSpan * clamp(edgeFraction, 0.04, 0.35));
+  const latitudeEdgeDistance = Math.min(lat - patch.south, patch.north - lat);
+  const longitudeEdgeDistance = Math.min(lon - patch.west, patch.east - lon);
+  return smoothstep01(latitudeEdgeDistance / latitudeFeather) * smoothstep01(longitudeEdgeDistance / longitudeFeather);
+}
+
+function smoothedRegionalTerrainValueAt(patch, latitude, longitude) {
+  const center = regionalTerrainValueAt(patch, latitude, longitude);
+  if (!Number.isFinite(center)) return null;
+  const radiusCells = clamp(Math.round(Number(patch.smoothingRadiusCells) || 0), 0, 16);
+  if (radiusCells <= 0) return center;
+
+  // The runtime grid may be much finer than the active regional mesh. Sample a
+  // small cross-shaped footprint before the residual reaches a coarse vertex so
+  // sub-grid ridges/islands cannot alias into alternating mesh triangles. Closer
+  // scale bands send smoothingRadiusCells=0 and retain the raw fine DEM.
+  const delta = patch.cellsizeDegrees * radiusCells * 0.72;
+  const taps = [
+    [latitude, longitude, 4],
+    [latitude + delta, longitude, 1],
+    [latitude - delta, longitude, 1],
+    [latitude, longitude + delta, 1],
+    [latitude, longitude - delta, 1]
+  ];
+  let weighted = 0;
+  let weight = 0;
+  for (const [lat, lon, tapWeight] of taps) {
+    const value = regionalTerrainValueAt(patch, lat, lon);
+    if (!Number.isFinite(value)) continue;
+    weighted += value * tapWeight;
+    weight += tapWeight;
+  }
+  return weight > 0 ? weighted / weight : center;
+}
+
 export function regionalTerrainResidualAt(patch, latitude, longitude) {
-  const highResolution = regionalTerrainValueAt(patch, latitude, longitude);
+  const highResolution = smoothedRegionalTerrainValueAt(patch, latitude, longitude);
   if (!Number.isFinite(highResolution)) return 0;
   const compact = interpolatedEtopoBedrockElevationAt(latitude, longitude);
-  return highResolution - compact;
+  const residual = clamp(highResolution - compact, -MAX_ABS_RESIDUAL_METERS, MAX_ABS_RESIDUAL_METERS);
+  return residual * regionalTerrainFeatherWeightAt(patch, latitude, longitude);
 }
 
 export function buildRegionalTerrainUrl(latitude, longitude, {
