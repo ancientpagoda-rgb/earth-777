@@ -1,4 +1,5 @@
 import { reconstructedBedrockElevation777At } from "../reconstruction/TerrainReconstruction777.js";
+import { regionalTerrainResidualAt } from "../reconstruction/RuntimeRegionalTerrainPatch.js";
 import { tectonicElevationOffsetMeters } from "../sim/DynamicLithosphere.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
@@ -32,8 +33,13 @@ function geomorphicOffsetAt(config, latitude, longitude) {
 
 function elevationAt(config, latitude, longitude) {
   const reconstructed = reconstructedBedrockElevation777At(latitude, longitude);
-  if (!config.earthState) return reconstructed + geomorphicOffsetAt(config, latitude, longitude);
+  // Runtime regional terrain is used only as a spatial-detail residual relative
+  // to the compact modern ETOPO skeleton. This preserves the 777 ka large-scale
+  // reconstruction while restoring coastlines/ridges erased by the 0.5° browser grid.
+  const regionalResidual = regionalTerrainResidualAt(config.regionalTerrainPatch, latitude, longitude);
+  if (!config.earthState) return reconstructed + regionalResidual + geomorphicOffsetAt(config, latitude, longitude);
   return reconstructed
+    + regionalResidual
     + tectonicElevationOffsetMeters(config.earthState, latitude, longitude, config.branchSeed)
     + geomorphicOffsetAt(config, latitude, longitude);
 }
