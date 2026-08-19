@@ -43,8 +43,13 @@ export function enterSurface(view, now) {
   view.applyPerformanceSettings(false);
 
   const ground = view.terrain.heightAt(0, 0);
-  view.surfaceCamera.position.set(0.02, ground + 0.085, 0.22);
-  view.surfaceControls.target.set(0, ground + 0.012, 0);
+
+  // “Descend to region” should first reveal the selected landscape as a region,
+  // not drop the observer almost directly onto the ground. Start several km out
+  // and settle into an oblique aerial view; OrbitControls still allow a seamless
+  // continuation all the way down to local/surface scale afterwards.
+  view.surfaceCamera.position.set(0.18, ground + 2.4, 3.4);
+  view.surfaceControls.target.set(0, ground + 0.04, 0);
   view.surfaceControls.enabled = false;
   view.updateSurfaceWater();
   view.terrain.update(view.surfaceCamera.position);
@@ -54,11 +59,11 @@ export function enterSurface(view, now) {
 
   view.surfaceEntry = {
     started: now,
-    duration: 1_450,
+    duration: 1_650,
     fromPosition: view.surfaceCamera.position.clone(),
-    toPosition: new THREE.Vector3(0.012, ground + 0.024, 0.075),
+    toPosition: new THREE.Vector3(0.08, ground + 1.15, 1.75),
     fromTarget: view.surfaceControls.target.clone(),
-    toTarget: new THREE.Vector3(0, ground + 0.007, -0.035)
+    toTarget: new THREE.Vector3(0, ground + 0.015, 0)
   };
   view.onModeChange?.("surface", view.selection);
   view.invalidate();
