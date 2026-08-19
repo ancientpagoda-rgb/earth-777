@@ -35,7 +35,7 @@ export function createSurfacePresentation(canvas) {
   const controls = new OrbitControls(camera, canvas);
   controls.enabled = false;
   controls.enableDamping = true;
-  controls.dampingFactor = 0.065;
+  controls.dampingFactor = 0.09;
   controls.enablePan = true;
   controls.screenSpacePanning = true;
   controls.minDistance = 0.00035;
@@ -45,6 +45,21 @@ export function createSurfacePresentation(canvas) {
   controls.rotateSpeed = 0.42;
   controls.panSpeed = 0.48;
   controls.zoomSpeed = 1.0;
+
+  // Direct manipulation should track the pointer immediately. Damping is useful
+  // after release, but leaving it enabled during drag/pinch makes the camera feel
+  // delayed even at a healthy frame rate.
+  let surfaceManipulating = false;
+  const onSurfaceControlStart = () => {
+    surfaceManipulating = true;
+    controls.enableDamping = false;
+  };
+  const onSurfaceControlEnd = () => {
+    surfaceManipulating = false;
+    controls.enableDamping = true;
+  };
+  controls.addEventListener("start", onSurfaceControlStart);
+  controls.addEventListener("end", onSurfaceControlEnd);
 
   const sky = new Sky();
   sky.scale.setScalar(420);
@@ -75,7 +90,7 @@ export function createSurfacePresentation(canvas) {
     const mesh = baseMeshFromResult(result, candidate);
     if (terrain.chunkSizeKm >= 8) {
       mesh.material = aerialMaterial;
-      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v3";
+      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v4-fast";
     }
     return mesh;
   };
@@ -102,6 +117,12 @@ export function createSurfacePresentation(canvas) {
   });
 
   const surfaceScale = installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
+
+  // Keep worker bookkeeping off the critical interaction path. Existing terrain
+  // remains renderable while dragging/zooming; completed terrain/ecology work is
+  // integrated at the normal budget immediately after the gesture ends.
+  const controlledPump = terrain.pump.bind(terrain);
+  terrain.pump = (budgetMs) => controlledPump(surfaceManipulating ? Math.min(Number(budgetMs) || 0, 0.18) : budgetMs);
 
   // A routed river that is scientifically meaningful at local scale is far
   // narrower than one regional mesh cell. Drawing that ribbon from orbit aliases
@@ -138,6 +159,8 @@ export function createSurfacePresentation(canvas) {
   const baseDispose = terrain.dispose.bind(terrain);
   terrain.dispose = () => {
     removeEventListener("keydown", toggleEarthLayers);
+    controls.removeEventListener("start", onSurfaceControlStart);
+    controls.removeEventListener("end", onSurfaceControlEnd);
     aerialMaterial.dispose();
     baseDispose();
   };
