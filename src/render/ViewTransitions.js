@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { surfaceFrameForBand } from "./SurfaceScaleController.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const smoothstep = (value) => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
@@ -34,6 +35,14 @@ export function updateDescent(view, now) {
   return true;
 }
 
+function framePosition(frame) {
+  return new THREE.Vector3(frame.position.x, frame.position.y, frame.position.z);
+}
+
+function frameTarget(frame) {
+  return new THREE.Vector3(frame.target.x, frame.target.y, frame.target.z);
+}
+
 export function enterSurface(view, now) {
   view.descent = null;
   view.mode = "surface";
@@ -43,24 +52,43 @@ export function enterSurface(view, now) {
   view.applyPerformanceSettings(false);
 
   const ground = view.terrain.heightAt(0, 0);
+  const aspect = Math.max(0.5, Number(view.surfaceCamera.aspect) || 16 / 9);
+  const fromFrame = surfaceFrameForBand({
+    bandId: "regional",
+    fovDegrees: view.surfaceCamera.fov,
+    aspect,
+    fill: 0.56,
+    elevationDegrees: 55,
+    azimuthDegrees: 8,
+    groundY: ground
+  });
+  const toFrame = surfaceFrameForBand({
+    bandId: "regional",
+    fovDegrees: view.surfaceCamera.fov,
+    aspect,
+    fill: 0.78,
+    elevationDegrees: 51,
+    azimuthDegrees: 8,
+    groundY: ground
+  });
 
-  // Regional entry must frame the terrain footprint rather than sit inside it.
-  // Begin around 125 km from the selected point and settle near 100 km, giving
-  // the ~84 km terrain window enough screen-space margin to read as geography.
-  view.surfaceCamera.position.set(12, ground + 78, 96);
-  view.surfaceControls.target.set(0, ground + 0.04, 0);
+  // Camera distance is now derived from the active regional footprint and FOV.
+  // This keeps the landscape at a stable screen size across desktop/mobile
+  // aspect ratios instead of oscillating between a wall and a postage stamp.
+  view.surfaceCamera.position.copy(framePosition(fromFrame));
+  view.surfaceControls.target.copy(frameTarget(fromFrame));
   view.surfaceControls.enabled = false;
   view.updateSurfaceWater();
   view.terrain.update(view.surfaceCamera.position);
-  view.terrain.pump(4);
+  view.terrain.pump(5);
 
   view.surfaceEntry = {
     started: now,
-    duration: 1_950,
+    duration: 1_850,
     fromPosition: view.surfaceCamera.position.clone(),
-    toPosition: new THREE.Vector3(8, ground + 64, 80),
+    toPosition: framePosition(toFrame),
     fromTarget: view.surfaceControls.target.clone(),
-    toTarget: new THREE.Vector3(0, ground + 0.02, 0)
+    toTarget: frameTarget(toFrame)
   };
   view.onModeChange?.("surface", view.selection);
   view.invalidate();
