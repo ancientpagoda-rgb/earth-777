@@ -3,6 +3,11 @@ import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 import { SurfaceComputeClient } from "./SurfaceComputeClient.js";
 import { WorkerSurfaceEcologyManager } from "./WorkerSurfaceEcologyManager.js";
 
+function rounded(value, digits = 2) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(digits) : "x";
+}
+
 export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
   constructor(scene, options = {}) {
     super(scene, options);
@@ -17,8 +22,31 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.computeContextSignature = "";
   }
 
+  _surfaceVisualDrivers() {
+    const vegetation = this.lastSurfaceContext?.vegetationSample ?? null;
+    const hydrology = this.lastSurfaceContext?.hydrologySample ?? this.surfaceEcology?.hydrologySample ?? null;
+    const water = this.lastSurfaceContext?.riverSample ?? this.surfaceEcology?.riverSample ?? null;
+    const profile = this.surfaceEcology?.profile ?? null;
+    return {
+      biomeCode: Number(vegetation?.biomeCode ?? profile?.biomeCode),
+      lai: Number(vegetation?.lai),
+      npp: Number(vegetation?.npp),
+      runoffMmPerYear: Number(hydrology?.surfaceRunoffMmPerYear ?? hydrology?.runoffPotentialMmPerYear),
+      treeDensity: Number(profile?.treeDensity),
+      grassDensity: Number(profile?.grassDensity),
+      shrubDensity: Number(profile?.shrubDensity),
+      lakeSurfaceElevationMeters: Number(water?.lakeSurfaceElevationMeters),
+      lakeCoverageFraction: Number(water?.lakeCoverageFraction),
+      lakeAreaKm2: Number(water?.lakeAreaKm2),
+      lakeCenterXKm: Number.isFinite(Number(water?.channelClosestXKm)) ? Number(water.channelClosestXKm) : 0,
+      lakeCenterZKm: Number.isFinite(Number(water?.channelClosestZKm)) ? Number(water.channelClosestZKm) : 0,
+      meanDischargeM3s: Number(water?.meanDischargeM3s)
+    };
+  }
+
   _contextSignature() {
     if (!this.origin) return "none";
+    const drivers = this._surfaceVisualDrivers();
     return [
       this.origin.latitude.toFixed(6),
       this.origin.longitude.toFixed(6),
@@ -29,7 +57,15 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       this.radius,
       this.segments,
       this.verticalScale,
-      this.biomeProfile?.groundColor?.join(",") ?? "none"
+      this.biomeProfile?.groundColor?.join(",") ?? "none",
+      drivers.biomeCode || "x",
+      rounded(drivers.lai),
+      rounded(drivers.npp, 0),
+      rounded(drivers.runoffMmPerYear, 0),
+      rounded(drivers.treeDensity),
+      rounded(drivers.lakeSurfaceElevationMeters, 1),
+      rounded(drivers.lakeCoverageFraction, 3),
+      rounded(drivers.lakeAreaKm2, 1)
     ].join("|");
   }
 
@@ -51,7 +87,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       radius: this.radius,
       segments: this.segments,
       verticalScale: this.verticalScale,
-      biomeGroundColor: this.biomeProfile?.groundColor ?? null
+      biomeGroundColor: this.biomeProfile?.groundColor ?? null,
+      surfaceVisualDrivers: this._surfaceVisualDrivers()
     });
     this.surfaceEcology.invalidateComputeContext();
     return true;
@@ -189,6 +226,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       queuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length + base.ecology.queuedChunks,
       terrainQueuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length,
       surfaceCompute: this.computeClient?.diagnostics?.() ?? { available: false, status: "unavailable" },
+      regionalSurfacePresentation: "science-driven-natural-mosaic-v1",
       worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v1", lastPump: this.lastSurfacePump })
     });
   }
