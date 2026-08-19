@@ -4,6 +4,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 
 export const EARTH_RADIUS_KM = 6371;
 export const ATMOSPHERE_REFERENCE_TOP_KM = 100;
+export const EARTH_LAYER_PRESENTATION = "open-sidewall-cutaway-v2";
 
 export const DEEP_EARTH_BOUNDARIES_KM = Object.freeze({
   mohoContinental: 35,
@@ -61,8 +62,6 @@ export function surfaceEarthLayerProfile({ baseElevationMeters = 0, seaLevelMete
 }
 
 function compressedGeologyWeights(profile) {
-  // Preserve ordering and rough relative importance without pretending the local
-  // 84 km scene can display 6,371 km of depth at 1:1 vertical scale.
   const weights = {
     "upper-crust": 0.85,
     "lower-crust": 0.95,
@@ -109,26 +108,79 @@ export function surfaceEarthLayerLayout({
     atmosphereDisplayHeightKm,
     geology: Object.freeze(geology),
     atmosphere: Object.freeze(atmosphere),
+    presentation: EARTH_LAYER_PRESENTATION,
     displayScaleNote: "Deep-Earth and atmosphere heights are vertically compressed for regional visualization; labels retain real radial/depth boundaries."
   });
 }
 
-function makeLayerBox(scene, layer) {
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
+function makeGeologySidewall(layer) {
+  const group = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({
     color: layer.color,
-    roughness: 0.94,
-    metalness: layer.id.includes("core") ? 0.08 : 0,
-    transparent: true,
-    opacity: layer.id.includes("core") ? 0.88 : 0.82
+    roughness: 0.95,
+    metalness: layer.id.includes("core") ? 0.06 : 0,
+    side: THREE.DoubleSide
   });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.userData.earthLayerId = layer.id;
-  mesh.userData.earthLayerLabel = layer.label;
-  mesh.userData.trueTopDepthKm = layer.topKm;
-  mesh.userData.trueBottomDepthKm = layer.bottomKm;
-  scene.add(mesh);
-  return mesh;
+  const sideGeometry = new THREE.PlaneGeometry(1, 1);
+
+  const front = new THREE.Mesh(sideGeometry, material);
+  const back = new THREE.Mesh(sideGeometry, material);
+  const left = new THREE.Mesh(sideGeometry, material);
+  const right = new THREE.Mesh(sideGeometry, material);
+  back.rotation.y = Math.PI;
+  left.rotation.y = Math.PI / 2;
+  right.rotation.y = -Math.PI / 2;
+
+  for (const mesh of [front, back, left, right]) {
+    mesh.userData.earthLayerId = layer.id;
+    mesh.userData.earthLayerLabel = layer.label;
+    mesh.userData.trueTopDepthKm = layer.topKm;
+    mesh.userData.trueBottomDepthKm = layer.bottomKm;
+    mesh.renderOrder = -2;
+    group.add(mesh);
+  }
+
+  group.userData.earthLayerId = layer.id;
+  group.userData.earthLayerLabel = layer.label;
+  group.userData.trueTopDepthKm = layer.topKm;
+  group.userData.trueBottomDepthKm = layer.bottomKm;
+  group.userData.presentation = EARTH_LAYER_PRESENTATION;
+  group.userData.sideMeshes = { front, back, left, right };
+  return group;
+}
+
+function configureGeologySidewall(group, span, topY, thickness) {
+  const { front, back, left, right } = group.userData.sideMeshes;
+  const half = span * 0.5;
+  const centerY = topY - thickness * 0.5;
+
+  front.scale.set(span, thickness, 1);
+  front.position.set(0, centerY, half);
+  back.scale.set(span, thickness, 1);
+  back.position.set(0, centerY, -half);
+
+  left.scale.set(span, thickness, 1);
+  left.position.set(-half, centerY, 0);
+  right.scale.set(span, thickness, 1);
+  right.position.set(half, centerY, 0);
+}
+
+function makeDepthBoundary(layer) {
+  const points = [
+    new THREE.Vector3(-0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, 0.5),
+    new THREE.Vector3(-0.5, 0, 0.5),
+    new THREE.Vector3(-0.5, 0, -0.5)
+  ];
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color: 0xe4d0bd, transparent: true, opacity: 0.28, depthWrite: false });
+  const line = new THREE.Line(geometry, material);
+  line.userData.earthLayerId = `${layer.id}-boundary`;
+  line.userData.earthLayerLabel = `${layer.label} lower boundary`;
+  line.userData.trueDepthKm = layer.bottomKm;
+  line.renderOrder = -1;
+  return line;
 }
 
 function makeAtmosphereBoundary(scene, layer) {
@@ -155,6 +207,7 @@ export class SurfaceEarthLayers {
     this.group = new THREE.Group();
     scene.add(this.group);
     this.geologyMeshes = new Map();
+    this.depthBoundaries = new Map();
     this.atmosphereBoundaries = new Map();
     this.layout = null;
     this.visible = true;
@@ -167,17 +220,29 @@ export class SurfaceEarthLayers {
 
     this.layout = surfaceEarthLayerLayout({ spanKm, baseElevationMeters, seaLevelMeters });
     const insetSpan = this.layout.spanKm * 0.985;
+    const surfaceY = Number(groundY) - 0.035;
 
     for (const layer of this.layout.geology) {
       let mesh = this.geologyMeshes.get(layer.id);
       if (!mesh) {
-        mesh = makeLayerBox(this.group, layer);
+        mesh = makeGeologySidewall(layer);
         this.geologyMeshes.set(layer.id, mesh);
+        this.group.add(mesh);
       }
       const thickness = layer.thicknessDisplayKm;
-      mesh.scale.set(insetSpan, thickness, insetSpan);
-      mesh.position.set(0, Number(groundY) - layer.topDisplayKm - thickness * 0.5 - 0.035, 0);
+      const layerTopY = surfaceY - layer.topDisplayKm;
+      configureGeologySidewall(mesh, insetSpan, layerTopY, thickness);
       mesh.visible = true;
+
+      let boundary = this.depthBoundaries.get(layer.id);
+      if (!boundary) {
+        boundary = makeDepthBoundary(layer);
+        this.depthBoundaries.set(layer.id, boundary);
+        this.group.add(boundary);
+      }
+      boundary.scale.set(insetSpan, 1, insetSpan);
+      boundary.position.set(0, surfaceY - layer.bottomDisplayKm, 0);
+      boundary.visible = true;
     }
 
     for (const layer of this.layout.atmosphere) {
@@ -193,12 +258,15 @@ export class SurfaceEarthLayers {
     }
 
     this.group.userData.earthLayerLayout = this.layout;
+    this.group.userData.presentation = EARTH_LAYER_PRESENTATION;
     return this.layout;
   }
 
   diagnostics() {
     return this.layout ? Object.freeze({
       visible: this.group.visible,
+      presentation: EARTH_LAYER_PRESENTATION,
+      surfaceOcclusionFree: true,
       crustType: this.layout.crustType,
       crustThicknessKm: this.layout.crustThicknessKm,
       geologyDisplayDepthKm: this.layout.geologyDisplayDepthKm,
@@ -211,15 +279,31 @@ export class SurfaceEarthLayers {
   }
 
   dispose() {
-    for (const mesh of this.geologyMeshes.values()) {
-      mesh.geometry.dispose();
-      mesh.material.dispose();
+    for (const group of this.geologyMeshes.values()) {
+      const meshes = Object.values(group.userData.sideMeshes ?? {});
+      const disposedGeometries = new Set();
+      const disposedMaterials = new Set();
+      for (const mesh of meshes) {
+        if (!disposedGeometries.has(mesh.geometry)) {
+          mesh.geometry.dispose();
+          disposedGeometries.add(mesh.geometry);
+        }
+        if (!disposedMaterials.has(mesh.material)) {
+          mesh.material.dispose();
+          disposedMaterials.add(mesh.material);
+        }
+      }
+    }
+    for (const boundary of this.depthBoundaries.values()) {
+      boundary.geometry.dispose();
+      boundary.material.dispose();
     }
     for (const boundary of this.atmosphereBoundaries.values()) {
       boundary.geometry.dispose();
       boundary.material.dispose();
     }
     this.geologyMeshes.clear();
+    this.depthBoundaries.clear();
     this.atmosphereBoundaries.clear();
     this.scene.remove(this.group);
   }
