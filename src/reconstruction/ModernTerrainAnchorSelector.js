@@ -1,4 +1,4 @@
-import { bedrockElevationAt } from "../data/generated/etopo-2022.generated.js";
+import { bedrockElevationAt, ETOPO_2022_META } from "../data/generated/etopo-2022.generated.js";
 import { EVIDENCE_RELATIONS } from "./EvidenceHarvester.js";
 
 const DEG = Math.PI / 180;
@@ -6,8 +6,10 @@ const EARTH_RADIUS_KM = 6371.0088;
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const mix = (a, b, t) => a + (b - a) * t;
 
-export const MODERN_TERRAIN_ANCHOR_POLICY = "measured-resolution-source-aware-anchor-v2";
+export const MODERN_TERRAIN_ANCHOR_POLICY = "measured-resolution-source-aware-anchor-v3";
 
 const DIRECT_GEBCO_TID = new Set([10, 11, 12, 13, 14, 15, 16, 17]);
 const INDIRECT_GEBCO_TID = new Set([40, 41, 42, 43, 44, 45, 46, 47, 48]);
@@ -89,19 +91,69 @@ function normalizeCandidate(candidate, latitude, longitude) {
   });
 }
 
+function rowCenterLatitude(row) {
+  return ETOPO_2022_META.northLatitude - row * ETOPO_2022_META.latitudeStepDegrees;
+}
+
+function colCenterLongitude(col) {
+  return wrapLongitude(ETOPO_2022_META.westLongitude + col * ETOPO_2022_META.longitudeStepDegrees);
+}
+
+function sampleCompactCell(row, col) {
+  const clampedRow = clamp(row, 0, ETOPO_2022_META.rows - 1);
+  const wrappedCol = ((col % ETOPO_2022_META.cols) + ETOPO_2022_META.cols) % ETOPO_2022_META.cols;
+  return bedrockElevationAt(rowCenterLatitude(clampedRow), colCenterLongitude(wrappedCol));
+}
+
+/**
+ * Bilinearly interpolate the compact browser ETOPO grid.
+ *
+ * The generated asset is intentionally compact (0.5° spacing) and its low-level
+ * accessor returns the nearest stored cell. Using that nearest-cell accessor
+ * directly in a regional mesh creates ~55 km rectangular elevation terraces.
+ * Interpolation cannot recover detail discarded during compacting, but it does
+ * restore a continuous large-scale relief field suitable for regional rendering.
+ */
+export function interpolatedEtopoBedrockElevationAt(latitude, longitude) {
+  const lat = clamp(Number(latitude) || 0, -90, 90);
+  const lon = wrapLongitude(longitude);
+  const rowFloat = (ETOPO_2022_META.northLatitude - lat) / ETOPO_2022_META.latitudeStepDegrees;
+  const row0 = clamp(Math.floor(rowFloat), 0, ETOPO_2022_META.rows - 1);
+  const row1 = clamp(row0 + 1, 0, ETOPO_2022_META.rows - 1);
+  const ty = row0 === row1 ? 0 : clamp(rowFloat - row0, 0, 1);
+
+  const cols = ETOPO_2022_META.cols;
+  const west = ETOPO_2022_META.westLongitude;
+  const step = ETOPO_2022_META.longitudeStepDegrees;
+  const span = cols * step;
+  const unwrappedLon = ((lon - west) % span + span) % span;
+  const colFloat = unwrappedLon / step;
+  const col0 = Math.floor(colFloat) % cols;
+  const col1 = (col0 + 1) % cols;
+  const tx = clamp(colFloat - Math.floor(colFloat), 0, 1);
+
+  const z00 = sampleCompactCell(row0, col0);
+  const z10 = sampleCompactCell(row0, col1);
+  const z01 = sampleCompactCell(row1, col0);
+  const z11 = sampleCompactCell(row1, col1);
+  return mix(mix(z00, z10, tx), mix(z01, z11, tx), ty);
+}
+
+const COMPACT_ETOPO_EFFECTIVE_RESOLUTION_METERS = Math.round(ETOPO_2022_META.sampleSpacingDegrees * 111_320);
+
 function etopoFallback(latitude, longitude, sigmaMeters = null) {
   return normalizeCandidate({
     sourceId: "etopo-2022",
     field: "bedrockElevationMeters",
-    value: bedrockElevationAt(latitude, longitude),
+    value: interpolatedEtopoBedrockElevationAt(latitude, longitude),
     sigma: sigmaMeters,
     relation: EVIDENCE_RELATIONS.MODERN_ANCHOR,
     globalCoverage: true,
-    resolutionMeters: 464,
+    resolutionMeters: COMPACT_ETOPO_EFFECTIVE_RESOLUTION_METERS,
     sourceQuality: 0.90,
-    measurementClass: "mixed",
-    method: "ETOPO 2022 15 arc-second global bedrock/bathymetry anchor",
-    note: "Guaranteed global fallback; higher-resolution measured anchors may replace it locally."
+    measurementClass: "interpolated",
+    method: "bilinear interpolation of the compact 0.5° browser grid derived from ETOPO 2022 bedrock relief",
+    note: "Guaranteed global fallback. The browser asset preserves broad modern relief continuously but only at ~0.5° effective spacing; higher-resolution measured anchors should replace it locally."
   }, latitude, longitude);
 }
 
