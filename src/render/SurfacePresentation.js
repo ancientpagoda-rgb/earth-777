@@ -75,7 +75,7 @@ export function createSurfacePresentation(canvas) {
     const mesh = baseMeshFromResult(result, candidate);
     if (terrain.chunkSizeKm >= 8) {
       mesh.material = aerialMaterial;
-      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v2";
+      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v3";
     }
     return mesh;
   };
@@ -88,9 +88,9 @@ export function createSurfacePresentation(canvas) {
   water.renderOrder = 1;
   scene.add(water);
 
-  // At regional/landscape scale, a filled ocean plane is visually misleading
-  // because we do not yet have a shoreline mask at the same resolution. Keep
-  // sea level visible as a precise horizontal reference outline instead.
+  // Sea level is useful as a scientific reference, but the rectangular guide can
+  // intersect real terrain when viewed obliquely. Keep it in the optional L-key
+  // inspection overlay rather than the default satellite-style presentation.
   const seaLevelOutline = createSeaLevelOutline();
   scene.add(seaLevelOutline);
 
@@ -107,11 +107,20 @@ export function createSurfacePresentation(canvas) {
   // narrower than one regional mesh cell. Drawing that ribbon from orbit aliases
   // into long trench-like lines. Keep regional drainage in the aerial color field
   // and reveal explicit river geometry only once the ecology/local bands are active.
+  // The sea-level guide follows the same inspection-mode rule as atmosphere and
+  // geology so it cannot draw straight lines through the default aerial surface.
   const baseApplyVisibility = surfaceScale._applyVisibility.bind(surfaceScale);
   surfaceScale._applyVisibility = (band = surfaceScale.band) => {
     baseApplyVisibility(band);
     if (terrain.surfaceEcology?.river) {
       terrain.surfaceEcology.river.visible = band?.id === "ecology" || band?.id === "ground";
+    }
+    if (seaLevelOutline) {
+      seaLevelOutline.visible = Boolean(
+        surfaceScale.earthLayerInspectionEnabled
+        && surfaceScale.waterPolicy?.visible
+        && surfaceScale.waterPolicy?.presentation === "reference-outline"
+      );
     }
   };
 
