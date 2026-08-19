@@ -73,6 +73,31 @@ export function surfaceScaleBandForDistance(distanceKm) {
     ?? SURFACE_SCALE_BANDS[SURFACE_SCALE_BANDS.length - 1];
 }
 
+export function surfaceScaleBandForDistanceStable(distanceKm, currentBand = null, hysteresisFraction = 0.14) {
+  const distance = Math.max(0, Number(distanceKm) || 0);
+  const candidate = surfaceScaleBandForDistance(distance);
+  if (!currentBand || candidate.id === currentBand.id) return candidate;
+
+  const currentIndex = SURFACE_SCALE_BANDS.findIndex((band) => band.id === currentBand.id);
+  const candidateIndex = SURFACE_SCALE_BANDS.findIndex((band) => band.id === candidate.id);
+  if (currentIndex < 0 || candidateIndex < 0) return candidate;
+
+  const hysteresis = clamp(hysteresisFraction, 0, 0.35);
+  if (candidateIndex > currentIndex) {
+    // Zooming inward: stay on the coarser band until the camera is clearly past
+    // its nominal boundary. This prevents wheel/pinch noise from repeatedly
+    // clearing and rebuilding terrain around the exact threshold.
+    const inwardBoundary = currentBand.minDistanceKm * (1 - hysteresis);
+    return distance <= inwardBoundary ? candidate : currentBand;
+  }
+
+  // Zooming outward: require the reciprocal margin before promoting to the
+  // coarser band, so crossing the same boundary in the opposite direction does
+  // not immediately undo the previous transition.
+  const outwardBoundary = candidate.minDistanceKm * (1 + hysteresis);
+  return distance >= outwardBoundary ? candidate : currentBand;
+}
+
 export function surfaceScaleBandById(id = "regional") {
   return SURFACE_SCALE_BANDS.find((band) => band.id === id) ?? SURFACE_SCALE_BANDS[0];
 }
@@ -195,7 +220,7 @@ class SurfaceScaleController {
 
   apply(cameraPosition) {
     this.distanceKm = cameraDistanceKm(cameraPosition, this.controls?.target);
-    const nextBand = surfaceScaleBandForDistance(this.distanceKm);
+    const nextBand = surfaceScaleBandForDistanceStable(this.distanceKm, this.band);
     this.band = nextBand;
     this._configureTerrain(nextBand);
     this._configureAtmosphere(nextBand);
