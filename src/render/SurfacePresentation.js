@@ -5,6 +5,26 @@ import { WorkerSurfaceTerrainSystem } from "./WorkerSurfaceTerrainSystem.js";
 import { installSurfaceScaleController } from "./SurfaceScaleController.js";
 import { SurfaceEarthLayers } from "./SurfaceEarthLayers.js";
 
+function createSeaLevelOutline() {
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, 0.5),
+    new THREE.Vector3(-0.5, 0, 0.5)
+  ]);
+  const material = new THREE.LineBasicMaterial({
+    color: 0x71aec7,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false
+  });
+  const outline = new THREE.LineLoop(geometry, material);
+  outline.visible = false;
+  outline.renderOrder = 2;
+  outline.userData.presentation = "regional-sea-level-reference";
+  return outline;
+}
+
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x7899aa);
@@ -52,9 +72,12 @@ export function createSurfacePresentation(canvas) {
   water.renderOrder = 1;
   scene.add(water);
 
-  // Regional/landscape views deliberately expose vertical structure. The
-  // cutaway is compressed vertically, but its metadata preserves the real
-  // atmosphere, crust, mantle, outer-core and inner-core boundaries.
+  // At regional/landscape scale, a filled ocean plane is visually misleading
+  // because we do not yet have a shoreline mask at the same resolution. Keep
+  // sea level visible as a precise horizontal reference outline instead.
+  const seaLevelOutline = createSeaLevelOutline();
+  scene.add(seaLevelOutline);
+
   const earthLayers = new SurfaceEarthLayers(scene);
   const baseConfigureEarthLayers = earthLayers.configure.bind(earthLayers);
   earthLayers.configure = (options = {}) => baseConfigureEarthLayers({
@@ -62,7 +85,7 @@ export function createSurfacePresentation(canvas) {
     cameraPosition: camera.position
   });
 
-  installSurfaceScaleController({ scene, terrain, controls, water, earthLayers });
+  installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
 
-  return { scene, camera, controls, terrain, water, sky, sun, earthLayers };
+  return { scene, camera, controls, terrain, water, seaLevelOutline, sky, sun, earthLayers };
 }
