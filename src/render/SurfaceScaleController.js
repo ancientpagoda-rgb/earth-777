@@ -127,23 +127,28 @@ export function surfaceWaterPolicy({
 
   if (body === "lake") {
     if (bandId === "regional" || bandId === "landscape") {
-      return Object.freeze({ visible: false, spanFraction: 0, reason: "local-lake-deferred" });
+      return Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "local-lake-deferred" });
     }
     const maxFraction = bandId === "ground" ? 0.58 : 0.36;
     const inferredFraction = clamp(0.10 + Math.sqrt(coverage) * 0.38, 0.10, maxFraction);
-    return Object.freeze({ visible: true, spanFraction: inferredFraction, reason: "local-lake" });
+    return Object.freeze({ visible: true, spanFraction: inferredFraction, presentation: "surface", reason: "local-lake" });
   }
 
   if (body === "ocean") {
     const coastalOrOcean = Number.isFinite(base) && Number.isFinite(sea) && base <= sea + 120;
+    if (!coastalOrOcean) {
+      return Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "inland-ocean-suppressed" });
+    }
+    const referenceOnly = bandId === "regional" || bandId === "landscape";
     return Object.freeze({
-      visible: coastalOrOcean,
-      spanFraction: coastalOrOcean ? 1.08 : 0,
-      reason: coastalOrOcean ? "coastal-ocean" : "inland-ocean-suppressed"
+      visible: true,
+      spanFraction: 1,
+      presentation: referenceOnly ? "reference-outline" : "surface",
+      reason: referenceOnly ? "regional-sea-level-reference" : "coastal-ocean"
     });
   }
 
-  return Object.freeze({ visible: false, spanFraction: 0, reason: "no-water" });
+  return Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "no-water" });
 }
 
 function cameraDistanceKm(cameraPosition, target) {
@@ -159,16 +164,17 @@ function ecologyVisible(band) {
 }
 
 class SurfaceScaleController {
-  constructor({ scene, terrain, controls, water, earthLayers = null }) {
+  constructor({ scene, terrain, controls, water, seaLevelOutline = null, earthLayers = null }) {
     this.scene = scene;
     this.terrain = terrain;
     this.controls = controls;
     this.water = water;
+    this.seaLevelOutline = seaLevelOutline;
     this.earthLayers = earthLayers;
     this.band = null;
     this.distanceKm = 0;
     this.lastConfigurationSignature = "";
-    this.waterPolicy = Object.freeze({ visible: false, spanFraction: 0, reason: "unresolved" });
+    this.waterPolicy = Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "unresolved" });
   }
 
   apply(cameraPosition) {
@@ -181,6 +187,7 @@ class SurfaceScaleController {
     this._configureEarthLayers(nextBand);
     this._applyVisibility(nextBand);
     this._fitWaterToTerrain(nextBand);
+    this._fitSeaLevelOutline(nextBand);
     this.terrain.viewScaleBand = nextBand.id;
     this.terrain.viewDistanceKm = this.distanceKm;
     return nextBand;
@@ -262,22 +269,30 @@ class SurfaceScaleController {
       for (const page of pool.pages ?? []) page.visible = visible;
     }
 
-    if (this.water) this.water.visible = Boolean(this.waterPolicy.visible);
+    if (this.water) this.water.visible = Boolean(this.waterPolicy.visible && this.waterPolicy.presentation === "surface");
+    if (this.seaLevelOutline) this.seaLevelOutline.visible = Boolean(this.waterPolicy.visible && this.waterPolicy.presentation === "reference-outline");
     if (this.earthLayers?.group) this.earthLayers.group.visible = Boolean(band.earthLayers);
   }
 
   _fitWaterToTerrain(band = this.band) {
-    if (!this.water || !band || !this.waterPolicy.visible) return;
+    if (!this.water || !band || !this.waterPolicy.visible || this.waterPolicy.presentation !== "surface") return;
     const geometryWidthKm = Number(this.water.geometry?.parameters?.width) || 220;
     const terrainSpanKm = band.chunkSizeKm * (band.radius * 2 + 1);
     const targetSpanKm = terrainSpanKm * this.waterPolicy.spanFraction;
     const scale = clamp(targetSpanKm / geometryWidthKm, 0.0015, 1);
     this.water.scale.set(scale, scale, scale);
   }
+
+  _fitSeaLevelOutline(band = this.band) {
+    if (!this.seaLevelOutline || !band) return;
+    const terrainSpanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+    this.seaLevelOutline.scale.set(terrainSpanKm * 0.985, 1, terrainSpanKm * 0.985);
+    this.seaLevelOutline.position.set(0, Number(this.water?.position?.y) || 0, 0);
+  }
 }
 
-export function installSurfaceScaleController({ scene, terrain, controls, water, earthLayers = null }) {
-  const controller = new SurfaceScaleController({ scene, terrain, controls, water, earthLayers });
+export function installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline = null, earthLayers = null }) {
+  const controller = new SurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
   const baseUpdate = terrain.update.bind(terrain);
   const basePump = terrain.pump.bind(terrain);
   const baseDiagnostics = terrain.diagnostics.bind(terrain);
@@ -294,6 +309,7 @@ export function installSurfaceScaleController({ scene, terrain, controls, water,
     controller.apply(cameraPosition);
     const result = baseUpdate(controller.terrainFocus(cameraPosition));
     controller._fitWaterToTerrain();
+    controller._fitSeaLevelOutline();
     return result;
   };
 
@@ -314,11 +330,14 @@ export function installSurfaceScaleController({ scene, terrain, controls, water,
   if (baseDispose) {
     terrain.dispose = () => {
       earthLayers?.dispose?.();
+      seaLevelOutline?.geometry?.dispose?.();
+      seaLevelOutline?.material?.dispose?.();
       baseDispose();
     };
   }
 
   terrain.surfaceScaleController = controller;
   terrain.surfaceEarthLayers = earthLayers;
+  terrain.surfaceSeaLevelOutline = seaLevelOutline;
   return controller;
 }
