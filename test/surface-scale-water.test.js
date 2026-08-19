@@ -10,22 +10,24 @@ test("surface scale bands descend from region to ground", () => {
   assert.equal(surfaceScaleBandForDistance(0.08).id, "ground");
 });
 
-test("regional overview stays bounded and sufficiently tessellated", () => {
+test("regional overview stays bounded, map-like, and sufficiently tessellated", () => {
   const regional = SURFACE_SCALE_BANDS.find((band) => band.id === "regional");
   assert.ok(regional);
   const spanKm = regional.chunkSizeKm * (regional.radius * 2 + 1);
   assert.ok(spanKm <= 90, `regional footprint should stay aerially frameable, got ${spanKm} km`);
   assert.ok(regional.segments >= 18, `regional chunks should avoid giant facets, got ${regional.segments} segments`);
   assert.ok(regional.radius <= 1, `regional streaming should not expose a postage-stamp center tile, got radius ${regional.radius}`);
+  assert.ok(regional.contourOpacity <= 0.03, `regional contours should stay subordinate to the landscape, got ${regional.contourOpacity}`);
+  assert.equal(regional.earthLayersAllowed, true, "regional structure inspection should remain available as an optional overlay");
 });
 
 test("regional framing derives camera distance from footprint and viewport", () => {
-  const frame = surfaceFrameForBand({ bandId: "regional", fovDegrees: 58, aspect: 16 / 9, fill: 0.78 });
+  const frame = surfaceFrameForBand({ bandId: "regional", fovDegrees: 58, aspect: 16 / 9, fill: 0.91, elevationDegrees: 78 });
   assert.equal(frame.spanKm, 84);
   assert.ok(frame.distanceKm > frame.spanKm * 0.6);
   assert.ok(frame.distanceKm < frame.spanKm * 1.8);
   assert.ok(frame.position.y > 0);
-  assert.ok(frame.position.z > 0);
+  assert.ok(frame.position.y > Math.abs(frame.position.z) * 2, "regional entry should be predominantly overhead");
 });
 
 test("local branch lakes are suppressed at regional and landscape scale", () => {
