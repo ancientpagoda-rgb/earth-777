@@ -4,6 +4,7 @@ const GMRT_GRIDSERVER_BASE = "https://www.gmrt.org/services/GridServer";
 const DEFAULT_SPAN_DEGREES = 1.5;
 const DEFAULT_RESOLUTION_METERS = 400;
 const MAX_GRID_CELLS = 900_000;
+const requestCache = new Map();
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
@@ -126,17 +127,35 @@ export function buildRegionalTerrainUrl(latitude, longitude, {
   return url.toString();
 }
 
+export function clearRuntimeRegionalTerrainCache() {
+  requestCache.clear();
+}
+
 export async function loadRuntimeRegionalTerrainPatch(latitude, longitude, options = {}) {
   const url = buildRegionalTerrainUrl(latitude, longitude, options);
-  const response = await fetch(url, { mode: "cors", cache: "force-cache" });
-  if (!response.ok) throw new Error(`Regional terrain request failed (${response.status})`);
-  const grid = parseRegionalTerrainAscii(await response.text());
-  return {
-    ...grid,
-    sourceId: "gmrt-4.5.0-runtime",
-    resolutionMeters: Math.max(200, Math.round(Number(options.resolutionMeters) || DEFAULT_RESOLUTION_METERS)),
-    requestedAt: Date.now(),
-    requestUrl: url,
-    scientificRole: "modern regional spatial-detail residual applied to the 777 ka reconstruction; not direct paleo topography"
-  };
+  if (requestCache.has(url)) return requestCache.get(url);
+
+  const request = (async () => {
+    const response = await fetch(url, { mode: "cors", cache: "force-cache" });
+    if (!response.ok) throw new Error(`Regional terrain request failed (${response.status})`);
+    const grid = parseRegionalTerrainAscii(await response.text());
+    return {
+      ...grid,
+      sourceId: "gmrt-4.5.0-runtime",
+      resolutionMeters: Math.max(200, Math.round(Number(options.resolutionMeters) || DEFAULT_RESOLUTION_METERS)),
+      requestedAt: Date.now(),
+      requestUrl: url,
+      scientificRole: "modern regional spatial-detail residual applied to the 777 ka reconstruction; not direct paleo topography"
+    };
+  })();
+
+  requestCache.set(url, request);
+  try {
+    return await request;
+  } catch (error) {
+    // Failed requests are not sticky; a later visit can retry after a temporary
+    // network/CORS/service failure while successful regions remain memory-cached.
+    if (requestCache.get(url) === request) requestCache.delete(url);
+    throw error;
+  }
 }
