@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildRegionalTerrainUrl,
   parseRegionalTerrainAscii,
+  regionalTerrainFeatherWeightAt,
   regionalTerrainValueAt
 } from "../src/reconstruction/RuntimeRegionalTerrainPatch.js";
 
@@ -25,6 +26,21 @@ test("runtime regional terrain bilinearly samples between cells", () => {
   assert.equal(regionalTerrainValueAt(patch, 21, 11), 250);
   assert.equal(regionalTerrainValueAt(patch, 21.5, 10.5), 100);
   assert.equal(regionalTerrainValueAt(patch, 20.5, 11.5), 400);
+});
+
+test("runtime regional refinement fades to zero at patch boundaries", () => {
+  const patch = {
+    values: new Float32Array([1, 1, 1, 1]),
+    cellsizeDegrees: 0.01,
+    south: 0,
+    north: 1,
+    west: 0,
+    east: 1
+  };
+  assert.equal(regionalTerrainFeatherWeightAt(patch, 0, 0.5), 0);
+  assert.equal(regionalTerrainFeatherWeightAt(patch, 0.5, 0), 0);
+  assert.ok(regionalTerrainFeatherWeightAt(patch, 0.5, 0.5) > 0.99);
+  assert.ok(regionalTerrainFeatherWeightAt(patch, 0.04, 0.5) < regionalTerrainFeatherWeightAt(patch, 0.5, 0.5));
 });
 
 test("runtime regional terrain URL requests a complete unmasked surface", () => {
