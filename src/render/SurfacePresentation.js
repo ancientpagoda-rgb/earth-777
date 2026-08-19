@@ -87,5 +87,22 @@ export function createSurfacePresentation(canvas) {
 
   installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
 
+  // Satellite-style landscape is the normal view. Press L while the regional
+  // surface controls are active to inspect atmosphere + deep-Earth cutaway.
+  const toggleEarthLayers = (event) => {
+    if (event.code !== "KeyL" || event.repeat || !controls.enabled) return;
+    if (event.target instanceof HTMLElement && event.target.closest("button, input, a, textarea, select, summary")) return;
+    event.preventDefault();
+    terrain.toggleEarthLayerInspection?.();
+    controls.dispatchEvent({ type: "change" });
+  };
+  addEventListener("keydown", toggleEarthLayers);
+
+  const baseDispose = terrain.dispose.bind(terrain);
+  terrain.dispose = () => {
+    removeEventListener("keydown", toggleEarthLayers);
+    baseDispose();
+  };
+
   return { scene, camera, controls, terrain, water, seaLevelOutline, sky, sun, earthLayers };
 }
