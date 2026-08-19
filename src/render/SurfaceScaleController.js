@@ -65,7 +65,8 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
 
 export function surfaceScaleBandForDistance(distanceKm) {
   const distance = Math.max(0, Number(distanceKm) || 0);
-  return SURFACE_SCALE_BANDS.find((band) => distance >= band.minDistanceKm) ?? SURFACE_SCALE_BANDS.at(-1);
+  return SURFACE_SCALE_BANDS.find((band) => distance >= band.minDistanceKm)
+    ?? SURFACE_SCALE_BANDS[SURFACE_SCALE_BANDS.length - 1];
 }
 
 function cameraDistanceKm(cameraPosition, target) {
@@ -74,6 +75,10 @@ function cameraDistanceKm(cameraPosition, target) {
   const dy = (Number(cameraPosition.y) || 0) - (Number(target.y) || 0);
   const dz = (Number(cameraPosition.z) || 0) - (Number(target.z) || 0);
   return Math.hypot(dx, dy, dz);
+}
+
+function ecologyVisible(band) {
+  return Boolean(band && Object.values(band.ecology).some(Boolean));
 }
 
 class SurfaceScaleController {
@@ -156,6 +161,17 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
   const controller = new SurfaceScaleController({ scene, terrain, controls, water });
   const baseUpdate = terrain.update.bind(terrain);
   const basePump = terrain.pump.bind(terrain);
+  const ecology = terrain.surfaceEcology;
+  const fauna = terrain.surfaceFauna;
+  const baseEcologyHasWork = ecology?.hasWork?.bind(ecology);
+  const baseFaunaHasWork = fauna?.hasWork?.bind(fauna);
+
+  if (baseEcologyHasWork) {
+    ecology.hasWork = () => ecologyVisible(controller.band) && baseEcologyHasWork();
+  }
+  if (baseFaunaHasWork) {
+    fauna.hasWork = () => Boolean(controller.band?.faunaGroup || controller.band?.faunaIndividual) && baseFaunaHasWork();
+  }
 
   terrain.update = (cameraPosition) => {
     controller.apply(cameraPosition);
