@@ -105,6 +105,16 @@ class SurfaceScaleController {
     return nextBand;
   }
 
+  terrainFocus(cameraPosition) {
+    if (!cameraPosition || !this.band || !this.controls?.target) return cameraPosition;
+    if (this.band.id !== "regional" && this.band.id !== "landscape") return cameraPosition;
+    return {
+      x: Number(this.controls.target.x) || 0,
+      y: Number(cameraPosition.y) || 0,
+      z: Number(this.controls.target.z) || 0
+    };
+  }
+
   _configureTerrain(band) {
     const terrain = this.terrain;
     const signature = [band.id, band.chunkSizeKm, band.radius, band.segments, band.verticalScale].join("|");
@@ -161,6 +171,7 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
   const controller = new SurfaceScaleController({ scene, terrain, controls, water });
   const baseUpdate = terrain.update.bind(terrain);
   const basePump = terrain.pump.bind(terrain);
+  const baseDiagnostics = terrain.diagnostics.bind(terrain);
   const ecology = terrain.surfaceEcology;
   const fauna = terrain.surfaceFauna;
   const baseEcologyHasWork = ecology?.hasWork?.bind(ecology);
@@ -175,7 +186,7 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
 
   terrain.update = (cameraPosition) => {
     controller.apply(cameraPosition);
-    const result = baseUpdate(cameraPosition);
+    const result = baseUpdate(controller.terrainFocus(cameraPosition));
     controller._fitWaterToTerrain();
     return result;
   };
@@ -185,6 +196,12 @@ export function installSurfaceScaleController({ scene, terrain, controls, water 
     controller._applyVisibility();
     return result;
   };
+
+  terrain.diagnostics = () => Object.freeze({
+    ...baseDiagnostics(),
+    viewScaleBand: controller.band?.id ?? "unresolved",
+    viewDistanceKm: controller.distanceKm
+  });
 
   terrain.surfaceScaleController = controller;
   return controller;
