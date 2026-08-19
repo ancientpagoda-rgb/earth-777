@@ -4,14 +4,18 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
   Object.freeze({
     id: "regional",
     minDistanceKm: 6,
-    chunkSizeKm: 28,
-    radius: 1,
-    segments: 32,
+    // Keep the familiar ~84 km regional framing, but stream a much larger
+    // low-cost terrain field behind it so the selected region no longer reads
+    // as a floating square. Five 84 km chunks span ~420 km around the focus.
+    frameSpanKm: 84,
+    chunkSizeKm: 84,
+    radius: 2,
+    segments: 18,
     verticalScale: 0.90,
     contourIntervalMeters: 200,
     contourOpacity: 0.025,
-    fogNearKm: 110,
-    fogFarKm: 360,
+    fogNearKm: 150,
+    fogFarKm: 520,
     earthLayersAllowed: true,
     ecology: Object.freeze({ grass: false, trunk: false, crown: false, shrub: false, rock: false }),
     faunaGroup: false,
@@ -102,6 +106,17 @@ export function surfaceScaleBandById(id = "regional") {
   return SURFACE_SCALE_BANDS.find((band) => band.id === id) ?? SURFACE_SCALE_BANDS[0];
 }
 
+export function surfaceStreamingSpanKm(bandOrId = "regional") {
+  const band = typeof bandOrId === "string" ? surfaceScaleBandById(bandOrId) : bandOrId;
+  return Number(band?.chunkSizeKm) * (Number(band?.radius) * 2 + 1);
+}
+
+export function surfacePresentationSpanKm(bandOrId = "regional") {
+  const band = typeof bandOrId === "string" ? surfaceScaleBandById(bandOrId) : bandOrId;
+  const framed = Number(band?.frameSpanKm);
+  return Number.isFinite(framed) && framed > 0 ? framed : surfaceStreamingSpanKm(band);
+}
+
 export function surfaceFrameForBand({
   bandId = "regional",
   fovDegrees = 58,
@@ -112,7 +127,10 @@ export function surfaceFrameForBand({
   groundY = 0
 } = {}) {
   const band = surfaceScaleBandById(bandId);
-  const spanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+  // Camera framing is deliberately decoupled from the streaming footprint.
+  // Regional terrain can extend far beyond the viewport without pushing the
+  // camera farther away and turning the selected area back into a postage stamp.
+  const spanKm = surfacePresentationSpanKm(band);
   const halfSpanKm = spanKm * 0.5;
   const safeFill = clamp(fill, 0.42, 0.96);
   const verticalFov = Math.max(0.1, Number(fovDegrees) || 58) * Math.PI / 180;
@@ -128,6 +146,7 @@ export function surfaceFrameForBand({
   return Object.freeze({
     bandId: band.id,
     spanKm,
+    streamingSpanKm: surfaceStreamingSpanKm(band),
     distanceKm,
     position: Object.freeze({
       x: Math.sin(azimuth) * horizontalKm,
@@ -237,6 +256,9 @@ class SurfaceScaleController {
   terrainFocus(cameraPosition) {
     if (!cameraPosition || !this.band || !this.controls?.target) return cameraPosition;
     if (this.band.id !== "regional" && this.band.id !== "landscape") return cameraPosition;
+    // Stream the broad terrain field around the point the user is actually
+    // inspecting. Orbiting changes the camera x/z but should not churn chunks;
+    // panning moves the target and naturally advances the world-stream window.
     return {
       x: Number(this.controls.target.x) || 0,
       y: Number(cameraPosition.y) || 0,
@@ -285,7 +307,7 @@ class SurfaceScaleController {
 
   _configureEarthLayers(band = this.band) {
     if (!this.earthLayers || !band) return null;
-    const spanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+    const spanKm = surfacePresentationSpanKm(band);
     const groundY = this.terrain.origin ? this.terrain.heightAt(0, 0) : 0;
     const layout = this.earthLayers.configure({
       spanKm,
@@ -318,7 +340,7 @@ class SurfaceScaleController {
   _fitWaterToTerrain(band = this.band) {
     if (!this.water || !band || !this.waterPolicy.visible || this.waterPolicy.presentation !== "surface") return;
     const geometryWidthKm = Number(this.water.geometry?.parameters?.width) || 220;
-    const terrainSpanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+    const terrainSpanKm = surfacePresentationSpanKm(band);
     const targetSpanKm = terrainSpanKm * this.waterPolicy.spanFraction;
     const scale = clamp(targetSpanKm / geometryWidthKm, 0.0015, 1);
     this.water.scale.set(scale, scale, scale);
@@ -326,7 +348,7 @@ class SurfaceScaleController {
 
   _fitSeaLevelOutline(band = this.band) {
     if (!this.seaLevelOutline || !band) return;
-    const terrainSpanKm = band.chunkSizeKm * (band.radius * 2 + 1);
+    const terrainSpanKm = surfacePresentationSpanKm(band);
     this.seaLevelOutline.scale.set(terrainSpanKm * 0.985, 1, terrainSpanKm * 0.985);
     this.seaLevelOutline.position.set(0, Number(this.water?.position?.y) || 0, 0);
   }
@@ -364,7 +386,9 @@ export function installSurfaceScaleController({ scene, terrain, controls, water,
     ...baseDiagnostics(),
     viewScaleBand: controller.band?.id ?? "unresolved",
     viewDistanceKm: controller.distanceKm,
-    defaultRegionalPresentation: "continuous-landscape",
+    presentationSpanKm: controller.band ? surfacePresentationSpanKm(controller.band) : 0,
+    streamingSpanKm: controller.band ? surfaceStreamingSpanKm(controller.band) : 0,
+    defaultRegionalPresentation: "buffered-continuous-landscape",
     earthLayerInspectionEnabled: controller.earthLayerInspectionEnabled,
     waterPresentation: Object.freeze({ ...controller.waterPolicy }),
     earthLayers: earthLayers?.diagnostics?.() ?? Object.freeze({ visible: false })
