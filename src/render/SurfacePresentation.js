@@ -29,7 +29,7 @@ function createSeaLevelOutline() {
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x7899aa);
-  scene.fog = new THREE.Fog(0x7899aa, 110, 360);
+  scene.fog = new THREE.Fog(0x7899aa, 150, 520);
 
   const camera = new THREE.PerspectiveCamera(58, 1, 0.00005, 1200);
   const controls = new OrbitControls(camera, canvas);
@@ -78,7 +78,10 @@ export function createSurfacePresentation(canvas) {
   sun.position.copy(sunDirection).multiplyScalar(90);
   scene.add(sun);
 
-  const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 28, radius: 1, segments: 32, verticalScale: 0.90 });
+  // Regional entry now starts with a broad coarse world-stream buffer rather
+  // than an 84 km square whose outer edge is visible from orbit. The camera still
+  // frames ~84 km; the extra terrain exists around it for orbiting and panning.
+  const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 84, radius: 2, segments: 18, verticalScale: 0.90 });
 
   // Regional/landscape rendering is an aerial reconstruction. Broad color comes
   // from simulated vegetation, hydrology and elevation vertex data; this shared
