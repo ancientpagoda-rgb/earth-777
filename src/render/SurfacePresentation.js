@@ -29,7 +29,7 @@ function createSeaLevelOutline() {
 export function createSurfacePresentation(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x7899aa);
-  scene.fog = new THREE.Fog(0x7899aa, 150, 520);
+  scene.fog = new THREE.Fog(0x7899aa, 250, 760);
 
   const camera = new THREE.PerspectiveCamera(58, 1, 0.00005, 1200);
   const controls = new OrbitControls(camera, canvas);
@@ -93,7 +93,7 @@ export function createSurfacePresentation(canvas) {
     const mesh = baseMeshFromResult(result, candidate);
     if (terrain.chunkSizeKm >= 8) {
       mesh.material = aerialMaterial;
-      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v4-fast";
+      mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v5-crisp";
     }
     return mesh;
   };
@@ -120,6 +120,23 @@ export function createSurfacePresentation(canvas) {
   });
 
   const surfaceScale = installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
+
+  // The wide regional stream should fade only in the distance. Starting fog at
+  // 150 km made the ordinary ~84 km inspection footprint look milky even though
+  // its terrain was fully loaded. Preserve atmospheric depth without sacrificing
+  // map-like readability near the camera.
+  const baseConfigureAtmosphere = surfaceScale._configureAtmosphere.bind(surfaceScale);
+  surfaceScale._configureAtmosphere = (band = surfaceScale.band) => {
+    baseConfigureAtmosphere(band);
+    if (!scene.fog || !band) return;
+    if (band.id === "regional") {
+      scene.fog.near = 250;
+      scene.fog.far = 760;
+    } else if (band.id === "landscape") {
+      scene.fog.near = 36;
+      scene.fog.far = 190;
+    }
+  };
 
   // Keep worker bookkeeping off the critical interaction path. Existing terrain
   // remains renderable while dragging/zooming; completed terrain/ecology work is
