@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SURFACE_SCALE_BANDS, surfaceFrameForBand, surfaceScaleBandForDistance, surfaceWaterPolicy } from "../src/render/SurfaceScaleController.js";
-import { ATMOSPHERE_REFERENCE_TOP_KM, DEEP_EARTH_BOUNDARIES_KM, surfaceEarthLayerLayout, surfaceEarthLayerProfile } from "../src/render/SurfaceEarthLayers.js";
+import { ATMOSPHERE_REFERENCE_TOP_KM, DEEP_EARTH_BOUNDARIES_KM, EARTH_LAYER_PRESENTATION, earthLayerFarSideVisibility, surfaceEarthLayerLayout, surfaceEarthLayerProfile } from "../src/render/SurfaceEarthLayers.js";
 
 test("surface scale bands descend from region to ground", () => {
   assert.equal(surfaceScaleBandForDistance(42).id, "regional");
@@ -85,8 +85,25 @@ test("deep Earth and atmosphere retain real boundaries while display depth stays
   const layout = surfaceEarthLayerLayout({ spanKm: 84, baseElevationMeters: 450, seaLevelMeters: -14 });
   assert.equal(layout.atmosphere.at(-1).topKm, ATMOSPHERE_REFERENCE_TOP_KM);
   assert.equal(layout.geology.at(-1).bottomKm, DEEP_EARTH_BOUNDARIES_KM.center);
-  assert.ok(layout.geologyDisplayDepthKm <= 15);
+  assert.ok(layout.geologyDisplayDepthKm <= 19);
+  assert.ok(layout.geologyDisplayDepthKm >= 12);
   assert.ok(layout.atmosphereDisplayHeightKm <= 12);
   assert.equal(layout.geology.length, 7);
   assert.equal(layout.atmosphere.length, 4);
+  assert.equal(layout.presentation, EARTH_LAYER_PRESENTATION);
+});
+
+test("cutaway opens the two camera-facing walls", () => {
+  assert.deepEqual(earthLayerFarSideVisibility({ x: 8, z: 70 }), {
+    front: false,
+    back: true,
+    left: true,
+    right: false
+  });
+  assert.deepEqual(earthLayerFarSideVisibility({ x: -8, z: -70 }), {
+    front: true,
+    back: false,
+    left: false,
+    right: true
+  });
 });
