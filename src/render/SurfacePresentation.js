@@ -64,6 +64,26 @@ export function createSurfacePresentation(canvas) {
 
   const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 28, radius: 1, segments: 32, verticalScale: 0.90 });
 
+  // The regional/landscape product is an aerial reconstruction, not a ground
+  // mesh seen from far away. Use an unlit vertex-color material at those scales
+  // so neighboring chunks cannot reveal their independently calculated edge
+  // normals as dark seams. Local ecology/ground meshes keep the lit material.
+  const aerialMaterial = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    side: THREE.FrontSide,
+    fog: true,
+    toneMapped: false
+  });
+  const baseMeshFromResult = terrain._meshFromResult.bind(terrain);
+  terrain._meshFromResult = (result, candidate) => {
+    const mesh = baseMeshFromResult(result, candidate);
+    if (terrain.chunkSizeKm >= 8) {
+      mesh.material = aerialMaterial;
+      mesh.userData.surfacePresentation = "science-colored-aerial";
+    }
+    return mesh;
+  };
+
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(220, 220),
     new THREE.MeshPhongMaterial({ color: 0x315d70, transparent: true, opacity: 0.64, shininess: 44, depthWrite: false })
@@ -101,6 +121,7 @@ export function createSurfacePresentation(canvas) {
   const baseDispose = terrain.dispose.bind(terrain);
   terrain.dispose = () => {
     removeEventListener("keydown", toggleEarthLayers);
+    aerialMaterial.dispose();
     baseDispose();
   };
 
