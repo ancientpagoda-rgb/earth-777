@@ -4,7 +4,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 
 export const EARTH_RADIUS_KM = 6371;
 export const ATMOSPHERE_REFERENCE_TOP_KM = 100;
-export const EARTH_LAYER_PRESENTATION = "camera-aware-open-cutaway-v3";
+export const EARTH_LAYER_PRESENTATION = "camera-distance-open-cutaway-v4";
 
 export const DEEP_EARTH_BOUNDARIES_KM = Object.freeze({
   mohoContinental: 35,
@@ -81,8 +81,6 @@ export function surfaceEarthLayerLayout({
 } = {}) {
   const span = Math.max(1, Number(spanKm) || 84);
   const profile = surfaceEarthLayerProfile({ baseElevationMeters, seaLevelMeters });
-  // A slightly deeper display stack makes the mantle/core distinction readable,
-  // while the metadata continues to carry the true 6371 km radial depth.
   const geologyDisplayDepthKm = clamp(span * 0.22, 12, 19);
   const atmosphereDisplayHeightKm = clamp(span * 0.12, 6, 12);
   const weights = compressedGeologyWeights(profile);
@@ -115,16 +113,28 @@ export function surfaceEarthLayerLayout({
   });
 }
 
-export function earthLayerFarSideVisibility(cameraPosition = {}) {
+export function earthLayerFarSideVisibility(cameraPosition = {}, spanKm = 84) {
   const x = Number(cameraPosition?.x) || 0;
   const z = Number(cameraPosition?.z) || 0;
-  // The side closest to the observer is intentionally left open. Only the two
-  // far walls carry geology, preserving a clear line of sight to the terrain.
+  const half = Math.max(0.5, Number(spanKm) || 84) * 0.5;
+  const sideCenters = {
+    front: { x: 0, z: half },
+    back: { x: 0, z: -half },
+    left: { x: -half, z: 0 },
+    right: { x: half, z: 0 }
+  };
+  const ranked = Object.entries(sideCenters)
+    .map(([name, center]) => ({
+      name,
+      distanceSquared: (x - center.x) ** 2 + (z - center.z) ** 2
+    }))
+    .sort((a, b) => b.distanceSquared - a.distanceSquared || a.name.localeCompare(b.name));
+  const visible = new Set(ranked.slice(0, 2).map((entry) => entry.name));
   return Object.freeze({
-    front: z <= 0,
-    back: z > 0,
-    left: x >= 0,
-    right: x < 0
+    front: visible.has("front"),
+    back: visible.has("back"),
+    left: visible.has("left"),
+    right: visible.has("right")
   });
 }
 
@@ -173,7 +183,6 @@ function configureGeologySidewall(group, span, topY, thickness) {
   front.position.set(0, centerY, half);
   back.scale.set(span, thickness, 1);
   back.position.set(0, centerY, -half);
-
   left.scale.set(span, thickness, 1);
   left.position.set(-half, centerY, 0);
   right.scale.set(span, thickness, 1);
@@ -188,9 +197,7 @@ function applyFarSideVisibility(group, visibility) {
 }
 
 function makeDepthBoundary(layer) {
-  // Boundary lines are retained only on the far two edges, so they separate
-  // layers without drawing a rectangle through the terrain-facing foreground.
-  const material = new THREE.LineBasicMaterial({ color: 0xf0dac4, transparent: true, opacity: 0.34, depthWrite: false });
+  const material = new THREE.LineBasicMaterial({ color: 0xf0dac4, transparent: true, opacity: 0.30, depthWrite: false });
   const group = new THREE.Group();
   const createEdge = (name, a, b) => {
     const geometry = new THREE.BufferGeometry().setFromPoints([a, b]);
@@ -229,7 +236,7 @@ function makeAtmosphereBoundary(layer) {
   const material = new THREE.LineBasicMaterial({
     color: layer.color,
     transparent: true,
-    opacity: layer.id === "karman-line" ? 0.50 : 0.25,
+    opacity: layer.id === "karman-line" ? 0.38 : 0.16,
     depthWrite: false
   });
   const ring = new THREE.LineLoop(geometry, material);
@@ -261,7 +268,7 @@ export class SurfaceEarthLayers {
     this.layout = surfaceEarthLayerLayout({ spanKm, baseElevationMeters, seaLevelMeters });
     const insetSpan = this.layout.spanKm * 0.985;
     const surfaceY = Number(groundY) - 0.035;
-    const farSides = earthLayerFarSideVisibility(cameraPosition ?? {});
+    const farSides = earthLayerFarSideVisibility(cameraPosition ?? {}, insetSpan);
     this.lastFarSideVisibility = farSides;
 
     for (const layer of this.layout.geology) {
@@ -296,7 +303,7 @@ export class SurfaceEarthLayers {
         this.atmosphereBoundaries.set(layer.id, boundary);
         this.group.add(boundary);
       }
-      boundary.scale.set(this.layout.spanKm, 1, this.layout.spanKm);
+      boundary.scale.set(this.layout.spanKm * 1.01, 1, this.layout.spanKm * 1.01);
       boundary.position.set(0, Number(groundY) + layer.heightDisplayKm, 0);
       boundary.visible = true;
     }
@@ -312,6 +319,7 @@ export class SurfaceEarthLayers {
       presentation: EARTH_LAYER_PRESENTATION,
       surfaceOcclusionFree: true,
       atmospherePresentation: "horizontal-altitude-rings",
+      farSideSelection: "two-farthest-side-centers",
       farSideVisibility: this.lastFarSideVisibility,
       crustType: this.layout.crustType,
       crustThicknessKm: this.layout.crustThicknessKm,
