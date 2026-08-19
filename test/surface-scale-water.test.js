@@ -38,6 +38,7 @@ test("local branch lakes are suppressed at regional and landscape scale", () => 
       lakeCoverageFraction: 0.72
     });
     assert.equal(policy.visible, false);
+    assert.equal(policy.presentation, "hidden");
     assert.equal(policy.reason, "local-lake-deferred");
   }
 });
@@ -46,12 +47,14 @@ test("local lakes materialize only close to the surface and remain bounded", () 
   const ecology = surfaceWaterPolicy({ bandId: "ecology", waterBody: "lake", lakeCoverageFraction: 1 });
   const ground = surfaceWaterPolicy({ bandId: "ground", waterBody: "lake", lakeCoverageFraction: 1 });
   assert.equal(ecology.visible, true);
+  assert.equal(ecology.presentation, "surface");
   assert.ok(ecology.spanFraction <= 0.36);
   assert.equal(ground.visible, true);
+  assert.equal(ground.presentation, "surface");
   assert.ok(ground.spanFraction <= 0.58);
 });
 
-test("fallback ocean water is suppressed inland but retained at coasts", () => {
+test("regional ocean uses a sea-level reference outline instead of a filled rectangle", () => {
   const inland = surfaceWaterPolicy({
     bandId: "regional",
     waterBody: "ocean",
@@ -59,6 +62,7 @@ test("fallback ocean water is suppressed inland but retained at coasts", () => {
     seaLevelMeters: -14
   });
   assert.equal(inland.visible, false);
+  assert.equal(inland.presentation, "hidden");
   assert.equal(inland.reason, "inland-ocean-suppressed");
 
   const coast = surfaceWaterPolicy({
@@ -68,7 +72,18 @@ test("fallback ocean water is suppressed inland but retained at coasts", () => {
     seaLevelMeters: -14
   });
   assert.equal(coast.visible, true);
-  assert.equal(coast.reason, "coastal-ocean");
+  assert.equal(coast.presentation, "reference-outline");
+  assert.equal(coast.reason, "regional-sea-level-reference");
+
+  const local = surfaceWaterPolicy({
+    bandId: "ground",
+    waterBody: "ocean",
+    baseElevationMeters: -12,
+    seaLevelMeters: -14
+  });
+  assert.equal(local.visible, true);
+  assert.equal(local.presentation, "surface");
+  assert.equal(local.reason, "coastal-ocean");
 });
 
 test("cutaway distinguishes oceanic and continental crust", () => {
@@ -93,17 +108,21 @@ test("deep Earth and atmosphere retain real boundaries while display depth stays
   assert.equal(layout.presentation, EARTH_LAYER_PRESENTATION);
 });
 
-test("cutaway opens the two camera-facing walls", () => {
-  assert.deepEqual(earthLayerFarSideVisibility({ x: 8, z: 70 }), {
+test("cutaway keeps exactly the two farthest side walls", () => {
+  assert.deepEqual(earthLayerFarSideVisibility({ x: 8, z: 70 }, 84), {
     front: false,
     back: true,
     left: true,
     right: false
   });
-  assert.deepEqual(earthLayerFarSideVisibility({ x: -8, z: -70 }), {
+  assert.deepEqual(earthLayerFarSideVisibility({ x: -8, z: -70 }, 84), {
     front: true,
     back: false,
     left: false,
     right: true
   });
+  const oblique = earthLayerFarSideVisibility({ x: 90, z: 18 }, 84);
+  assert.equal(Object.values(oblique).filter(Boolean).length, 2);
+  assert.equal(oblique.left, true);
+  assert.equal(oblique.right, false);
 });
