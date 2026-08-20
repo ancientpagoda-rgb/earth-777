@@ -8,8 +8,10 @@ export class SurfaceComputeClient {
     this.pending = new Map();
     this.lastTerrainMs = 0;
     this.lastEcologyMs = 0;
+    this.lastRegionalTerrainMs = 0;
     this.completedTerrain = 0;
     this.completedEcology = 0;
+    this.completedRegionalTerrain = 0;
     this.status = this.worker ? "ready" : "unavailable";
     this.worker?.addEventListener("message", (event) => this._handleMessage(event.data ?? {}));
     this.worker?.addEventListener("error", (event) => this._failAll(event.error ?? new Error(event.message || "Surface compute worker failed")));
@@ -19,6 +21,10 @@ export class SurfaceComputeClient {
     this.contextId += 1;
     if (this.worker) this.worker.postMessage({ type: "context", contextId: this.contextId, context });
     return this.contextId;
+  }
+
+  clearRegionalTerrainPatch() {
+    if (this.worker) this.worker.postMessage({ type: "clearRegionalTerrain" });
   }
 
   _request(type, payload = {}) {
@@ -40,12 +46,16 @@ export class SurfaceComputeClient {
     return this._request("ecology", { payload });
   }
 
+  regionalTerrain(latitude, longitude, options = {}) {
+    return this._request("regionalTerrain", { latitude, longitude, options });
+  }
+
   _handleMessage(message) {
     const pending = this.pending.get(message.id);
     if (!pending) return;
     this.pending.delete(message.id);
     if (message.type === "error") pending.reject(new Error(message.message || "Surface compute worker error"));
-    else if (message.type === "stale" || message.contextId !== pending.contextId || message.contextId !== this.contextId) pending.resolve(null);
+    else if (message.type === "stale" || (pending.type !== "regionalTerrain" && (message.contextId !== pending.contextId || message.contextId !== this.contextId))) pending.resolve(null);
     else {
       if (message.type === "terrain") {
         this.lastTerrainMs = Number(message.milliseconds) || 0;
@@ -53,6 +63,9 @@ export class SurfaceComputeClient {
       } else if (message.type === "ecology") {
         this.lastEcologyMs = Number(message.milliseconds) || 0;
         this.completedEcology += 1;
+      } else if (message.type === "regionalTerrain") {
+        this.lastRegionalTerrainMs = Number(message.milliseconds) || 0;
+        this.completedRegionalTerrain += 1;
       }
       pending.resolve(message);
     }
@@ -73,8 +86,10 @@ export class SurfaceComputeClient {
       pending: this.pending.size,
       lastTerrainMs: this.lastTerrainMs,
       lastEcologyMs: this.lastEcologyMs,
+      lastRegionalTerrainMs: this.lastRegionalTerrainMs,
       completedTerrain: this.completedTerrain,
-      completedEcology: this.completedEcology
+      completedEcology: this.completedEcology,
+      completedRegionalTerrain: this.completedRegionalTerrain
     });
   }
 
