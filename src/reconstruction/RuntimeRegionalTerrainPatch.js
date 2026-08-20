@@ -1,8 +1,8 @@
 import { interpolatedEtopoBedrockElevationAt } from "./ModernTerrainAnchorSelector.js";
 
 const GMRT_GRIDSERVER_BASE = "https://www.gmrt.org/services/GridServer";
-const DEFAULT_SPAN_DEGREES = 1.5;
-const DEFAULT_RESOLUTION_METERS = 400;
+const DEFAULT_SPAN_DEGREES = 1.0;
+const DEFAULT_RESOLUTION_METERS = 600;
 const MAX_GRID_CELLS = 900_000;
 const MAX_ABS_RESIDUAL_METERS = 6000;
 const requestCache = new Map();
@@ -121,10 +121,6 @@ function smoothedRegionalTerrainValueAt(patch, latitude, longitude) {
   const radiusCells = clamp(Math.round(Number(patch.smoothingRadiusCells) || 0), 0, 16);
   if (radiusCells <= 0) return center;
 
-  // The runtime grid may be much finer than the active regional mesh. Sample a
-  // small cross-shaped footprint before the residual reaches a coarse vertex so
-  // sub-grid ridges/islands cannot alias into alternating mesh triangles. Closer
-  // scale bands send smoothingRadiusCells=0 and retain the raw fine DEM.
   const delta = patch.cellsizeDegrees * radiusCells * 0.72;
   const taps = [
     [latitude, longitude, 4],
@@ -165,8 +161,6 @@ export function buildRegionalTerrainUrl(latitude, longitude, {
   url.searchParams.set("north", String(lat + half));
   url.searchParams.set("west", String(lon - half));
   url.searchParams.set("east", String(lon + half));
-  // Unmasked topo retains a complete land/ocean surface; GMRT high-resolution
-  // observations replace its background where available.
   url.searchParams.set("layer", "topo");
   url.searchParams.set("format", "esriascii");
   url.searchParams.set("mresolution", String(Math.max(200, Math.round(Number(resolutionMeters) || DEFAULT_RESOLUTION_METERS))));
@@ -199,8 +193,6 @@ export async function loadRuntimeRegionalTerrainPatch(latitude, longitude, optio
   try {
     return await request;
   } catch (error) {
-    // Failed requests are not sticky; a later visit can retry after a temporary
-    // network/CORS/service failure while successful regions remain memory-cached.
     if (requestCache.get(url) === request) requestCache.delete(url);
     throw error;
   }
