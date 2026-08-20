@@ -1,8 +1,9 @@
 import * as THREE from "three";
-import { loadRuntimeRegionalTerrainPatch } from "../reconstruction/RuntimeRegionalTerrainPatch.js";
 import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 import { SurfaceComputeClient } from "./SurfaceComputeClient.js";
 import { WorkerSurfaceEcologyManager } from "./WorkerSurfaceEcologyManager.js";
+
+const KM_PER_DEGREE_LATITUDE = 111.32;
 
 function rounded(value, digits = 2) {
   const number = Number(value);
@@ -19,12 +20,15 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.terrainInFlight = 0;
     this.terrainInFlightKeys = new Set();
     this.terrainCompleted = [];
-    this.maxTerrainInFlight = 3;
+    // One Web Worker executes terrain serially. Keeping several requests queued
+    // only increases stale-work latency when the user pans/zooms or LOD changes.
+    this.maxTerrainInFlight = 1;
     this.computeContextSignature = "";
     this.regionalTerrainPatch = null;
     this.regionalTerrainPatchStatus = "idle";
     this.regionalTerrainPatchError = null;
     this.regionalTerrainRequestToken = 0;
+    this.regionalTerrainRefinementTimer = null;
   }
 
   _surfaceVisualDrivers() {
@@ -52,19 +56,9 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
   _regionalTerrainSmoothingRadiusCells() {
     const patch = this.regionalTerrainPatch;
     if (!patch || Number(this.chunkSizeKm) < 8) return 0;
-    const sourceResolutionMeters = Math.max(50, Number(patch.resolutionMeters) || 400);
+    const sourceResolutionMeters = Math.max(50, Number(patch.resolutionMeters) || 600);
     const vertexSpacingMeters = Math.max(1, Number(this.chunkSizeKm) * 1000 / Math.max(1, Number(this.segments) || 1));
-    // Keep at least ~2 source samples across one coarse regional vertex spacing.
-    // Landscape/ecology bands return zero and therefore keep raw high-resolution relief.
     return Math.max(1, Math.min(16, Math.round(vertexSpacingMeters / sourceResolutionMeters * 0.42)));
-  }
-
-  _regionalTerrainPatchForCompute() {
-    if (!this.regionalTerrainPatch) return null;
-    return {
-      ...this.regionalTerrainPatch,
-      smoothingRadiusCells: this._regionalTerrainSmoothingRadiusCells()
-    };
   }
 
   _contextSignature() {
@@ -108,7 +102,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       earthState: this.earthState,
       branchSeed: this.branchSeed,
       geomorphologyPatch: this.geomorphologyPatch,
-      regionalTerrainPatch: this._regionalTerrainPatchForCompute(),
+      regionalTerrainPatchActive: Boolean(this.regionalTerrainPatch),
+      regionalTerrainSmoothingRadiusCells: this._regionalTerrainSmoothingRadiusCells(),
       chunkSizeKm: this.chunkSizeKm,
       radius: this.radius,
       segments: this.segments,
@@ -118,6 +113,23 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     });
     this.surfaceEcology.invalidateComputeContext();
     return true;
+  }
+
+  _chunkOverlapsRegionalTerrainPatch(chunkX, chunkZ) {
+    const patch = this.regionalTerrainPatch;
+    if (!patch || !this.origin) return false;
+    const half = Number(this.chunkSizeKm) * 0.5;
+    const centerXKm = Number(chunkX) * Number(this.chunkSizeKm);
+    const centerZKm = Number(chunkZ) * Number(this.chunkSizeKm);
+    const longitudeScale = Math.max(12, KM_PER_DEGREE_LATITUDE * Math.cos(Number(this.origin.latitude) * Math.PI / 180));
+    const south = Number(this.origin.latitude) + (centerZKm - half) / KM_PER_DEGREE_LATITUDE;
+    const north = Number(this.origin.latitude) + (centerZKm + half) / KM_PER_DEGREE_LATITUDE;
+    const west = Number(this.origin.longitude) + (centerXKm - half) / longitudeScale;
+    const east = Number(this.origin.longitude) + (centerXKm + half) / longitudeScale;
+    return north >= Number(patch.south)
+      && south <= Number(patch.north)
+      && east >= Number(patch.west)
+      && west <= Number(patch.east);
   }
 
   _queueVisibleTerrainRefresh() {
@@ -131,6 +143,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       for (let dx = -this.radius; dx <= this.radius; dx += 1) {
         const x = centerX + dx;
         const z = centerZ + dz;
+        if (!this._chunkOverlapsRegionalTerrainPatch(x, z)) continue;
         const key = `${x}:${z}`;
         candidates.push({ x, z, key, distance: dx * dx + dz * dz, replaceExisting: true });
         this.queuedKeys.add(key);
@@ -141,49 +154,55 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     return candidates.length > 0;
   }
 
+  _scheduleRegionalTerrainRefinement(origin, token) {
+    if (this.regionalTerrainRefinementTimer != null) clearTimeout(this.regionalTerrainRefinementTimer);
+    this.regionalTerrainPatchStatus = "queued";
+    // Give the coarse terrain roughly half a second to become interactive before
+    // asking the worker to download/parse the optional refinement grid.
+    this.regionalTerrainRefinementTimer = setTimeout(() => {
+      this.regionalTerrainRefinementTimer = null;
+      if (token !== this.regionalTerrainRequestToken || !this.computeClient?.worker) return;
+      this.regionalTerrainPatchStatus = "loading";
+      this.computeClient.regionalTerrain(origin.latitude, origin.longitude, { spanDegrees: 1.0, resolutionMeters: 600 })
+        .then((result) => {
+          if (token !== this.regionalTerrainRequestToken || !this.origin || !result?.patch) return;
+          this.regionalTerrainPatch = result.patch;
+          this.regionalTerrainPatchStatus = "ready";
+          this.regionalTerrainPatchError = null;
+          // The worker already owns the heavy Float32 DEM. Only lightweight patch
+          // metadata crosses back to the main thread, then overlapping chunks are
+          // replaced progressively while the coarse world remains visible.
+          this.queue = [];
+          this.queuedKeys.clear();
+          this._syncComputeContext(true);
+          this._queueVisibleTerrainRefresh();
+        })
+        .catch((error) => {
+          if (token !== this.regionalTerrainRequestToken) return;
+          this.regionalTerrainPatch = null;
+          this.regionalTerrainPatchStatus = "fallback";
+          this.regionalTerrainPatchError = error?.message ?? String(error);
+          console.info("Regional terrain refinement unavailable; retaining compact ETOPO fallback.", error);
+        });
+    }, 500);
+  }
+
   setOrigin(latitude, longitude) {
     super.setOrigin(latitude, longitude);
+    if (this.regionalTerrainRefinementTimer != null) {
+      clearTimeout(this.regionalTerrainRefinementTimer);
+      this.regionalTerrainRefinementTimer = null;
+    }
+    this.computeClient?.clearRegionalTerrainPatch?.();
     this.regionalTerrainPatch = null;
     this.regionalTerrainPatchError = null;
-    this.regionalTerrainPatchStatus = "loading";
     const token = ++this.regionalTerrainRequestToken;
     const origin = { latitude: this.origin.latitude, longitude: this.origin.longitude };
-
-    // Progressive refinement: never block descent on a remote terrain request.
-    // The compact ETOPO surface renders first; when the regional modern relief
-    // patch arrives, workers rebuild the visible terrain using only its
-    // high-frequency residual over the 777 ka reconstruction.
-    loadRuntimeRegionalTerrainPatch(origin.latitude, origin.longitude)
-      .then((patch) => {
-        if (token !== this.regionalTerrainRequestToken || !this.origin) return;
-        this.regionalTerrainPatch = patch;
-        this.regionalTerrainPatchStatus = "ready";
-        this.regionalTerrainPatchError = null;
-
-        // Keep the old generation visible while the refined one is computed.
-        // Each completed replacement chunk removes its predecessor and is added
-        // in the same pump turn, preventing holes or overlapping generations.
-        this.queue = [];
-        this.queuedKeys.clear();
-        this._syncComputeContext(true);
-        this._queueVisibleTerrainRefresh();
-      })
-      .catch((error) => {
-        if (token !== this.regionalTerrainRequestToken) return;
-        this.regionalTerrainPatch = null;
-        this.regionalTerrainPatchStatus = "fallback";
-        this.regionalTerrainPatchError = error?.message ?? String(error);
-        // A failed external refinement is intentionally non-fatal: the compact
-        // global ETOPO reconstruction remains the complete offline fallback.
-        console.info("Regional terrain refinement unavailable; retaining compact ETOPO fallback.", error);
-      });
+    this._scheduleRegionalTerrainRefinement(origin, token);
   }
 
   update(cameraPosition) {
     super.update(cameraPosition);
-    // TerrainChunkManager tracks queued work in queuedKeys. A worker task is no
-    // longer in the queue while it is computing, so preserve current-generation
-    // in-flight keys to prevent the base updater from enqueueing duplicates.
     for (const key of this.terrainInFlightKeys) this.queuedKeys.add(key);
   }
 
@@ -293,7 +312,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.workCursor = (this.workCursor + 1) % producers.length;
 
     this.lastSurfacePump = Object.freeze({
-      policy: "surface-worker-transfer-v1",
+      policy: "surface-worker-transfer-v2-idle-refinement",
       budgetMs: budget,
       elapsedMs: Math.max(0, performance.now() - started),
       workUnits,
@@ -331,7 +350,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         }) : null,
         error: this.regionalTerrainPatchError
       }),
-      worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v1", lastPump: this.lastSurfacePump })
+      worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v2-idle-refinement", lastPump: this.lastSurfacePump })
     });
   }
 
@@ -345,6 +364,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
 
   dispose() {
     this.regionalTerrainRequestToken += 1;
+    if (this.regionalTerrainRefinementTimer != null) clearTimeout(this.regionalTerrainRefinementTimer);
+    this.regionalTerrainRefinementTimer = null;
     super.dispose();
     this.computeClient?.dispose();
     this.computeClient = null;
