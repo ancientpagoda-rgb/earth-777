@@ -4,6 +4,7 @@ import { buildEcologyChunkPlan, buildTerrainChunkData } from "./SurfaceComputeKe
 let contextId = 0;
 let context = null;
 let regionalTerrainPatch = null;
+let regionalTerrainGeneration = 0;
 
 function transferListForTerrain(result) {
   return [result.positions.buffer, result.colors.buffer, result.elevations.buffer, result.indices.buffer, result.normals.buffer];
@@ -34,12 +35,18 @@ self.addEventListener("message", async (event) => {
       return;
     }
     if (message.type === "clearRegionalTerrain") {
+      regionalTerrainGeneration += 1;
       regionalTerrainPatch = null;
       return;
     }
     if (message.type === "regionalTerrain") {
+      const generation = regionalTerrainGeneration;
       const started = performance.now();
       const patch = await loadRuntimeRegionalTerrainPatch(message.latitude, message.longitude, message.options ?? {});
+      if (generation !== regionalTerrainGeneration) {
+        self.postMessage({ type: "stale", id: message.id, contextId: message.contextId });
+        return;
+      }
       regionalTerrainPatch = patch;
       const { values, ...metadata } = patch;
       self.postMessage({
