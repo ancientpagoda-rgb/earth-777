@@ -5,7 +5,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 const activeButton = (button) => Number(button?.value) > 0.15 || button?.pressed === true;
 const editableTarget = (target) => typeof HTMLElement !== "undefined" && target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, button, a, summary, [contenteditable='true']"));
 
-export const SURFACE_NAVIGATION_POLICY = "translation-only-gamepad-v3";
+export const SURFACE_NAVIGATION_POLICY = "exclusive-camera-translation-gamepad-v4";
 
 export function applyGamepadDeadzone(value, deadzone = 0.16) {
   const input = clamp(value, -1, 1);
@@ -67,12 +67,20 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   const right = new THREE.Vector3();
   const translation = new THREE.Vector3();
   const offset = new THREE.Vector3();
+  const savedCamera = new THREE.Vector3();
+  const savedTarget = new THREE.Vector3();
+  const savedQuaternion = new THREE.Quaternion();
+  const lockedOffset = new THREE.Vector3();
+  const lockedForward = new THREE.Vector3();
+  const lockedRight = new THREE.Vector3();
   let lastDevice = "none";
   let lastSpeedKmPerSecond = 0;
   let lastActive = false;
   let rafId = null;
   let lastFrameMs = 0;
   let disposed = false;
+  let ownsCamera = false;
+  let previousDamping = true;
 
   const relevantKeys = new Set([
     "KeyW", "KeyA", "KeyS", "KeyD",
@@ -80,21 +88,66 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
     "PageUp", "PageDown", "Equal", "Minus", "NumpadAdd", "NumpadSubtract"
   ]);
-  const actionKeys = new Set([
+  const movementKeys = new Set([
     "KeyW", "KeyA", "KeyS", "KeyD",
-    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"
+  ]);
+  const actionKeys = new Set([
+    ...movementKeys,
     "PageUp", "PageDown", "Equal", "Minus", "NumpadAdd", "NumpadSubtract"
   ]);
 
   const wake = () => controls.dispatchEvent({ type: "change" });
   const keyboardHasActivity = () => [...actionKeys].some((code) => held.has(code));
+  const keyboardHasMovement = () => [...movementKeys].some((code) => held.has(code));
   const inputHasActivity = () => keyboardHasActivity() || gamepadHasActivity(readGamepad());
+  const movementHasActivity = () => keyboardHasMovement() || gamepadHasActivity(readGamepad());
+  const controlsAvailable = () => controls.enabled || ownsCamera;
 
   const keyboardAxis = (positiveCodes, negativeCodes) => {
     let value = 0;
     if (positiveCodes.some((code) => held.has(code))) value += 1;
     if (negativeCodes.some((code) => held.has(code))) value -= 1;
     return value;
+  };
+
+  const acquireCameraOwnership = () => {
+    if (ownsCamera || !controls.enabled) return ownsCamera;
+
+    // OrbitControls may still contain private spherical/pan damping deltas from a
+    // preceding mouse gesture. Run one non-damped update to zero those internals,
+    // but restore the exact visible pose afterward so clearing inertia is invisible.
+    savedCamera.copy(camera.position);
+    savedTarget.copy(controls.target);
+    savedQuaternion.copy(camera.quaternion);
+    previousDamping = Boolean(controls.enableDamping);
+    controls.enableDamping = false;
+    controls.update?.();
+    camera.position.copy(savedCamera);
+    controls.target.copy(savedTarget);
+    camera.quaternion.copy(savedQuaternion);
+
+    lockedOffset.subVectors(camera.position, controls.target);
+    lockedForward.copy(controls.target).sub(camera.position);
+    lockedForward.y = 0;
+    if (lockedForward.lengthSq() < 1e-8) lockedForward.set(0, 0, -1);
+    else lockedForward.normalize();
+    lockedRight.copy(lockedForward).cross(UP).normalize();
+
+    // EarthView only calls OrbitControls.update() when enabled. Disable it while
+    // travel owns the camera so there can be no second writer rotating the pose.
+    controls.enabled = false;
+    ownsCamera = true;
+    return true;
+  };
+
+  const releaseCameraOwnership = () => {
+    if (!ownsCamera) return;
+    ownsCamera = false;
+    controls.enabled = true;
+    controls.enableDamping = previousDamping;
+    lastSpeedKmPerSecond = 0;
+    wake();
   };
 
   const followTerrainElevation = (oldX, oldZ) => {
@@ -110,30 +163,28 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   const translateSurface = (moveX, moveForward, distanceKm) => {
     const magnitude = Math.hypot(moveX, moveForward);
     if (magnitude < 1e-5 || !(distanceKm > 0)) return false;
+    if (!acquireCameraOwnership()) return false;
+
     const scale = magnitude > 1 ? 1 / magnitude : 1;
     const oldX = controls.target.x;
     const oldZ = controls.target.z;
 
-    forward.subVectors(controls.target, camera.position);
-    forward.y = 0;
-    if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
-    else forward.normalize();
-    right.copy(forward).cross(UP).normalize();
-
     translation.set(0, 0, 0)
-      .addScaledVector(forward, moveForward * scale * distanceKm)
-      .addScaledVector(right, moveX * scale * distanceKm);
+      .addScaledVector(lockedForward, moveForward * scale * distanceKm)
+      .addScaledVector(lockedRight, moveX * scale * distanceKm);
 
-    // Translate camera and target by the exact same vector. This preserves the
-    // camera-to-target offset and therefore cannot rotate the view.
     controls.target.add(translation);
     camera.position.add(translation);
     followTerrainElevation(oldX, oldZ);
+
+    // Hard invariant: a travel frame may change position, never camera-to-target
+    // orientation. Reapply the offset captured when travel began every frame.
+    camera.position.copy(controls.target).add(lockedOffset);
     return true;
   };
 
   const zoomSurface = (zoomInput, deltaSeconds) => {
-    if (Math.abs(zoomInput) < 1e-5) return false;
+    if (Math.abs(zoomInput) < 1e-5 || ownsCamera) return false;
     offset.subVectors(camera.position, controls.target);
     const current = Math.max(1e-8, offset.length());
     const next = clamp(
@@ -147,7 +198,7 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   };
 
   const update = (deltaSeconds = 1 / 60) => {
-    if (!controls.enabled) {
+    if (!controlsAvailable()) {
       lastActive = false;
       lastSpeedKmPerSecond = 0;
       return false;
@@ -159,14 +210,18 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     const keyboardForward = keyboardAxis(["KeyW", "ArrowUp"], ["KeyS", "ArrowDown"]);
     const moveX = clamp(keyboardMoveX + (gamepad?.moveX ?? 0), -1, 1);
     const moveForward = clamp(keyboardForward + (gamepad?.moveForward ?? 0), -1, 1);
+    const hasMovement = Math.hypot(moveX, moveForward) > 0.01;
+
+    if (!hasMovement && ownsCamera) releaseCameraOwnership();
+
     const boost = held.has("ShiftLeft") || held.has("ShiftRight") || Boolean(gamepad?.boost);
     const precision = held.has("ControlLeft") || held.has("ControlRight") || Boolean(gamepad?.precision);
     const cameraDistance = camera.position.distanceTo(controls.target);
     const speed = surfaceTravelSpeedKmPerSecond(cameraDistance, { boost, precision });
-    const translated = translateSurface(moveX, moveForward, speed * dt);
+    const translated = hasMovement ? translateSurface(moveX, moveForward, speed * dt) : false;
 
-    // Controller look/zoom are deliberately disabled until translation is verified
-    // stable across browser/controller mappings. Keyboard zoom remains available.
+    // Controller look/zoom stay disabled. Keyboard zoom operates only when travel
+    // does not own the camera, keeping camera ownership single-writer at all times.
     const keyboardZoom = keyboardAxis(["PageDown", "Minus", "NumpadSubtract"], ["PageUp", "Equal", "NumpadAdd"]);
     const zoomed = zoomSurface(keyboardZoom, dt);
 
@@ -175,14 +230,15 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     lastSpeedKmPerSecond = translated ? speed : 0;
     if (active) {
       lastDevice = gamepadHasActivity(gamepad) ? "gamepad" : "keyboard";
-      controls.dispatchEvent({ type: "change" });
+      wake();
     }
     return active;
   };
 
   const driveFrame = (now) => {
     rafId = null;
-    if (disposed || !controls.enabled || !inputHasActivity()) {
+    if (disposed || !controlsAvailable() || !inputHasActivity()) {
+      if (ownsCamera) releaseCameraOwnership();
       lastFrameMs = 0;
       lastActive = false;
       return;
@@ -190,17 +246,20 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     const deltaSeconds = lastFrameMs > 0 ? Math.min(0.08, Math.max(0.001, (now - lastFrameMs) / 1000)) : 1 / 60;
     lastFrameMs = now;
     update(deltaSeconds);
-    if (!disposed && controls.enabled && inputHasActivity()) rafId = requestAnimationFrame(driveFrame);
-    else lastFrameMs = 0;
+    if (!disposed && controlsAvailable() && inputHasActivity()) rafId = requestAnimationFrame(driveFrame);
+    else {
+      if (ownsCamera && !movementHasActivity()) releaseCameraOwnership();
+      lastFrameMs = 0;
+    }
   };
 
   const ensureDriveLoop = () => {
-    if (disposed || rafId != null || !controls.enabled || !inputHasActivity() || typeof requestAnimationFrame !== "function") return;
+    if (disposed || rafId != null || !controlsAvailable() || !inputHasActivity() || typeof requestAnimationFrame !== "function") return;
     rafId = requestAnimationFrame(driveFrame);
   };
 
   const onKeyDown = (event) => {
-    if (!controls.enabled || editableTarget(event.target) || event.metaKey || event.altKey) return;
+    if ((!controls.enabled && !ownsCamera) || editableTarget(event.target) || event.metaKey || event.altKey) return;
     if (!relevantKeys.has(event.code)) return;
     held.add(event.code);
     if (event.code.startsWith("Arrow") || event.code.startsWith("Page")) event.preventDefault();
@@ -210,15 +269,23 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   const onKeyUp = (event) => {
     if (!relevantKeys.has(event.code)) return;
     held.delete(event.code);
+    if (ownsCamera && !movementHasActivity()) releaseCameraOwnership();
   };
-  const onBlur = () => held.clear();
+  const onBlur = () => {
+    held.clear();
+    releaseCameraOwnership();
+  };
 
   addEventListener("keydown", onKeyDown, { passive: false });
   addEventListener("keyup", onKeyUp);
   addEventListener("blur", onBlur);
 
   const gamepadWakeTimer = setInterval(() => {
-    if (!controls.enabled || !gamepadHasActivity(readGamepad())) return;
+    const gamepad = readGamepad();
+    if ((!controls.enabled && !ownsCamera) || !gamepadHasActivity(gamepad)) {
+      if (ownsCamera && !keyboardHasMovement() && !gamepadHasActivity(gamepad)) releaseCameraOwnership();
+      return;
+    }
     wake();
     ensureDriveLoop();
   }, 50);
@@ -234,6 +301,7 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
       gamepadId: gamepad?.id ?? null,
       gamepadMapping: gamepad?.mapping ?? null,
       controllerCameraControl: false,
+      exclusiveCameraOwnership: ownsCamera,
       active: lastActive,
       lastDevice,
       speedKmPerSecond: lastSpeedKmPerSecond
@@ -248,6 +316,7 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
       clearInterval(gamepadWakeTimer);
       if (rafId != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
       rafId = null;
+      releaseCameraOwnership();
       removeEventListener("keydown", onKeyDown);
       removeEventListener("keyup", onKeyUp);
       removeEventListener("blur", onBlur);
