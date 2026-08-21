@@ -54,6 +54,19 @@ test("surface rebasing stays dormant while focus remains inside the local precis
   assert.equal(plan, null);
 });
 
+test("floating origin scales down with landscape-sized chunks", () => {
+  const plan = surfaceRebasePlan({
+    origin: { latitude: 35, longitude: -100 },
+    focusXKm: 13,
+    focusZKm: 2,
+    chunkSizeKm: 8
+  });
+  assert.ok(plan);
+  assert.equal(plan.chunkShiftX, 2);
+  assert.equal(plan.shiftXKm, 16);
+  assert.ok(Math.abs(plan.residualXKm) < 8);
+});
+
 test("repeated eastward rebases can circle the planet without unbounded coordinates", () => {
   let origin = { latitude: 0, longitude: 0 };
   for (let index = 0; index < 480; index += 1) {
