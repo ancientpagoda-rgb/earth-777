@@ -38,8 +38,8 @@ export class SurfaceComputeClient {
     });
   }
 
-  terrain(chunkX, chunkZ) {
-    return this._request("terrain", { chunkX, chunkZ });
+  terrain(chunkX, chunkZ, options = {}) {
+    return this._request("terrain", { chunkX, chunkZ, options });
   }
 
   ecology(payload) {
