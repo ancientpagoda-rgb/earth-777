@@ -27,6 +27,10 @@ export class SurfaceComputeClient {
     if (this.worker) this.worker.postMessage({ type: "clearRegionalTerrain" });
   }
 
+  invalidateRegionalTerrainRequest() {
+    if (this.worker) this.worker.postMessage({ type: "invalidateRegionalTerrainRequest" });
+  }
+
   _request(type, payload = {}) {
     if (!this.worker) return Promise.resolve(null);
     const id = this.nextId++;
