@@ -43,6 +43,8 @@ export class EarthView {
     this.surfaceEntry = null;
     this.surfaceLoading = false;
     this.surfaceRuntimePromise = null;
+    this.surfaceTransitionPromise = null;
+    this.surfacePrewarmHandle = null;
     this.surfaceTransitions = null;
     this.surfaceScene = null;
     this.surfaceCamera = null;
@@ -125,12 +127,29 @@ export class EarthView {
     return this.surfaceRuntimePromise;
   }
 
+  _scheduleSurfaceRuntimeWarmup() {
+    if (this.terrain || this.surfaceRuntimePromise || this.surfacePrewarmHandle != null) return;
+    const warm = () => {
+      this.surfacePrewarmHandle = null;
+      if (this.mode !== "globe" || !this.selection) return;
+      this._ensureSurfaceRuntime().catch((error) => console.info("Surface runtime prewarm deferred after an initialization error.", error));
+    };
+    if (typeof requestIdleCallback === "function") {
+      this.surfacePrewarmHandle = requestIdleCallback(warm, { timeout: 260 });
+    } else {
+      this.surfacePrewarmHandle = setTimeout(warm, 0);
+    }
+  }
+
   invalidate() { this.onInvalidate?.(); }
   setInvalidateCallback(callback) { this.onInvalidate = callback; }
   isInteracting(now = performance.now()) { return this.interacting || now < this.continuousUntilMs || this.descent != null || this.surfaceEntry != null; }
   setSimulationPlaying(playing) { this.simulationPlaying = Boolean(playing); if (playing) this.invalidate(); }
   focusSelection() { return this.descendToSelection(); }
-  toggleSurface() { return this.mode === "surface" ? this.ascendToGlobe() : this.mode === "globe" ? this.descendToSelection() : false; }
+  toggleSurface() {
+    if (this.surfaceTransitionPromise) return this.surfaceTransitionPromise;
+    return this.mode === "surface" ? this.ascendToGlobe() : this.mode === "globe" ? this.descendToSelection() : false;
+  }
 
   _applySelection(hit) {
     const selection = geographicSelection(hit);
@@ -143,6 +162,10 @@ export class EarthView {
     this.continuousUntilMs = performance.now() + 1_000;
     this.onSelect?.({ latitude: selection.latitude, longitude: selection.longitude, normal: this.selectionDirection.clone() });
     this.invalidate();
+    // A selected region is a strong signal that the surface will probably be
+    // opened next. Construct the lazy surface runtime during the first idle
+    // opportunity so the user's button press does not pay that setup cost.
+    this._scheduleSurfaceRuntimeWarmup();
   }
 
   selectNormalized(pointerX, pointerY) {
@@ -158,20 +181,33 @@ export class EarthView {
 
   selectViewCenter() { return this.selectNormalized(0, 0); }
 
-  async descendToSelection() {
+  descendToSelection() {
+    if (this.surfaceTransitionPromise) return this.surfaceTransitionPromise;
     if (!this.selectionDirection || !this.selection || this.mode !== "globe") return false;
+
     this.surfaceLoading = true;
     this.onModeChange?.("surface-loading", this.selection);
     this.invalidate();
-    try {
-      await this._ensureSurfaceRuntime();
-      return this.surfaceTransitions.beginDescent(this);
-    } catch (error) {
-      this.onModeChange?.("globe", this.selection);
-      throw error;
-    } finally {
-      this.surfaceLoading = false;
-    }
+
+    const transition = (async () => {
+      try {
+        // Let the loading label/disabled state reach the screen before any
+        // synchronous Three.js/worker construction can monopolize the main thread.
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await this._ensureSurfaceRuntime();
+        if (this.mode !== "globe" || !this.selectionDirection || !this.selection) return false;
+        return this.surfaceTransitions.beginDescent(this);
+      } catch (error) {
+        this.onModeChange?.("globe", this.selection);
+        throw error;
+      } finally {
+        this.surfaceLoading = false;
+        if (this.surfaceTransitionPromise === transition) this.surfaceTransitionPromise = null;
+      }
+    })();
+
+    this.surfaceTransitionPromise = transition;
+    return transition;
   }
 
   ascendToGlobe() { return this.surfaceTransitions?.returnToGlobe(this) ?? false; }
@@ -342,6 +378,11 @@ export class EarthView {
   }
 
   dispose() {
+    if (this.surfacePrewarmHandle != null) {
+      if (typeof cancelIdleCallback === "function") cancelIdleCallback(this.surfacePrewarmHandle);
+      clearTimeout(this.surfacePrewarmHandle);
+      this.surfacePrewarmHandle = null;
+    }
     this.resizeObserver?.disconnect();
     this.rasterWorker.dispose();
     this.terrain?.dispose?.();
