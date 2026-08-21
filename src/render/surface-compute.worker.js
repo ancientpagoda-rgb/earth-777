@@ -5,6 +5,7 @@ let contextId = 0;
 let context = null;
 let regionalTerrainPatch = null;
 let regionalTerrainGeneration = 0;
+let latestRegionalTerrainRequestId = 0;
 
 function transferListForTerrain(result) {
   return [result.positions.buffer, result.colors.buffer, result.elevations.buffer, result.indices.buffer, result.normals.buffer];
@@ -36,14 +37,17 @@ self.addEventListener("message", async (event) => {
     }
     if (message.type === "clearRegionalTerrain") {
       regionalTerrainGeneration += 1;
+      latestRegionalTerrainRequestId = 0;
       regionalTerrainPatch = null;
       return;
     }
     if (message.type === "regionalTerrain") {
       const generation = regionalTerrainGeneration;
+      latestRegionalTerrainRequestId = Number(message.id) || 0;
+      const requestId = latestRegionalTerrainRequestId;
       const started = performance.now();
       const patch = await loadRuntimeRegionalTerrainPatch(message.latitude, message.longitude, message.options ?? {});
-      if (generation !== regionalTerrainGeneration) {
+      if (generation !== regionalTerrainGeneration || requestId !== latestRegionalTerrainRequestId) {
         self.postMessage({ type: "stale", id: message.id, contextId: message.contextId });
         return;
       }
@@ -65,7 +69,15 @@ self.addEventListener("message", async (event) => {
     if (message.type === "terrain") {
       const started = performance.now();
       const requestedSegments = Math.max(6, Math.min(56, Math.round(Number(message.options?.segments) || Number(context.segments) || 18)));
-      const terrainContext = { ...activeContext(), segments: requestedSegments };
+      const baseContext = activeContext();
+      const smoothingRadiusCells = Math.max(0, Math.min(16, Math.round(Number(message.options?.regionalTerrainSmoothingRadiusCells) || 0)));
+      const terrainContext = {
+        ...baseContext,
+        segments: requestedSegments,
+        regionalTerrainPatch: baseContext?.regionalTerrainPatch
+          ? { ...baseContext.regionalTerrainPatch, smoothingRadiusCells }
+          : null
+      };
       const result = buildTerrainChunkData(terrainContext, message.chunkX, message.chunkZ);
       self.postMessage({
         type: "terrain",
