@@ -1,5 +1,10 @@
 import { createSurfacePresentation as createBaseSurfacePresentation } from "./SurfacePresentationBase.js";
 import { installSurfaceNavigationControls, SURFACE_NAVIGATION_POLICY } from "./SurfaceNavigationControls.js";
+import {
+  EARTH_MEAN_RADIUS_KM,
+  SURFACE_CURVATURE_POLICY,
+  surfaceCurvatureBlend
+} from "./SurfacePlanetCurvature.js";
 
 export { SURFACE_NAVIGATION_POLICY };
 
@@ -40,6 +45,54 @@ export function createSurfacePresentation(canvas) {
     };
   }
 
+  // Preserve the familiar flat local reconstruction at normal regional scales,
+  // then progressively bend only the rendered aerial terrain toward Earth's mean
+  // sphere as the camera moves into the newly available high-altitude range.
+  // Science, hydrology, streaming keys and floating-origin coordinates stay flat
+  // and deterministic; this is strictly a presentation transform in the shader.
+  let curvatureDiagnostics = Object.freeze({
+    policy: SURFACE_CURVATURE_POLICY,
+    strength: 0,
+    distanceKm: 0,
+    centerXKm: 0,
+    centerZKm: 0,
+    radiusKm: EARTH_MEAN_RADIUS_KM,
+    materialCount: 0
+  });
+  const applyPlanetCurvature = () => {
+    const target = surface.controls.target;
+    const distanceKm = surface.camera.position.distanceTo(target);
+    const strength = surfaceCurvatureBlend(distanceKm);
+    const materials = new Set();
+    for (const mesh of surface.terrain.chunks?.values?.() ?? []) {
+      const material = mesh?.material;
+      const setter = material?.userData?.setPlanetCurvature;
+      if (typeof setter !== "function" || materials.has(material)) continue;
+      materials.add(material);
+      setter({
+        centerX: Number(target.x) || 0,
+        centerZ: Number(target.z) || 0,
+        strength,
+        radiusKm: EARTH_MEAN_RADIUS_KM
+      });
+    }
+    curvatureDiagnostics = Object.freeze({
+      policy: SURFACE_CURVATURE_POLICY,
+      strength,
+      distanceKm,
+      centerXKm: Number(target.x) || 0,
+      centerZKm: Number(target.z) || 0,
+      radiusKm: EARTH_MEAN_RADIUS_KM,
+      materialCount: materials.size
+    });
+  };
+
+  const baseTerrainUpdate = surface.terrain.update.bind(surface.terrain);
+  surface.terrain.update = (cameraPosition) => {
+    applyPlanetCurvature();
+    return baseTerrainUpdate(cameraPosition);
+  };
+
   const navigation = installSurfaceNavigationControls({
     camera: surface.camera,
     controls: surface.controls,
@@ -61,6 +114,7 @@ export function createSurfacePresentation(canvas) {
   surface.terrain.diagnostics = () => Object.freeze({
     ...baseDiagnostics(),
     surfaceNavigation: navigation.diagnostics(),
+    surfaceCurvature: curvatureDiagnostics,
     surfaceZoom: Object.freeze({
       maxDistanceKm: SURFACE_MAX_DISTANCE_KM,
       regionalStreamRadius: REGIONAL_STREAM_RADIUS,
