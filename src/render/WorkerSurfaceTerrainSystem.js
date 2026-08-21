@@ -2,6 +2,13 @@ import * as THREE from "three";
 import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 import { SurfaceComputeClient } from "./SurfaceComputeClient.js";
 import { WorkerSurfaceEcologyManager } from "./WorkerSurfaceEcologyManager.js";
+import {
+  SURFACE_STREAMING_POLICY,
+  localKilometersToGeographic,
+  predictedRefinementCenter,
+  regionalPatchContainsFocus,
+  streamingSegmentsForCandidate
+} from "./SurfaceStreamingPolicy.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
 
@@ -20,8 +27,6 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.terrainInFlight = 0;
     this.terrainInFlightKeys = new Set();
     this.terrainCompleted = [];
-    // One Web Worker executes terrain serially. Keeping several requests queued
-    // only increases stale-work latency when the user pans/zooms or LOD changes.
     this.maxTerrainInFlight = 1;
     this.computeContextSignature = "";
     this.regionalTerrainPatch = null;
@@ -29,6 +34,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.regionalTerrainPatchError = null;
     this.regionalTerrainRequestToken = 0;
     this.regionalTerrainRefinementTimer = null;
+    this.lastRefinementFocus = { x: 0, z: 0 };
+    this.lastRequestedRefinementCenter = null;
   }
 
   _surfaceVisualDrivers() {
@@ -53,12 +60,20 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     };
   }
 
-  _regionalTerrainSmoothingRadiusCells() {
+  _regionalTerrainSmoothingRadiusCells(segments = this.segments) {
     const patch = this.regionalTerrainPatch;
     if (!patch || Number(this.chunkSizeKm) < 8) return 0;
     const sourceResolutionMeters = Math.max(50, Number(patch.resolutionMeters) || 600);
-    const vertexSpacingMeters = Math.max(1, Number(this.chunkSizeKm) * 1000 / Math.max(1, Number(this.segments) || 1));
+    const vertexSpacingMeters = Math.max(1, Number(this.chunkSizeKm) * 1000 / Math.max(1, Number(segments) || 1));
     return Math.max(1, Math.min(16, Math.round(vertexSpacingMeters / sourceResolutionMeters * 0.42)));
+  }
+
+  _segmentsForCandidate(candidate) {
+    return streamingSegmentsForCandidate({
+      bandId: this.viewScaleBand ?? "regional",
+      baseSegments: this.segments,
+      distanceSquared: candidate?.distance ?? 0
+    });
   }
 
   _contextSignature() {
@@ -84,7 +99,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       rounded(drivers.lakeSurfaceElevationMeters, 1),
       rounded(drivers.lakeCoverageFraction, 3),
       rounded(drivers.lakeAreaKm2, 1),
-      patch ? `${patch.sourceId}:${patch.west}:${patch.south}:${patch.ncols}:${patch.nrows}:${patch.resolutionMeters}:smooth-${this._regionalTerrainSmoothingRadiusCells()}` : "regional-patch:none"
+      patch ? `${patch.sourceId}:${patch.west}:${patch.south}:${patch.ncols}:${patch.nrows}:${patch.resolutionMeters}` : "regional-patch:none"
     ].join("|");
   }
 
@@ -145,7 +160,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         const z = centerZ + dz;
         if (!this._chunkOverlapsRegionalTerrainPatch(x, z)) continue;
         const key = `${x}:${z}`;
-        candidates.push({ x, z, key, distance: dx * dx + dz * dz, replaceExisting: true });
+        const distance = dx * dx + dz * dz;
+        candidates.push({ x, z, key, distance, replaceExisting: true, segments: this._segmentsForCandidate({ distance }) });
         this.queuedKeys.add(key);
       }
     }
@@ -154,24 +170,39 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     return candidates.length > 0;
   }
 
-  _scheduleRegionalTerrainRefinement(origin, token) {
+  _queueConcentricLodRefresh() {
+    if (!Number.isFinite(Number(this.lastCenter?.x)) || !Number.isFinite(Number(this.lastCenter?.z))) return 0;
+    const replacements = [];
+    for (const [key, mesh] of this.chunks) {
+      const [x, z] = key.split(":").map(Number);
+      const dx = x - this.lastCenter.x;
+      const dz = z - this.lastCenter.z;
+      const distance = dx * dx + dz * dz;
+      const desiredSegments = this._segmentsForCandidate({ distance });
+      const currentSegments = Number(mesh.userData?.segments) || Number(this.segments);
+      if (desiredSegments === currentSegments || this.queuedKeys.has(key) || this.terrainInFlightKeys.has(key)) continue;
+      replacements.push({ x, z, key, distance, replaceExisting: true, segments: desiredSegments });
+      this.queuedKeys.add(key);
+    }
+    replacements.sort((a, b) => a.distance - b.distance);
+    this.queue.unshift(...replacements);
+    return replacements.length;
+  }
+
+  _scheduleRegionalTerrainRefinement(center, token, delayMs = 420) {
     if (this.regionalTerrainRefinementTimer != null) clearTimeout(this.regionalTerrainRefinementTimer);
-    this.regionalTerrainPatchStatus = "queued";
-    // Give the coarse terrain roughly half a second to become interactive before
-    // asking the worker to download/parse the optional refinement grid.
+    this.regionalTerrainPatchStatus = this.regionalTerrainPatch ? "moving" : "queued";
+    this.lastRequestedRefinementCenter = { ...center };
     this.regionalTerrainRefinementTimer = setTimeout(() => {
       this.regionalTerrainRefinementTimer = null;
       if (token !== this.regionalTerrainRequestToken || !this.computeClient?.worker) return;
       this.regionalTerrainPatchStatus = "loading";
-      this.computeClient.regionalTerrain(origin.latitude, origin.longitude, { spanDegrees: 1.0, resolutionMeters: 600 })
+      this.computeClient.regionalTerrain(center.latitude, center.longitude, { spanDegrees: 1.0, resolutionMeters: 600 })
         .then((result) => {
           if (token !== this.regionalTerrainRequestToken || !this.origin || !result?.patch) return;
           this.regionalTerrainPatch = result.patch;
           this.regionalTerrainPatchStatus = "ready";
           this.regionalTerrainPatchError = null;
-          // The worker already owns the heavy Float32 DEM. Only lightweight patch
-          // metadata crosses back to the main thread, then overlapping chunks are
-          // replaced progressively while the coarse world remains visible.
           this.queue = [];
           this.queuedKeys.clear();
           this._syncComputeContext(true);
@@ -179,12 +210,38 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         })
         .catch((error) => {
           if (token !== this.regionalTerrainRequestToken) return;
-          this.regionalTerrainPatch = null;
-          this.regionalTerrainPatchStatus = "fallback";
+          this.regionalTerrainPatchStatus = this.regionalTerrainPatch ? "ready" : "fallback";
           this.regionalTerrainPatchError = error?.message ?? String(error);
-          console.info("Regional terrain refinement unavailable; retaining compact ETOPO fallback.", error);
+          console.info("Regional terrain refinement unavailable; retaining current terrain fallback.", error);
         });
-    }, 500);
+    }, Math.max(120, Number(delayMs) || 0));
+  }
+
+  _updateRegionalTerrainFocus(cameraPosition) {
+    if (!this.origin || !cameraPosition || !["regional", "landscape"].includes(this.viewScaleBand)) return;
+    const focusX = Number(cameraPosition.x) || 0;
+    const focusZ = Number(cameraPosition.z) || 0;
+    const geographic = localKilometersToGeographic(this.origin, focusX, focusZ);
+    const previous = this.lastRefinementFocus;
+    this.lastRefinementFocus = { x: focusX, z: focusZ };
+
+    if (this.regionalTerrainPatch && regionalPatchContainsFocus(this.regionalTerrainPatch, geographic.latitude, geographic.longitude, 0.20)) return;
+
+    const center = predictedRefinementCenter({
+      origin: this.origin,
+      focusXKm: focusX,
+      focusZKm: focusZ,
+      previousFocusXKm: previous.x,
+      previousFocusZKm: previous.z,
+      lookAheadKm: this.viewScaleBand === "regional" ? 20 : 10,
+      quantizationDegrees: 0.25
+    });
+    if (this.lastRequestedRefinementCenter
+      && Math.abs(center.latitude - this.lastRequestedRefinementCenter.latitude) < 1e-6
+      && Math.abs(center.longitude - this.lastRequestedRefinementCenter.longitude) < 1e-6) return;
+
+    const token = ++this.regionalTerrainRequestToken;
+    this._scheduleRegionalTerrainRefinement(center, token, this.regionalTerrainPatch ? 520 : 360);
   }
 
   setOrigin(latitude, longitude) {
@@ -196,14 +253,18 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.computeClient?.clearRegionalTerrainPatch?.();
     this.regionalTerrainPatch = null;
     this.regionalTerrainPatchError = null;
+    this.lastRefinementFocus = { x: 0, z: 0 };
+    this.lastRequestedRefinementCenter = null;
     const token = ++this.regionalTerrainRequestToken;
-    const origin = { latitude: this.origin.latitude, longitude: this.origin.longitude };
-    this._scheduleRegionalTerrainRefinement(origin, token);
+    const center = predictedRefinementCenter({ origin: this.origin, focusXKm: 0, focusZKm: 0, quantizationDegrees: 0.25 });
+    this._scheduleRegionalTerrainRefinement(center, token, 360);
   }
 
   update(cameraPosition) {
     super.update(cameraPosition);
     for (const key of this.terrainInFlightKeys) this.queuedKeys.add(key);
+    this._queueConcentricLodRefresh();
+    this._updateRegionalTerrainFocus(cameraPosition);
   }
 
   _meshFromResult(result, candidate) {
@@ -217,6 +278,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     const mesh = new THREE.Mesh(geometry, this.material);
     mesh.frustumCulled = true;
     mesh.userData.chunk = { x: candidate.x, z: candidate.z };
+    mesh.userData.segments = Number(result.segments) || Number(candidate.segments) || Number(this.segments);
+    mesh.userData.hydrology = result.hydrology ?? null;
     return mesh;
   }
 
@@ -248,10 +311,14 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     while (this.queue.length && this.terrainInFlight < this.maxTerrainInFlight) {
       const candidate = this.queue.shift();
       const generation = this.terrainGeneration;
+      const segments = Number(candidate.segments) || this._segmentsForCandidate(candidate);
       this.terrainInFlight += 1;
       this.terrainInFlightKeys.add(candidate.key);
-      this.computeClient.terrain(candidate.x, candidate.z).then((result) => {
-        if (result && generation === this.terrainGeneration) this.terrainCompleted.push({ candidate, result });
+      this.computeClient.terrain(candidate.x, candidate.z, {
+        segments,
+        regionalTerrainSmoothingRadiusCells: this._regionalTerrainSmoothingRadiusCells(segments)
+      }).then((result) => {
+        if (result && generation === this.terrainGeneration) this.terrainCompleted.push({ candidate: { ...candidate, segments }, result });
         else if (generation === this.terrainGeneration) this.queuedKeys.delete(candidate.key);
       }).catch((error) => {
         if (generation === this.terrainGeneration) {
@@ -312,7 +379,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.workCursor = (this.workCursor + 1) % producers.length;
 
     this.lastSurfacePump = Object.freeze({
-      policy: "surface-worker-transfer-v2-idle-refinement",
+      policy: "surface-worker-transfer-v3-camera-following",
       budgetMs: budget,
       elapsedMs: Math.max(0, performance.now() - started),
       workUnits,
@@ -331,12 +398,39 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
 
   diagnostics() {
     const base = super.diagnostics();
+    let streamVertices = 0;
+    let wetlandVertices = 0;
+    let lakeVertices = 0;
+    let hydrologyChunks = 0;
+    const lodCounts = {};
+    for (const mesh of this.chunks.values()) {
+      const segments = Number(mesh.userData?.segments) || this.segments;
+      lodCounts[segments] = (lodCounts[segments] ?? 0) + 1;
+      const hydrology = mesh.userData?.hydrology;
+      if (!hydrology) continue;
+      hydrologyChunks += 1;
+      streamVertices += Number(hydrology.streamVertexCount) || 0;
+      wetlandVertices += Number(hydrology.wetlandVertexCount) || 0;
+      lakeVertices += Number(hydrology.lakeVertexCount) || 0;
+    }
     return Object.freeze({
       ...base,
       queuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length + base.ecology.queuedChunks,
       terrainQueuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length,
       surfaceCompute: this.computeClient?.diagnostics?.() ?? { available: false, status: "unavailable" },
       regionalSurfacePresentation: "science-driven-natural-mosaic-v1",
+      multiresolutionStreaming: Object.freeze({
+        policy: SURFACE_STREAMING_POLICY,
+        lodChunkCounts: Object.freeze({ ...lodCounts }),
+        refinementFocusKm: Object.freeze({ ...this.lastRefinementFocus })
+      }),
+      terrainCoupledHydrology: Object.freeze({
+        policy: "displayed-terrain-d8-basin-wetland-v1",
+        chunks: hydrologyChunks,
+        streamVertices,
+        wetlandVertices,
+        lakeVertices
+      }),
       regionalTerrainRefinement: Object.freeze({
         status: this.regionalTerrainPatchStatus,
         sourceId: this.regionalTerrainPatch?.sourceId ?? null,
@@ -350,7 +444,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         }) : null,
         error: this.regionalTerrainPatchError
       }),
-      worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v2-idle-refinement", lastPump: this.lastSurfacePump })
+      worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v3-camera-following", lastPump: this.lastSurfacePump })
     });
   }
 
