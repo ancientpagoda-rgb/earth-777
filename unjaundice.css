@@ -38,7 +38,9 @@ body,
   border-top-color: rgba(134, 169, 188, 0.12);
 }
 
-.primary-button,
+/* Secondary controls stay quiet, but the primary surface action must remain
+   visually obvious. The previous grouped override accidentally painted the
+   primary button dark-on-dark, making an enabled action look disabled. */
 .quiet-button,
 .play-button,
 .close-button {
@@ -47,6 +49,18 @@ body,
 
 .primary-button {
   color: #071016;
+  background: var(--jade);
+  border-color: rgba(183, 207, 219, 0.58);
+}
+
+.primary-button:not(:disabled):hover {
+  background: var(--jade-bright);
+  border-color: rgba(215, 231, 239, 0.82);
+}
+
+.primary-button:disabled {
+  background: rgba(15, 23, 30, 0.9);
+  color: var(--muted);
 }
 
 .quiet-button:hover {
