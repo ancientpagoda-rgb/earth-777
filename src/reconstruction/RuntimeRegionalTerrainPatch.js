@@ -5,6 +5,7 @@ const DEFAULT_SPAN_DEGREES = 1.0;
 const DEFAULT_RESOLUTION_METERS = 600;
 const MAX_GRID_CELLS = 900_000;
 const MAX_ABS_RESIDUAL_METERS = 6000;
+const CACHE_NAME = "earth-777-regional-terrain-v1";
 const requestCache = new Map();
 const finite = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -82,7 +83,6 @@ export function regionalTerrainValueAt(patch, latitude, longitude) {
   const lon = wrapLongitude(longitude);
   if (lat < patch.south || lat > patch.north || lon < patch.west || lon > patch.east) return null;
 
-  // ArcASCII data rows run north -> south and coordinates describe cell edges.
   const x = (lon - patch.west) / patch.cellsizeDegrees - 0.5;
   const y = (patch.north - lat) / patch.cellsizeDegrees - 0.5;
   const x0 = Math.floor(x);
@@ -167,6 +167,29 @@ export function buildRegionalTerrainUrl(latitude, longitude, {
   return url.toString();
 }
 
+async function fetchRegionalTerrainText(url) {
+  // CacheStorage survives page reloads and is available in modern dedicated
+  // workers. It turns revisiting a previously inspected region into a local parse
+  // instead of another network trip. The ordinary HTTP cache remains the fallback.
+  if (typeof caches !== "undefined") {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(url);
+      if (cached?.ok) return cached.text();
+      const response = await fetch(url, { mode: "cors", cache: "force-cache" });
+      if (!response.ok) throw new Error(`Regional terrain request failed (${response.status})`);
+      try { await cache.put(url, response.clone()); } catch {}
+      return response.text();
+    } catch (error) {
+      if (String(error?.message || "").includes("Regional terrain request failed")) throw error;
+    }
+  }
+
+  const response = await fetch(url, { mode: "cors", cache: "force-cache" });
+  if (!response.ok) throw new Error(`Regional terrain request failed (${response.status})`);
+  return response.text();
+}
+
 export function clearRuntimeRegionalTerrainCache() {
   requestCache.clear();
 }
@@ -176,9 +199,7 @@ export async function loadRuntimeRegionalTerrainPatch(latitude, longitude, optio
   if (requestCache.has(url)) return requestCache.get(url);
 
   const request = (async () => {
-    const response = await fetch(url, { mode: "cors", cache: "force-cache" });
-    if (!response.ok) throw new Error(`Regional terrain request failed (${response.status})`);
-    const grid = parseRegionalTerrainAscii(await response.text());
+    const grid = parseRegionalTerrainAscii(await fetchRegionalTerrainText(url));
     return {
       ...grid,
       sourceId: "gmrt-4.5.0-runtime",
