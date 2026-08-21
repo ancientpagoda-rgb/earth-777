@@ -1,8 +1,9 @@
-const KM_PER_DEGREE_LATITUDE = 111.32;
+import { geographicDestination } from "./SurfacePlanetaryStreaming.js";
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 
-export const SURFACE_STREAMING_POLICY = "camera-following-concentric-lod-v1";
+export const SURFACE_STREAMING_POLICY = "camera-following-concentric-lod-v2-planetary";
 
 export function streamingSegmentsForCandidate({ bandId = "regional", baseSegments = 18, distanceSquared = 0 } = {}) {
   const base = Math.max(6, Math.round(Number(baseSegments) || 18));
@@ -21,10 +22,7 @@ export function streamingSegmentsForCandidate({ bandId = "regional", baseSegment
 }
 
 export function localKilometersToGeographic(origin, xKm = 0, zKm = 0) {
-  const latitude = clamp(Number(origin?.latitude) + Number(zKm) / KM_PER_DEGREE_LATITUDE, -89.85, 89.85);
-  const longitudeScale = Math.max(12, KM_PER_DEGREE_LATITUDE * Math.cos(Number(origin?.latitude) * Math.PI / 180));
-  const longitude = wrapLongitude(Number(origin?.longitude) + Number(xKm) / longitudeScale);
-  return Object.freeze({ latitude, longitude });
+  return geographicDestination(origin, Number(xKm) || 0, Number(zKm) || 0);
 }
 
 export function quantizeRegionalTerrainCenter(latitude, longitude, stepDegrees = 0.25) {
