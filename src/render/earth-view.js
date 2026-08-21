@@ -4,7 +4,7 @@ import { AdaptivePerformanceController } from "./AdaptivePerformanceController.j
 import { createGlobePresentation } from "./GlobePresentation.js";
 import { requestEarthRaster, requestCloudRaster } from "./RasterRefresh.js";
 import { wireGlobePicking } from "./PointerRaycast.js";
-import { geographicSelection } from "./GeoSelection.js";
+import { geographicSelection, globeDirectionFromGeographic } from "./GeoSelection.js";
 
 const EARTH_INTERVAL_MS = 3_000;
 const CLOUD_INTERVAL_MS = 15_000;
@@ -114,6 +114,7 @@ export class EarthView {
         this._wireControls(this.surfaceControls, "surface");
         this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
         this.terrain.setEarthSystemState?.(this.lastState, this.lastState.seed, false);
+        this.terrain.onPlanetaryRebase = (event) => this._applySurfaceGeographicFocus(event?.focus ?? event?.origin);
         this.applyPerformanceSettings(true);
         this.resize();
       }
@@ -166,6 +167,23 @@ export class EarthView {
     // opened next. Construct the lazy surface runtime during the first idle
     // opportunity so the user's button press does not pay that setup cost.
     this._scheduleSurfaceRuntimeWarmup();
+  }
+
+  _applySurfaceGeographicFocus(focus) {
+    const latitude = Number(focus?.latitude);
+    const longitude = Number(focus?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+    const direction = globeDirectionFromGeographic(latitude, longitude, this.earth?.rotation?.y ?? 0);
+    this.selectionDirection = direction;
+    this.selection = { latitude, longitude, normal: direction.clone() };
+    this.marker.position.copy(direction).multiplyScalar(1.445);
+    this.marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+    this.marker.visible = true;
+    this.onSelect?.({ latitude, longitude, normal: direction.clone() });
+    this.updateSurfaceWater();
+    this.diagnosticsCacheAt = -Infinity;
+    this.invalidate();
+    return true;
   }
 
   selectNormalized(pointerX, pointerY) {
@@ -385,6 +403,7 @@ export class EarthView {
     }
     this.resizeObserver?.disconnect();
     this.rasterWorker.dispose();
+    if (this.terrain) this.terrain.onPlanetaryRebase = null;
     this.terrain?.dispose?.();
     this.controls.dispose();
     this.surfaceControls?.dispose?.();
