@@ -58,18 +58,6 @@ function terminalFor(index, downstream, memo) {
   return -4;
 }
 
-function basinSpillElevation(elevations, side, terminal, terminalByCell) {
-  let spill = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < elevations.length; index += 1) {
-    if (terminalByCell[index] !== terminal) continue;
-    for (const neighbor of neighbors(index, side)) {
-      if (terminalByCell[neighbor] === terminal) continue;
-      spill = Math.min(spill, Math.max(elevations[index], elevations[neighbor]));
-    }
-  }
-  return spill;
-}
-
 export function solveTerrainCoupledHydrology({
   elevations,
   positions = null,
@@ -93,7 +81,7 @@ export function solveTerrainCoupledHydrology({
   const lakeStrength = new Float32Array(count);
   const lakeSurfaceByCell = new Float32Array(count);
   lakeSurfaceByCell.fill(Number.NaN);
-  downstream.fill(-3); // -3 ocean, -2 closed sink, -4 leaves this terrain tile.
+  downstream.fill(-3);
 
   const land = [];
   const sea = Number(seaLevelMeters) || 0;
@@ -131,7 +119,6 @@ export function solveTerrainCoupledHydrology({
     }
   }
 
-  // Strictly downhill routing means descending elevation is a valid accumulation order.
   land.sort((a, b) => Number(elevations[b]) - Number(elevations[a]) || a - b);
   for (const index of land) {
     const target = downstream[index];
@@ -148,9 +135,24 @@ export function solveTerrainCoupledHydrology({
     basinMembers.get(terminal).push(index);
   }
 
+  // One boundary scan resolves spill saddles for every closed basin. This keeps
+  // the solver close to O(n) even on the denser center meshes.
+  const spillByTerminal = new Map();
+  for (const index of land) {
+    const terminal = terminalByCell[index];
+    if (terminal < 0) continue;
+    for (const neighbor of neighbors(index, side)) {
+      if (terminalByCell[neighbor] === terminal) continue;
+      const saddle = Math.max(Number(elevations[index]), Number(elevations[neighbor]));
+      const previous = spillByTerminal.get(terminal);
+      if (!Number.isFinite(previous) || saddle < previous) spillByTerminal.set(terminal, saddle);
+    }
+  }
+
   const runoffScale = clamp(Math.log1p(Math.max(0, Number(runoffMmPerYear) || 0)) / Math.log1p(1800), 0, 1);
   const dischargeScale = clamp(Math.log1p(Math.max(0, Number(routedDischargeM3s) || 0)) / Math.log1p(25_000), 0, 1);
-  const maxAccumulation = Math.max(2, ...land.map((index) => Number(accumulation[index]) || 0));
+  let maxAccumulation = 2;
+  for (const index of land) maxAccumulation = Math.max(maxAccumulation, Number(accumulation[index]) || 0);
   const logMax = Math.log1p(maxAccumulation);
 
   for (const index of land) {
@@ -167,8 +169,6 @@ export function solveTerrainCoupledHydrology({
     wetlandStrength[index] = clamp(flatness * lowlandWetness * 0.72 + floodplain * flatness * 0.46, 0, 1);
   }
 
-  // Closed depressions become lakes only when the regional water balance says
-  // lake storage is plausible. Edge-draining basins are excluded by terminal=-4.
   const desiredLakeFraction = clamp(Number(lakeCoverageFraction), 0, 1);
   if (desiredLakeFraction > 0.002 && basinMembers.size) {
     const rankedBasins = [...basinMembers.entries()]
@@ -180,11 +180,12 @@ export function solveTerrainCoupledHydrology({
     for (const basin of rankedBasins) {
       if (assigned >= desiredCells) break;
       const sinkElevation = Number(elevations[basin.terminal]);
-      const spill = basinSpillElevation(elevations, side, basin.terminal, terminalByCell);
-      const finiteSpill = Number.isFinite(spill) && spill > sinkElevation;
+      const spill = spillByTerminal.get(basin.terminal);
+      const finiteSpill = Number.isFinite(spill) && spill > sinkElevation + 0.02;
       const modelSurface = Number(lakeSurfaceElevationMeters);
+      const spillCeiling = finiteSpill ? Math.max(sinkElevation, spill - 0.02) : Number.POSITIVE_INFINITY;
       const waterSurface = Number.isFinite(modelSurface)
-        ? clamp(modelSurface, sinkElevation, finiteSpill ? spill - 0.02 : modelSurface)
+        ? clamp(modelSurface, sinkElevation, spillCeiling)
         : sinkElevation + (finiteSpill ? Math.min(spill - sinkElevation, 3 + Math.log1p(basin.members.length) * 1.8) : 2);
       const sorted = [...basin.members].sort((a, b) => Number(elevations[a]) - Number(elevations[b]) || a - b);
       for (const index of sorted) {
