@@ -51,7 +51,7 @@ export function surfaceRebasePlan({
   const chunk = Math.max(0.1, finite(chunkSizeKm, 84));
   const x = finite(focusXKm);
   const z = finite(focusZKm);
-  const threshold = Math.max(chunk * 1.35, finite(thresholdKm, 0), 96);
+  const threshold = Math.max(chunk * 1.35, finite(thresholdKm, 0), chunk * 0.75);
   if (Math.hypot(x, z) < threshold) return null;
 
   let chunkShiftX = Math.round(x / chunk);
