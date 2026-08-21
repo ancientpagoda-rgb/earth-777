@@ -105,9 +105,23 @@ function rekeyAndTranslateTerrain(terrain, plan, verticalShiftKm) {
     const [x, z] = key.split(":").map(Number);
     const nextX = x - plan.chunkShiftX;
     const nextZ = z - plan.chunkShiftZ;
-    mesh.position.x -= plan.shiftXKm;
-    mesh.position.z -= plan.shiftZKm;
-    mesh.position.y += verticalShiftKm;
+    const position = mesh.geometry?.getAttribute?.("position");
+    if (position) {
+      for (let index = 0; index < position.count; index += 1) {
+        position.setXYZ(
+          index,
+          position.getX(index) - plan.shiftXKm,
+          position.getY(index) + verticalShiftKm,
+          position.getZ(index) - plan.shiftZKm
+        );
+      }
+      position.needsUpdate = true;
+      mesh.geometry.computeBoundingSphere?.();
+    } else {
+      mesh.position.x -= plan.shiftXKm;
+      mesh.position.z -= plan.shiftZKm;
+      mesh.position.y += verticalShiftKm;
+    }
     mesh.userData.chunk = { x: nextX, z: nextZ };
     nextChunks.set(`${nextX}:${nextZ}`, mesh);
   }
@@ -224,7 +238,7 @@ export function installPlanetarySurfaceStreaming({ terrain, controls, camera, th
   updateDiagnostics();
   return Object.freeze({
     dispose() {
-      if (terrain.update !== baseUpdate) terrain.update = baseUpdate;
+      terrain.update = baseUpdate;
     }
   });
 }
