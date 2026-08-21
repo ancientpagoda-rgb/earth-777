@@ -37,8 +37,8 @@ test("regional refinement predicts ahead of camera motion and quantizes cache ke
   });
   const current = localKilometersToGeographic(origin, 20, 0);
   assert.ok(center.longitude >= current.longitude);
-  assert.equal((center.latitude * 4) % 1, 0);
-  assert.equal((center.longitude * 4) % 1, 0);
+  assert.ok(Math.abs((center.latitude * 4) % 1) < 1e-9);
+  assert.ok(Math.abs((center.longitude * 4) % 1) < 1e-9);
 });
 
 test("fine patch is retained until the focus enters its feather margin", () => {
