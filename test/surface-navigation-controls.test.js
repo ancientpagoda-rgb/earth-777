@@ -6,8 +6,8 @@ import {
   SURFACE_NAVIGATION_POLICY
 } from "../src/render/SurfaceNavigationControls.js";
 
-test("surface navigation exposes a stable input policy", () => {
-  assert.equal(SURFACE_NAVIGATION_POLICY, "scale-aware-keyboard-standard-gamepad-v1");
+test("surface navigation exposes the exclusive move/look input policy", () => {
+  assert.equal(SURFACE_NAVIGATION_POLICY, "exclusive-surface-move-look-v6");
 });
 
 test("gamepad deadzone removes stick drift and preserves full-scale input", () => {
