@@ -3,7 +3,7 @@ import * as THREE from "three";
 const UP = new THREE.Vector3(0, 1, 0);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const activeButton = (button) => Number(button?.value) > 0.15 || button?.pressed === true;
-const editableTarget = (target) => target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, button, a, summary, [contenteditable='true']"));
+const editableTarget = (target) => typeof HTMLElement !== "undefined" && target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, button, a, summary, [contenteditable='true']"));
 
 export const SURFACE_NAVIGATION_POLICY = "scale-aware-keyboard-standard-gamepad-v1";
 
@@ -85,6 +85,9 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   let lastDevice = "none";
   let lastSpeedKmPerSecond = 0;
   let lastActive = false;
+  let rafId = null;
+  let lastFrameMs = 0;
+  let disposed = false;
 
   const relevantKeys = new Set([
     "KeyW", "KeyA", "KeyS", "KeyD",
@@ -92,33 +95,15 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
     "PageUp", "PageDown", "Equal", "Minus", "NumpadAdd", "NumpadSubtract"
   ]);
+  const actionKeys = new Set([
+    "KeyW", "KeyA", "KeyS", "KeyD",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+    "PageUp", "PageDown", "Equal", "Minus", "NumpadAdd", "NumpadSubtract"
+  ]);
 
   const wake = () => controls.dispatchEvent({ type: "change" });
-
-  const onKeyDown = (event) => {
-    if (!controls.enabled || editableTarget(event.target) || event.metaKey || event.altKey) return;
-    if (!relevantKeys.has(event.code)) return;
-    held.add(event.code);
-    if (event.code.startsWith("Arrow") || event.code.startsWith("Page")) event.preventDefault();
-    wake();
-  };
-  const onKeyUp = (event) => {
-    if (!relevantKeys.has(event.code)) return;
-    held.delete(event.code);
-  };
-  const onBlur = () => held.clear();
-
-  addEventListener("keydown", onKeyDown, { passive: false });
-  addEventListener("keyup", onKeyUp);
-  addEventListener("blur", onBlur);
-
-  // Gamepad state has no per-axis browser event. Poll cheaply while idle solely to
-  // wake the renderer; once movement begins EarthView's ordinary continuous render
-  // loop performs the actual frame-rate-independent integration.
-  const gamepadWakeTimer = setInterval(() => {
-    if (!controls.enabled) return;
-    if (gamepadHasActivity(readGamepad())) wake();
-  }, 50);
+  const keyboardHasActivity = () => [...actionKeys].some((code) => held.has(code));
+  const inputHasActivity = () => keyboardHasActivity() || gamepadHasActivity(readGamepad());
 
   const keyboardAxis = (positiveCodes, negativeCodes) => {
     let value = 0;
@@ -224,6 +209,51 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     return active;
   };
 
+  const driveFrame = (now) => {
+    rafId = null;
+    if (disposed || !controls.enabled || !inputHasActivity()) {
+      lastFrameMs = 0;
+      lastActive = false;
+      return;
+    }
+    const deltaSeconds = lastFrameMs > 0 ? Math.min(0.08, Math.max(0.001, (now - lastFrameMs) / 1000)) : 1 / 60;
+    lastFrameMs = now;
+    update(deltaSeconds);
+    if (!disposed && controls.enabled && inputHasActivity()) rafId = requestAnimationFrame(driveFrame);
+    else lastFrameMs = 0;
+  };
+
+  const ensureDriveLoop = () => {
+    if (disposed || rafId != null || !controls.enabled || !inputHasActivity() || typeof requestAnimationFrame !== "function") return;
+    rafId = requestAnimationFrame(driveFrame);
+  };
+
+  const onKeyDown = (event) => {
+    if (!controls.enabled || editableTarget(event.target) || event.metaKey || event.altKey) return;
+    if (!relevantKeys.has(event.code)) return;
+    held.add(event.code);
+    if (event.code.startsWith("Arrow") || event.code.startsWith("Page")) event.preventDefault();
+    wake();
+    ensureDriveLoop();
+  };
+  const onKeyUp = (event) => {
+    if (!relevantKeys.has(event.code)) return;
+    held.delete(event.code);
+  };
+  const onBlur = () => held.clear();
+
+  addEventListener("keydown", onKeyDown, { passive: false });
+  addEventListener("keyup", onKeyUp);
+  addEventListener("blur", onBlur);
+
+  // Gamepad state has no per-axis browser event. Poll cheaply while idle solely to
+  // wake/start the RAF; active movement itself runs at display cadence.
+  const gamepadWakeTimer = setInterval(() => {
+    if (!controls.enabled || !gamepadHasActivity(readGamepad())) return;
+    wake();
+    ensureDriveLoop();
+  }, 50);
+
   const diagnostics = () => {
     const gamepad = readGamepad();
     return Object.freeze({
@@ -243,7 +273,10 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     update,
     diagnostics,
     dispose() {
+      disposed = true;
       clearInterval(gamepadWakeTimer);
+      if (rafId != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
+      rafId = null;
       removeEventListener("keydown", onKeyDown);
       removeEventListener("keyup", onKeyUp);
       removeEventListener("blur", onBlur);
