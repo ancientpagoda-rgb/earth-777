@@ -1,6 +1,15 @@
 import * as THREE from "three";
+import { EARTH_MEAN_RADIUS_KM } from "./SurfacePlanetCurvature.js";
 
 export function createRegionalAerialMaterial() {
+  const curvature = {
+    centerX: 0,
+    centerZ: 0,
+    strength: 0,
+    radiusKm: EARTH_MEAN_RADIUS_KM,
+    shader: null
+  };
+
   const material = new THREE.MeshBasicMaterial({
     vertexColors: true,
     side: THREE.FrontSide,
@@ -9,14 +18,19 @@ export function createRegionalAerialMaterial() {
   });
 
   material.onBeforeCompile = (shader) => {
+    curvature.shader = shader;
+    shader.uniforms.uAerialCurvatureCenter = { value: new THREE.Vector2(curvature.centerX, curvature.centerZ) };
+    shader.uniforms.uAerialCurvatureStrength = { value: curvature.strength };
+    shader.uniforms.uAerialEarthRadiusKm = { value: curvature.radiusKm };
+
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
-        `#include <common>\nvarying vec3 vAerialWorldPosition;`
+        `#include <common>\nvarying vec3 vAerialWorldPosition;\nuniform vec2 uAerialCurvatureCenter;\nuniform float uAerialCurvatureStrength;\nuniform float uAerialEarthRadiusKm;`
       )
       .replace(
         "#include <begin_vertex>",
-        `#include <begin_vertex>\nvAerialWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        `#include <begin_vertex>\n// At ordinary regional distances the local tangent plane stays unchanged.\n// As the camera pulls far back, bend that plane onto a sphere with Earth's\n// mean radius. This is presentation-only: science and tile coordinates remain\n// in their stable local tangent frame.\nvec2 aerialCurvatureDelta = transformed.xz - uAerialCurvatureCenter;\nfloat aerialCurvatureRadiusSq = uAerialEarthRadiusKm * uAerialEarthRadiusKm;\nfloat aerialCurvaturePlanarSq = min(dot(aerialCurvatureDelta, aerialCurvatureDelta), aerialCurvatureRadiusSq * 0.999999);\nfloat aerialCurvatureDrop = uAerialEarthRadiusKm - sqrt(max(0.0, aerialCurvatureRadiusSq - aerialCurvaturePlanarSq));\ntransformed.y -= aerialCurvatureDrop * uAerialCurvatureStrength;\nvAerialWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
       );
 
     shader.fragmentShader = shader.fragmentShader
@@ -30,7 +44,20 @@ export function createRegionalAerialMaterial() {
       );
   };
 
-  material.customProgramCacheKey = () => "earth777-regional-aerial-mosaic-v5-crisp";
-  material.userData.presentation = "science-colored-aerial-fragment-mosaic-v5-crisp";
+  material.userData.setPlanetCurvature = ({ centerX = 0, centerZ = 0, strength = 0, radiusKm = EARTH_MEAN_RADIUS_KM } = {}) => {
+    curvature.centerX = Number(centerX) || 0;
+    curvature.centerZ = Number(centerZ) || 0;
+    curvature.strength = Math.min(1, Math.max(0, Number(strength) || 0));
+    curvature.radiusKm = Math.max(1, Number(radiusKm) || EARTH_MEAN_RADIUS_KM);
+    const shader = curvature.shader;
+    if (shader) {
+      shader.uniforms.uAerialCurvatureCenter.value.set(curvature.centerX, curvature.centerZ);
+      shader.uniforms.uAerialCurvatureStrength.value = curvature.strength;
+      shader.uniforms.uAerialEarthRadiusKm.value = curvature.radiusKm;
+    }
+  };
+  material.userData.planetCurvature = curvature;
+  material.customProgramCacheKey = () => "earth777-regional-aerial-mosaic-v6-curved";
+  material.userData.presentation = "science-colored-aerial-fragment-mosaic-v6-curved";
   return material;
 }
