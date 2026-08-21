@@ -5,7 +5,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 const activeButton = (button) => Number(button?.value) > 0.15 || button?.pressed === true;
 const editableTarget = (target) => typeof HTMLElement !== "undefined" && target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, button, a, summary, [contenteditable='true']"));
 
-export const SURFACE_NAVIGATION_POLICY = "scale-aware-keyboard-calibrated-gamepad-v2";
+export const SURFACE_NAVIGATION_POLICY = "translation-only-gamepad-v3";
 
 export function applyGamepadDeadzone(value, deadzone = 0.16) {
   const input = clamp(value, -1, 1);
@@ -16,9 +16,6 @@ export function applyGamepadDeadzone(value, deadzone = 0.16) {
 }
 
 export function surfaceTravelSpeedKmPerSecond(cameraDistanceKm, { boost = false, precision = false } = {}) {
-  // One speed model works from a near-ground inspection to the regional map.
-  // At ground scale this bottoms out around walking speed; from high altitude it
-  // becomes geographic travel rather than forcing the user to hold a key forever.
   let speed = clamp(Number(cameraDistanceKm) * 0.28, 0.003, 24);
   if (boost) speed *= 4;
   if (precision) speed *= 0.24;
@@ -30,91 +27,36 @@ function firstConnectedGamepad() {
   const pads = navigator.getGamepads();
   for (const pad of pads) {
     if (!pad?.connected) continue;
-    // Movement can safely use the first two axes even on controllers whose browser
-    // mapping is not standard. Camera orbit/trigger zoom are stricter below.
     if (pad.axes?.length >= 2 && pad.buttons?.length >= 4) return pad;
   }
   return null;
 }
 
-function updateRightStickCalibration(state, pad, rawX, rawY) {
-  const id = `${pad?.index ?? 0}:${pad?.id ?? "gamepad"}`;
-  if (state.padId !== id) {
-    state.padId = id;
-    state.neutralFrames = 0;
-    state.armed = false;
-  }
-
-  const standard = pad?.mapping === "standard" && (pad?.axes?.length ?? 0) >= 4;
-  if (!standard) {
-    state.neutralFrames = 0;
-    state.armed = false;
-    return false;
-  }
-
-  if (!state.armed) {
-    // A controller must demonstrate a neutral right stick before it is allowed to
-    // rotate the camera. This prevents trigger-like/nonstandard idle axes from
-    // being interpreted as a permanently held look stick.
-    if (Math.hypot(Number(rawX) || 0, Number(rawY) || 0) <= 0.18) state.neutralFrames += 1;
-    else state.neutralFrames = 0;
-    if (state.neutralFrames >= 4) state.armed = true;
-  }
-  return state.armed;
-}
-
-function readGamepad(rightStickCalibration = null) {
+function readGamepad() {
   const pad = firstConnectedGamepad();
-  if (!pad) {
-    if (rightStickCalibration) {
-      rightStickCalibration.padId = null;
-      rightStickCalibration.neutralFrames = 0;
-      rightStickCalibration.armed = false;
-    }
-    return null;
-  }
-
+  if (!pad) return null;
   const buttons = pad.buttons ?? [];
   const axes = pad.axes ?? [];
   const standard = pad.mapping === "standard";
-  const leftX = applyGamepadDeadzone(axes[0] ?? 0, 0.20);
-  const leftY = applyGamepadDeadzone(axes[1] ?? 0, 0.20);
-  const rawRightX = Number(axes[2]) || 0;
-  const rawRightY = Number(axes[3]) || 0;
-  const rightStickReady = rightStickCalibration
-    ? updateRightStickCalibration(rightStickCalibration, pad, rawRightX, rawRightY)
-    : standard && axes.length >= 4 && Math.hypot(rawRightX, rawRightY) <= 0.18;
-  const rightX = rightStickReady ? applyGamepadDeadzone(rawRightX, 0.28) : 0;
-  const rightY = rightStickReady ? applyGamepadDeadzone(rawRightY, 0.28) : 0;
-  const dpadUp = activeButton(buttons[12]) ? 1 : 0;
-  const dpadDown = activeButton(buttons[13]) ? 1 : 0;
-  const dpadLeft = activeButton(buttons[14]) ? 1 : 0;
-  const dpadRight = activeButton(buttons[15]) ? 1 : 0;
+  const leftX = applyGamepadDeadzone(axes[0] ?? 0, 0.24);
+  const leftY = applyGamepadDeadzone(axes[1] ?? 0, 0.24);
+  const dpadUp = standard && activeButton(buttons[12]) ? 1 : 0;
+  const dpadDown = standard && activeButton(buttons[13]) ? 1 : 0;
+  const dpadLeft = standard && activeButton(buttons[14]) ? 1 : 0;
+  const dpadRight = standard && activeButton(buttons[15]) ? 1 : 0;
 
   return Object.freeze({
     id: pad.id ?? "gamepad",
     mapping: pad.mapping || "none",
     moveX: clamp(leftX + dpadRight - dpadLeft, -1, 1),
     moveForward: clamp(-leftY + dpadUp - dpadDown, -1, 1),
-    orbitX: rightX,
-    orbitY: rightY,
-    // Trigger semantics are standardized only for standard-mapped gamepads.
-    zoomOut: standard ? clamp(buttons[6]?.value ?? 0, 0, 1) : 0,
-    zoomIn: standard ? clamp(buttons[7]?.value ?? 0, 0, 1) : 0,
     precision: standard && activeButton(buttons[4]),
-    boost: standard && activeButton(buttons[5]),
-    rightStickReady
+    boost: standard && activeButton(buttons[5])
   });
 }
 
 function gamepadHasActivity(input) {
-  if (!input) return false;
-  return Math.abs(input.moveX) > 0.01
-    || Math.abs(input.moveForward) > 0.01
-    || Math.abs(input.orbitX) > 0.01
-    || Math.abs(input.orbitY) > 0.01
-    || input.zoomIn > 0.02
-    || input.zoomOut > 0.02;
+  return Boolean(input && (Math.abs(input.moveX) > 0.01 || Math.abs(input.moveForward) > 0.01));
 }
 
 export function installSurfaceNavigationControls({ camera, controls, terrain } = {}) {
@@ -125,8 +67,6 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   const right = new THREE.Vector3();
   const translation = new THREE.Vector3();
   const offset = new THREE.Vector3();
-  const spherical = new THREE.Spherical();
-  const rightStickCalibration = { padId: null, neutralFrames: 0, armed: false };
   let lastDevice = "none";
   let lastSpeedKmPerSecond = 0;
   let lastActive = false;
@@ -148,7 +88,7 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
 
   const wake = () => controls.dispatchEvent({ type: "change" });
   const keyboardHasActivity = () => [...actionKeys].some((code) => held.has(code));
-  const inputHasActivity = () => keyboardHasActivity() || gamepadHasActivity(readGamepad(rightStickCalibration));
+  const inputHasActivity = () => keyboardHasActivity() || gamepadHasActivity(readGamepad());
 
   const keyboardAxis = (positiveCodes, negativeCodes) => {
     let value = 0;
@@ -183,26 +123,12 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     translation.set(0, 0, 0)
       .addScaledVector(forward, moveForward * scale * distanceKm)
       .addScaledVector(right, moveX * scale * distanceKm);
+
+    // Translate camera and target by the exact same vector. This preserves the
+    // camera-to-target offset and therefore cannot rotate the view.
     controls.target.add(translation);
     camera.position.add(translation);
     followTerrainElevation(oldX, oldZ);
-    return true;
-  };
-
-  const orbitSurface = (x, y, deltaSeconds) => {
-    if (Math.abs(x) < 1e-5 && Math.abs(y) < 1e-5) return false;
-    offset.subVectors(camera.position, controls.target);
-    spherical.setFromVector3(offset);
-    const rate = 1.65 * deltaSeconds;
-    spherical.theta -= x * rate;
-    spherical.phi = clamp(
-      spherical.phi + y * rate,
-      Math.max(0.01, Number(controls.minPolarAngle) || 0.01),
-      Math.min(Math.PI - 0.01, Number(controls.maxPolarAngle) || Math.PI - 0.01)
-    );
-    offset.setFromSpherical(spherical);
-    camera.position.copy(controls.target).add(offset);
-    camera.lookAt(controls.target);
     return true;
   };
 
@@ -228,7 +154,7 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     }
 
     const dt = clamp(deltaSeconds, 0, 0.08);
-    const gamepad = readGamepad(rightStickCalibration);
+    const gamepad = readGamepad();
     const keyboardMoveX = keyboardAxis(["KeyD", "ArrowRight"], ["KeyA", "ArrowLeft"]);
     const keyboardForward = keyboardAxis(["KeyW", "ArrowUp"], ["KeyS", "ArrowDown"]);
     const moveX = clamp(keyboardMoveX + (gamepad?.moveX ?? 0), -1, 1);
@@ -239,12 +165,12 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
     const speed = surfaceTravelSpeedKmPerSecond(cameraDistance, { boost, precision });
     const translated = translateSurface(moveX, moveForward, speed * dt);
 
+    // Controller look/zoom are deliberately disabled until translation is verified
+    // stable across browser/controller mappings. Keyboard zoom remains available.
     const keyboardZoom = keyboardAxis(["PageDown", "Minus", "NumpadSubtract"], ["PageUp", "Equal", "NumpadAdd"]);
-    const gamepadZoom = (gamepad?.zoomOut ?? 0) - (gamepad?.zoomIn ?? 0);
-    const zoomed = zoomSurface(clamp(keyboardZoom + gamepadZoom, -1, 1), dt);
-    const orbited = orbitSurface(gamepad?.orbitX ?? 0, gamepad?.orbitY ?? 0, dt);
+    const zoomed = zoomSurface(keyboardZoom, dt);
 
-    const active = translated || zoomed || orbited;
+    const active = translated || zoomed;
     lastActive = active;
     lastSpeedKmPerSecond = translated ? speed : 0;
     if (active) {
@@ -291,25 +217,23 @@ export function installSurfaceNavigationControls({ camera, controls, terrain } =
   addEventListener("keyup", onKeyUp);
   addEventListener("blur", onBlur);
 
-  // Gamepad state has no per-axis browser event. Poll cheaply while idle solely to
-  // wake/start the RAF; active movement itself runs at display cadence.
   const gamepadWakeTimer = setInterval(() => {
-    if (!controls.enabled || !gamepadHasActivity(readGamepad(rightStickCalibration))) return;
+    if (!controls.enabled || !gamepadHasActivity(readGamepad())) return;
     wake();
     ensureDriveLoop();
   }, 50);
 
   const diagnostics = () => {
-    const gamepad = readGamepad(rightStickCalibration);
+    const gamepad = readGamepad();
     return Object.freeze({
       available: true,
       policy: SURFACE_NAVIGATION_POLICY,
       keyboard: "WASD/arrows move; Shift boost; Ctrl precision; PageUp/PageDown zoom",
-      gamepad: "left stick/D-pad move; standard right stick orbit after neutral calibration; LT/RT zoom; LB precision; RB boost",
+      gamepad: "left stick/D-pad move only; LB precision; RB boost; camera look disabled",
       gamepadConnected: Boolean(gamepad),
       gamepadId: gamepad?.id ?? null,
       gamepadMapping: gamepad?.mapping ?? null,
-      rightStickReady: Boolean(gamepad?.rightStickReady),
+      controllerCameraControl: false,
       active: lastActive,
       lastDevice,
       speedKmPerSecond: lastSpeedKmPerSecond
