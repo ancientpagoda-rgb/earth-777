@@ -64,13 +64,16 @@ self.addEventListener("message", async (event) => {
     }
     if (message.type === "terrain") {
       const started = performance.now();
-      const result = buildTerrainChunkData(activeContext(), message.chunkX, message.chunkZ);
+      const requestedSegments = Math.max(6, Math.min(56, Math.round(Number(message.options?.segments) || Number(context.segments) || 18)));
+      const terrainContext = { ...activeContext(), segments: requestedSegments };
+      const result = buildTerrainChunkData(terrainContext, message.chunkX, message.chunkZ);
       self.postMessage({
         type: "terrain",
         id: message.id,
         contextId,
         chunkX: message.chunkX,
         chunkZ: message.chunkZ,
+        segments: requestedSegments,
         milliseconds: performance.now() - started,
         ...result
       }, transferListForTerrain(result));
