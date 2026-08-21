@@ -5,6 +5,8 @@ import { WorkerSurfaceTerrainSystem } from "./WorkerSurfaceTerrainSystem.js";
 import { installSurfaceScaleController } from "./SurfaceScaleController.js";
 import { SurfaceEarthLayers } from "./SurfaceEarthLayers.js";
 import { createRegionalAerialMaterial } from "./RegionalAerialMaterial.js";
+import { stitchChunkNeighborhood, TERRAIN_SEAM_POLICY } from "./TerrainSeamStitching.js";
+import { applySurfaceHydrologyContinuity, SURFACE_HYDROLOGY_CONTINUITY_POLICY } from "./SurfaceHydrologyContinuity.js";
 
 function createSeaLevelOutline() {
   const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -95,6 +97,21 @@ export function createSurfacePresentation(canvas) {
       mesh.material = aerialMaterial;
       mesh.userData.surfacePresentation = "science-colored-aerial-fragment-mosaic-v5-crisp";
     }
+
+    // Local D8 hydrology remains responsible for tributaries, floodplains and
+    // closed depressions. Major routed channels and model-supported lake footprints
+    // are projected in world coordinates so their visible presentation does not
+    // restart when a camera-following terrain chunk or LOD boundary is crossed.
+    const continuity = applySurfaceHydrologyContinuity(mesh, {
+      geomorphologyPatch: terrain.geomorphologyPatch,
+      waterSystem: terrain.currentWaterSystem?.(),
+      chunkSizeKm: terrain.chunkSizeKm,
+      radius: terrain.radius,
+      branchSeed: terrain.branchSeed,
+      baseElevationMeters: terrain.baseElevationMeters,
+      verticalScale: terrain.verticalScale
+    });
+    mesh.userData.hydrologyContinuity = continuity;
     return mesh;
   };
 
@@ -140,9 +157,41 @@ export function createSurfacePresentation(canvas) {
 
   // Keep worker bookkeeping off the critical interaction path. Existing terrain
   // remains renderable while dragging/zooming; completed terrain/ecology work is
-  // integrated at the normal budget immediately after the gesture ends.
+  // integrated at the normal budget immediately after the gesture ends. Newly
+  // integrated terrain is stitched only against its immediate neighbors, so mixed
+  // concentric LODs meet on one shared edge instead of exposing T-junction cracks.
   const controlledPump = terrain.pump.bind(terrain);
-  terrain.pump = (budgetMs) => controlledPump(surfaceManipulating ? Math.min(Number(budgetMs) || 0, 0.18) : budgetMs);
+  const stitchedMeshRefs = new Map();
+  let seamStitchOperations = 0;
+  terrain.pump = (budgetMs) => {
+    const result = controlledPump(surfaceManipulating ? Math.min(Number(budgetMs) || 0, 0.18) : budgetMs);
+    for (const [key, mesh] of terrain.chunks) {
+      if (stitchedMeshRefs.get(key) === mesh) continue;
+      stitchedMeshRefs.set(key, mesh);
+      seamStitchOperations += stitchChunkNeighborhood(terrain.chunks, key);
+    }
+    for (const key of [...stitchedMeshRefs.keys()]) {
+      if (!terrain.chunks.has(key)) stitchedMeshRefs.delete(key);
+    }
+    terrain.surfaceContinuityDiagnostics = Object.freeze({
+      terrainSeamPolicy: TERRAIN_SEAM_POLICY,
+      hydrologyPolicy: SURFACE_HYDROLOGY_CONTINUITY_POLICY,
+      seamStitchOperations,
+      trackedChunks: stitchedMeshRefs.size
+    });
+    return result;
+  };
+
+  const baseTerrainDiagnostics = terrain.diagnostics.bind(terrain);
+  terrain.diagnostics = () => Object.freeze({
+    ...baseTerrainDiagnostics(),
+    surfaceContinuity: terrain.surfaceContinuityDiagnostics ?? Object.freeze({
+      terrainSeamPolicy: TERRAIN_SEAM_POLICY,
+      hydrologyPolicy: SURFACE_HYDROLOGY_CONTINUITY_POLICY,
+      seamStitchOperations: 0,
+      trackedChunks: 0
+    })
+  });
 
   // A routed river that is scientifically meaningful at local scale is far
   // narrower than one regional mesh cell. Drawing that ribbon from orbit aliases
@@ -181,6 +230,7 @@ export function createSurfacePresentation(canvas) {
     removeEventListener("keydown", toggleEarthLayers);
     controls.removeEventListener("start", onSurfaceControlStart);
     controls.removeEventListener("end", onSurfaceControlEnd);
+    stitchedMeshRefs.clear();
     aerialMaterial.dispose();
     baseDispose();
   };
