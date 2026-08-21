@@ -7,6 +7,7 @@ import { SurfaceEarthLayers } from "./SurfaceEarthLayers.js";
 import { createRegionalAerialMaterial } from "./RegionalAerialMaterial.js";
 import { stitchChunkNeighborhood, TERRAIN_SEAM_POLICY } from "./TerrainSeamStitching.js";
 import { applySurfaceHydrologyContinuity, SURFACE_HYDROLOGY_CONTINUITY_POLICY } from "./SurfaceHydrologyContinuity.js";
+import { installPlanetarySurfaceStreaming, PLANETARY_SURFACE_STREAMING_POLICY } from "./SurfacePlanetaryStreaming.js";
 
 function createSeaLevelOutline() {
   const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -80,9 +81,9 @@ export function createSurfacePresentation(canvas) {
   sun.position.copy(sunDirection).multiplyScalar(90);
   scene.add(sun);
 
-  // Regional entry now starts with a broad coarse world-stream buffer rather
-  // than an 84 km square whose outer edge is visible from orbit. The camera still
-  // frames ~84 km; the extra terrain exists around it for orbiting and panning.
+  // Regional entry starts with a broad coarse world-stream buffer rather than a
+  // finite map. Planetary floating-origin rebasing below lets this same local
+  // buffer move around the whole globe without local coordinates growing large.
   const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 84, radius: 2, segments: 18, verticalScale: 0.90 });
 
   // Regional/landscape rendering is an aerial reconstruction. Broad color comes
@@ -137,6 +138,7 @@ export function createSurfacePresentation(canvas) {
   });
 
   const surfaceScale = installSurfaceScaleController({ scene, terrain, controls, water, seaLevelOutline, earthLayers });
+  const planetaryStreaming = installPlanetarySurfaceStreaming({ terrain, controls, camera });
 
   // The wide regional stream should fade only in the distance. Starting fog at
   // 150 km made the ordinary ~84 km inspection footprint look milky even though
@@ -190,6 +192,13 @@ export function createSurfacePresentation(canvas) {
       hydrologyPolicy: SURFACE_HYDROLOGY_CONTINUITY_POLICY,
       seamStitchOperations: 0,
       trackedChunks: 0
+    }),
+    planetarySurface: terrain.planetarySurfaceDiagnostics ?? Object.freeze({
+      policy: PLANETARY_SURFACE_STREAMING_POLICY,
+      rebaseCount: 0,
+      totalRebasedKm: 0,
+      origin: terrain.origin ? Object.freeze({ ...terrain.origin }) : null,
+      lastRebase: null
     })
   });
 
@@ -230,6 +239,7 @@ export function createSurfacePresentation(canvas) {
     removeEventListener("keydown", toggleEarthLayers);
     controls.removeEventListener("start", onSurfaceControlStart);
     controls.removeEventListener("end", onSurfaceControlEnd);
+    planetaryStreaming.dispose();
     stitchedMeshRefs.clear();
     aerialMaterial.dispose();
     baseDispose();
