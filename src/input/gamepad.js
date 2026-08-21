@@ -78,8 +78,17 @@ export class GamepadDriver {
     }
 
     const state = readGamepadState(gamepad);
-    if (state.orbitX || state.orbitY) this.handlers.onOrbit?.({ x: state.orbitX, y: state.orbitY, deltaSeconds, gamepad });
-    if (state.zoom) this.handlers.onZoom?.({ value: state.zoom, deltaSeconds, gamepad });
+    const surfaceOwnsGamepad = globalThis.__earth777SurfaceOwnsGamepad?.() === true;
+
+    // Globe navigation and surface navigation intentionally use different stick
+    // semantics. Never let the legacy globe driver rotate/zoom the same camera
+    // while the surface translation layer owns the controller.
+    if (!surfaceOwnsGamepad && (state.orbitX || state.orbitY)) {
+      this.handlers.onOrbit?.({ x: state.orbitX, y: state.orbitY, deltaSeconds, gamepad });
+    }
+    if (!surfaceOwnsGamepad && state.zoom) {
+      this.handlers.onZoom?.({ value: state.zoom, deltaSeconds, gamepad });
+    }
 
     this._dispatchEdge(state.pressedButtons, 0, () => this.handlers.onSelect?.(gamepad));
     this._dispatchEdge(state.pressedButtons, 1, () => this.handlers.onBack?.(gamepad));
