@@ -1,9 +1,11 @@
 export class SimulationWorkerClient {
-  constructor({ seed = 777001, worker = null, onState = null, onFidelity = null, onError = null } = {}) {
+  constructor({ seed = 777001, worker = null, onState = null, onFidelity = null, onError = null, maxAdvanceChunkYears = 1000 } = {}) {
     this.worker = worker ?? new Worker(new URL("./simulation.worker.js", import.meta.url), { type: "module" });
     this.onState = onState;
     this.onFidelity = onFidelity;
     this.onError = onError;
+    this.seed = Number(seed) >>> 0;
+    this.maxAdvanceChunkYears = Math.max(1, Number(maxAdvanceChunkYears) || 1000);
     this.version = 0;
     this.nextRequestId = 0;
     this.readyResolved = false;
@@ -27,7 +29,7 @@ export class SimulationWorkerClient {
       this.onError?.(error);
     });
 
-    this._post("init", { seed: Number(seed) >>> 0, version: this.version });
+    this._post("init", { seed: this.seed, version: this.version });
   }
 
   _post(type, payload = {}) {
@@ -135,7 +137,7 @@ export class SimulationWorkerClient {
 
   _flushAdvance() {
     if (!this.readyResolved || this.advanceInFlight || this.pendingAdvanceYears <= 0) return;
-    const years = this.pendingAdvanceYears;
+    const years = Math.min(this.pendingAdvanceYears, this.maxAdvanceChunkYears);
     this.pendingAdvanceYears = 0;
     const version = this.version;
     const requestId = this._post("advance", { years, version });
@@ -147,10 +149,36 @@ export class SimulationWorkerClient {
   }
 
   seek(elapsedYears) {
-    return this._request("seek", { elapsedYears: Number(elapsedYears) || 0 }, { bumpVersion: true });
+    const target = Math.max(0, Number(elapsedYears) || 0);
+    this.version += 1;
+    this.pendingAdvanceYears = 0;
+    const version = this.version;
+    const currentElapsed = Number(this.latestState?.elapsedYears) || 0;
+
+    const run = async () => {
+      if (target < currentElapsed) {
+        await this._request("reset", { seed: this.seed }, { bumpVersion: false });
+        if (this.version !== version) return null;
+      }
+
+      let remaining = target < currentElapsed ? target : target - currentElapsed;
+      let lastResult = this.latestState;
+
+      while (remaining > 0 && this.version === version) {
+        const chunk = Math.min(this.maxAdvanceChunkYears, remaining);
+        lastResult = await this._request("advance", { years: chunk }, { bumpVersion: false });
+        if (this.version !== version) return null;
+        remaining -= chunk;
+      }
+
+      return lastResult;
+    };
+
+    return run();
   }
 
   reset(seed) {
+    this.seed = Number(seed) >>> 0;
     return this._request("reset", { seed: Number(seed) >>> 0 }, { bumpVersion: true });
   }
 

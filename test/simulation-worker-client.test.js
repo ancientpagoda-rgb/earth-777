@@ -23,10 +23,15 @@ class FakeWorker {
   terminate() {}
 }
 
-function readyClient() {
+function readyClient({ maxAdvanceChunkYears = 1000 } = {}) {
   const worker = new FakeWorker();
   const states = [];
-  const client = new SimulationWorkerClient({ worker, seed: 777001, onState: (result) => states.push(result) });
+  const client = new SimulationWorkerClient({
+    worker,
+    seed: 777001,
+    maxAdvanceChunkYears,
+    onState: (result) => states.push(result)
+  });
   const init = worker.sent[0];
   worker.emit({
     type: "ready",
@@ -82,9 +87,6 @@ test("discards stale advance state after a version-changing seek", async () => {
   client.queueAdvance(10);
   const advance = worker.sent.at(-1);
   const seekPromise = client.seek(2000);
-  const seek = worker.sent.at(-1);
-  assert.equal(seek.type, "seek");
-  assert.notEqual(seek.version, advance.version);
 
   worker.emit({
     type: "advance",
@@ -97,20 +99,41 @@ test("discards stale advance state after a version-changing seek", async () => {
   });
   assert.equal(states.length, 0);
 
+  const seekChunk1 = worker.sent.at(-1);
+  assert.equal(seekChunk1.type, "advance");
+  assert.equal(seekChunk1.years, 1000);
+
   worker.emit({
-    type: "seek",
-    requestId: seek.requestId,
-    version: seek.version,
-    state: { yearBP: 775000, temperatureAnomaly: -1.1 },
-    stateMode: "full",
-    fidelity: { targets: [] },
+    type: "advance",
+    requestId: seekChunk1.requestId,
+    version: seekChunk1.version,
+    statePatch: { yearBP: 776000, elapsedYears: 1000 },
+    stateMode: "delta",
+    patchKeys: 2,
+    durationMs: 12
+  });
+  assert.equal(states.length, 1);
+  assert.equal(states[0].state.yearBP, 776000);
+  await Promise.resolve();
+
+  const seekChunk2 = worker.sent.at(-1);
+  assert.equal(seekChunk2.type, "advance");
+  assert.equal(seekChunk2.years, 1000);
+
+  worker.emit({
+    type: "advance",
+    requestId: seekChunk2.requestId,
+    version: seekChunk2.version,
+    statePatch: { yearBP: 775000, elapsedYears: 2000, temperatureAnomaly: -1.1 },
+    stateMode: "delta",
+    patchKeys: 3,
     durationMs: 12
   });
   const result = await seekPromise;
   assert.equal(result.state.yearBP, 775000);
   assert.equal(result.state.temperatureAnomaly, -1.1);
-  assert.equal(states.length, 1);
-  assert.equal(states[0].type, "seek");
+  assert.equal(states.length, 2);
+  assert.equal(states[1].type, "advance");
 });
 
 test("clearPendingAdvance removes work that has not been sent yet", async () => {

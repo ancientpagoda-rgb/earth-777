@@ -358,7 +358,8 @@ function setSeed(nextSeed) {
 
 function seekTimeline(elapsedYears) {
   const targetYears = clamp(Math.round(elapsedYears), 0, TIMELINE_WINDOW_YEARS);
-  simulation.clearPendingAdvance();
+  if (playing) setPlaying(false);
+  else simulation.clearPendingAdvance();
   deferredSimulationResult = null;
   ui.elapsed.textContent = "seeking…";
   simulation.seek(targetYears).catch(() => {});
