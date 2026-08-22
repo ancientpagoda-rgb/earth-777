@@ -1,6 +1,7 @@
 import { SOURCES } from "./data/provenance.js";
 import { GamepadDriver, GAMEPAD_HINT, KEYBOARD_HINT, POINTER_HINT, clamp } from "./input/gamepad.js";
 import { SimulationWorkerClient } from "./sim/SimulationWorkerClient.js";
+import { TIMELINE_WINDOW_YEARS } from "./data/checkpoint-777.js";
 import { EarthView } from "./render/earth-view.js";
 import { FrameProfiler } from "./render/FrameProfiler.js";
 
@@ -137,7 +138,18 @@ const gamepad = new GamepadDriver({
   }
 });
 
-function formatYear(yearBP) { return `${Math.max(0, Math.round(yearBP)).toLocaleString()} BP`; }
+function formatYear(yearBP) {
+  const rounded = Math.round(Number(yearBP) || 0);
+  if (rounded === 0) return "present";
+  if (rounded > 0) return `${rounded.toLocaleString()} BP`;
+  return `${Math.abs(rounded).toLocaleString()} years future`;
+}
+function stageLabelForYear(yearBP) {
+  if (Number(yearBP) < 0) return "Future Earth";
+  if (yearBP > 773_900) return "Late MIS 19c";
+  if (yearBP > 756_900) return "MIS 19 transition";
+  return "Free Earth trajectory";
+}
 function signed(value, digits = 2) {
   const rounded = Number(value).toFixed(digits);
   return Number(value) > 0 ? `+${rounded}` : rounded.replace("-", "−");
@@ -177,7 +189,7 @@ function updateInterface(state, forceTexture = false, forceRegion = false) {
   const yearLabel = formatYear(state.yearBP);
   ui.year.textContent = yearLabel;
   ui.timelineDate.textContent = yearLabel;
-  ui.stage.textContent = state.yearBP > 773_900 ? "Late MIS 19c" : state.yearBP > 756_900 ? "MIS 19 transition" : "Free Earth trajectory";
+  ui.stage.textContent = state.stage ?? stageLabelForYear(state.yearBP);
   ui.co2.textContent = `${Math.round(state.co2)}`;
   ui.temperature.textContent = signed(state.temperatureAnomaly);
   ui.ice.textContent = iceDescription(state.iceIndex);
@@ -191,7 +203,8 @@ function updateInterface(state, forceTexture = false, forceRegion = false) {
     ? Math.max(0, Math.round(state.homininPopulationPersons)).toLocaleString()
     : ecosystemDescription(state.homininPopulationIndex);
   ui.range.value = Math.round(state.elapsedYears);
-  ui.range.style.setProperty("--progress", `${state.elapsedYears / 777_000 * 100}%`);
+  ui.range.max = String(TIMELINE_WINDOW_YEARS);
+  ui.range.style.setProperty("--progress", `${state.elapsedYears / TIMELINE_WINDOW_YEARS * 100}%`);
   ui.elapsed.textContent = state.elapsedYears < 1 ? "checkpoint" : `+${Math.round(state.elapsedYears).toLocaleString()} years`;
   if (isSourcesOpen()) updateJournal(state);
   const now = performance.now();
@@ -344,7 +357,7 @@ function setSeed(nextSeed) {
 }
 
 function seekTimeline(elapsedYears) {
-  const targetYears = clamp(Math.round(elapsedYears), 0, 777_000);
+  const targetYears = clamp(Math.round(elapsedYears), 0, TIMELINE_WINDOW_YEARS);
   simulation.clearPendingAdvance();
   deferredSimulationResult = null;
   ui.elapsed.textContent = "seeking…";
@@ -370,7 +383,7 @@ function applySimulationResult(result) {
   const state = result.state;
   const now = performance.now();
   currentState = state;
-  if (state.yearBP <= 0 && playing) setPlaying(false);
+  if (state.elapsedYears >= TIMELINE_WINDOW_YEARS && playing) setPlaying(false);
   const force = result.type !== "advance";
   if (force || !playing || now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
     profiler.measure("uiMs", () => updateInterface(state, force, force));
@@ -528,9 +541,11 @@ ui.surface.addEventListener("click", () => Promise.resolve(earthView.toggleSurfa
 ui.branch.addEventListener("click", () => setSeed(crypto.getRandomValues(new Uint32Array(1))[0]));
 ui.range.addEventListener("input", () => {
   const previewYear = 777_000 - Number(ui.range.value);
+  ui.year.textContent = formatYear(previewYear);
   ui.timelineDate.textContent = formatYear(previewYear);
+  ui.stage.textContent = stageLabelForYear(previewYear);
   ui.elapsed.textContent = "release to seek";
-  ui.range.style.setProperty("--progress", `${Number(ui.range.value) / 777_000 * 100}%`);
+  ui.range.style.setProperty("--progress", `${Number(ui.range.value) / TIMELINE_WINDOW_YEARS * 100}%`);
 });
 ui.range.addEventListener("change", () => { seekTimeline(Number(ui.range.value)); });
 ui.speedSelect.addEventListener("change", () => { setSpeed(Number(ui.speedSelect.value) || 1); });

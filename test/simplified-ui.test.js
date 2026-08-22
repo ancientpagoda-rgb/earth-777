@@ -20,10 +20,12 @@ test("timeline defaults to 1x while retaining higher speed choices", () => {
   assert.match(html, /<select id="speed-select"/);
   assert.match(html, /<option value="1" selected>1×<\/option>/);
   assert.match(html, /<option value="10000">10K×<\/option>/);
+  assert.match(html, /<input id="timeline-range" type="range" min="0" max="1554000"/);
   assert.doesNotMatch(html, /data-speed=/);
   assert.match(main, /let speed = 1;/);
   assert.match(main, /ui\.speedSelect\.addEventListener\("change"/);
   assert.match(main, /setSpeed\(Number\(ui\.speedSelect\.value\) \|\| 1\)/);
+  assert.match(main, /TIMELINE_WINDOW_YEARS/);
 });
 
 test("region selection opens one compact observation card", () => {

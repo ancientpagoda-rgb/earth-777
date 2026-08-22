@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CHECKPOINT_777 } from "../src/data/checkpoint-777.js";
+import { CHECKPOINT_777, TIMELINE_WINDOW_YEARS } from "../src/data/checkpoint-777.js";
 import { ORBITAL_ANCHOR, paleoForcingAt } from "../src/data/paleo-forcing.js";
 import {
   BIOGEOCHEMISTRY_BASELINE,
@@ -16,6 +16,7 @@ import { regionalState } from "../src/sim/regional-state.js";
 
 test("checkpoint carries the published MIS 19 boundary conditions", () => {
   assert.equal(CHECKPOINT_777.yearsBeforePresent, 777_000);
+  assert.equal(TIMELINE_WINDOW_YEARS, 1_554_000);
   assert.equal(CHECKPOINT_777.boundary.co2.value, 245);
   assert.equal(CHECKPOINT_777.boundary.methane.value, 631);
   assert.equal(CHECKPOINT_777.boundary.obliquity.value, 23.3);
@@ -263,6 +264,7 @@ test("geological stage advances instead of remaining frozen at the checkpoint la
   assert.equal(stageForYearBP(777_000), "Late MIS 19c");
   assert.equal(stageForYearBP(100_000), "Late Pleistocene");
   assert.equal(stageForYearBP(7_000), "Holocene");
+  assert.equal(stageForYearBP(-1), "Future Earth");
   assert.equal(new FreeEarthEngine(88).seek(770_000).stage, "Holocene");
 });
 

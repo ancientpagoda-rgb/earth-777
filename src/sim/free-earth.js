@@ -1,4 +1,4 @@
-import { checkpointState, CHECKPOINT_777 } from "../data/checkpoint-777.js";
+import { checkpointState, CHECKPOINT_777, TIMELINE_WINDOW_YEARS } from "../data/checkpoint-777.js";
 import { paleoForcingAt } from "../data/paleo-forcing.js";
 import { AdaptiveFidelityController } from "./AdaptiveFidelityController.js";
 import {
@@ -27,6 +27,7 @@ const round = (value, digits = 4) => Number(value.toFixed(digits));
 const relax = (current, target, dtYears, tauYears) => current + (target - current) * (1 - Math.exp(-dtYears / tauYears));
 
 export function stageForYearBP(yearBP) {
+  if (Number(yearBP) < 0) return "Future Earth";
   const year = Math.max(0, Number(yearBP) || 0);
   if (year > 773_900) return "Late MIS 19c";
   if (year > 756_900) return "MIS 19 transition";
@@ -87,7 +88,7 @@ export class FreeEarthEngine {
   fidelityDiagnostics() { return this.fidelity.diagnostics(); }
 
   advance(years) {
-    const target = clamp(Number(years) || 0, 0, CHECKPOINT_777.yearsBeforePresent);
+    const target = clamp(Number(years) || 0, 0, TIMELINE_WINDOW_YEARS);
     let remaining = target;
     while (remaining > 0) {
       const step = Math.min(25, remaining);
@@ -98,14 +99,14 @@ export class FreeEarthEngine {
   }
 
   seek(elapsedYears) {
-    const target = clamp(Math.round(elapsedYears), 0, CHECKPOINT_777.yearsBeforePresent);
+    const target = clamp(Math.round(elapsedYears), 0, TIMELINE_WINDOW_YEARS);
     if (target < this.state.elapsedYears) this.reset(this.seed);
     return this.advance(target - this.state.elapsedYears);
   }
 
   _step(dt) {
     const state = this.state;
-    state.elapsedYears = Math.min(CHECKPOINT_777.yearsBeforePresent, state.elapsedYears + dt);
+    state.elapsedYears = Math.min(TIMELINE_WINDOW_YEARS, state.elapsedYears + dt);
     state.yearBP = CHECKPOINT_777.yearsBeforePresent - state.elapsedYears;
     state.stage = stageForYearBP(state.yearBP);
 

@@ -103,7 +103,7 @@ export class EarthSystemHydrology extends MassConservingHydrology {
     return Object.freeze({
       ...globalState,
       elapsedYears,
-      yearBP: Math.max(0, 777_000 - elapsedYears),
+      yearBP: 777_000 - elapsedYears,
       temperatureAnomaly: quantize(globalState.temperatureAnomaly, 0.1),
       oceanTemperatureAnomaly: quantize(globalState.oceanTemperatureAnomaly ?? globalState.temperatureAnomaly, 0.1),
       iceIndex: quantize(globalState.iceIndex, 0.01),

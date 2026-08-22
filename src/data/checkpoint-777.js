@@ -37,6 +37,8 @@ export const CHECKPOINT_777 = Object.freeze({
   })
 });
 
+export const TIMELINE_WINDOW_YEARS = CHECKPOINT_777.yearsBeforePresent * 2;
+
 export function checkpointState() {
   const b = CHECKPOINT_777.boundary;
   return {
