@@ -24,10 +24,12 @@ export function requestEarthRaster(view, state) {
     if (version !== view.earthVersion || message.type === "error") return;
     applyWhenViewSettles(view, "earthVersion", version, () => {
       const next = textureFromRaster(message);
-      view.earthMaterial.map?.dispose();
+      const previous = view.earthMaterial.map;
       view.earthMaterial.map = next;
       view.earthMaterial.color.setHex(0xffffff);
       view.earthMaterial.needsUpdate = true;
+      view.surfacePlanetaryFarField?.setTexture?.(next);
+      previous?.dispose();
       view.lastTextureYear = state.yearBP;
       view.invalidate();
     });
