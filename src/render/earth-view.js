@@ -51,6 +51,7 @@ export class EarthView {
     this.surfaceControls = null;
     this.terrain = null;
     this.surfaceWater = null;
+    this.surfacePlanetaryFarField = null;
     this.continuousUntilMs = 0;
     this.lastRenderMs = 0;
     this.lastFrameDeltaMs = 16.7;
@@ -111,6 +112,8 @@ export class EarthView {
         this.surfaceControls = surface.controls;
         this.terrain = surface.terrain;
         this.surfaceWater = surface.water;
+        this.surfacePlanetaryFarField = surface.planetaryFarField ?? null;
+        this.surfacePlanetaryFarField?.setTexture?.(this.earthMaterial?.map ?? null);
         this._wireControls(this.surfaceControls, "surface");
         this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
         this.terrain.setEarthSystemState?.(this.lastState, this.lastState.seed, false);
@@ -404,6 +407,7 @@ export class EarthView {
     this.resizeObserver?.disconnect();
     this.rasterWorker.dispose();
     if (this.terrain) this.terrain.onPlanetaryRebase = null;
+    this.surfacePlanetaryFarField = null;
     this.terrain?.dispose?.();
     this.controls.dispose();
     this.surfaceControls?.dispose?.();
