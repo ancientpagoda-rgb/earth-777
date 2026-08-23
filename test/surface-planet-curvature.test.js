@@ -8,7 +8,7 @@ import {
 } from "../src/render/SurfacePlanetCurvature.js";
 
 test("surface curvature policy is explicit and stable", () => {
-  assert.equal(SURFACE_CURVATURE_POLICY, "distance-blended-local-spherical-cap-v1");
+  assert.equal(SURFACE_CURVATURE_POLICY, "local-detail-to-georeferenced-full-earth-v2");
 });
 
 test("curvature stays flat at ordinary regional distance and reaches full strength far out", () => {
