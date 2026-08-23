@@ -1,5 +1,5 @@
 export const EARTH_MEAN_RADIUS_KM = 6371.0088;
-export const SURFACE_CURVATURE_POLICY = "distance-blended-local-spherical-cap-v1";
+export const SURFACE_CURVATURE_POLICY = "local-detail-to-georeferenced-full-earth-v2";
 
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
 

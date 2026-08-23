@@ -5,6 +5,7 @@ import {
   SURFACE_CURVATURE_POLICY,
   surfaceCurvatureBlend
 } from "./SurfacePlanetCurvature.js";
+import { createSurfacePlanetFarField } from "./SurfacePlanetFarField.js";
 
 export { SURFACE_NAVIGATION_POLICY };
 
@@ -18,9 +19,14 @@ export function createSurfacePresentation(canvas) {
   // forcing a return to the globe. Keep the camera, sky and clip plane large
   // enough that the extra zoom range remains a normal surface presentation.
   surface.controls.maxDistance = SURFACE_MAX_DISTANCE_KM;
-  surface.camera.far = 1800;
+  surface.camera.far = 4000;
   surface.camera.updateProjectionMatrix();
-  surface.sky?.scale?.setScalar?.(900);
+  surface.sky?.scale?.setScalar?.(5000);
+
+  // The local reconstruction is only the high-detail foreground. Continue it
+  // with the same georeferenced Earth used by globe mode, tangent beneath the
+  // selection, so distant terrain reaches a curved planetary horizon.
+  const planetaryFarField = createSurfacePlanetFarField(surface.scene);
 
   // A larger camera range needs a wider coarse terrain window or the user would
   // simply reveal the edge of the local map. Expand only the regional band from
@@ -45,14 +51,13 @@ export function createSurfacePresentation(canvas) {
     };
   }
 
-  // Preserve the familiar flat local reconstruction at normal regional scales,
-  // then progressively bend only the rendered aerial terrain toward Earth's mean
-  // sphere as the camera moves into the newly available high-altitude range.
-  // Science, hydrology, streaming keys and floating-origin coordinates stay flat
-  // and deterministic; this is strictly a presentation transform in the shader.
+  // Bend the rendered regional terrain onto Earth's mean sphere while keeping
+  // science, hydrology and streaming coordinates deterministic in their tangent
+  // frame. The far field supplies the rest of that same sphere beyond the detail.
   let curvatureDiagnostics = Object.freeze({
     policy: SURFACE_CURVATURE_POLICY,
-    strength: 0,
+    strength: 1,
+    cameraStrength: 0,
     distanceKm: 0,
     centerXKm: 0,
     centerZKm: 0,
@@ -62,7 +67,7 @@ export function createSurfacePresentation(canvas) {
   const applyPlanetCurvature = () => {
     const target = surface.controls.target;
     const distanceKm = surface.camera.position.distanceTo(target);
-    const strength = surfaceCurvatureBlend(distanceKm);
+    const cameraStrength = surfaceCurvatureBlend(distanceKm);
     const materials = new Set();
     for (const mesh of surface.terrain.chunks?.values?.() ?? []) {
       const material = mesh?.material;
@@ -70,18 +75,19 @@ export function createSurfacePresentation(canvas) {
       if (typeof setter !== "function" || materials.has(material)) continue;
       materials.add(material);
       setter({
-        centerX: Number(target.x) || 0,
-        centerZ: Number(target.z) || 0,
-        strength,
+        centerX: 0,
+        centerZ: 0,
+        strength: 1,
         radiusKm: EARTH_MEAN_RADIUS_KM
       });
     }
     curvatureDiagnostics = Object.freeze({
       policy: SURFACE_CURVATURE_POLICY,
-      strength,
+      strength: 1,
+      cameraStrength,
       distanceKm,
-      centerXKm: Number(target.x) || 0,
-      centerZKm: Number(target.z) || 0,
+      centerXKm: 0,
+      centerZKm: 0,
       radiusKm: EARTH_MEAN_RADIUS_KM,
       materialCount: materials.size
     });
@@ -90,7 +96,9 @@ export function createSurfacePresentation(canvas) {
   const baseTerrainUpdate = surface.terrain.update.bind(surface.terrain);
   surface.terrain.update = (cameraPosition) => {
     applyPlanetCurvature();
-    return baseTerrainUpdate(cameraPosition);
+    const result = baseTerrainUpdate(cameraPosition);
+    planetaryFarField.setOrigin(surface.terrain.origin);
+    return result;
   };
 
   const navigation = installSurfaceNavigationControls({
@@ -115,6 +123,7 @@ export function createSurfacePresentation(canvas) {
     ...baseDiagnostics(),
     surfaceNavigation: navigation.diagnostics(),
     surfaceCurvature: curvatureDiagnostics,
+    planetaryFarField: planetaryFarField.diagnostics(),
     surfaceZoom: Object.freeze({
       maxDistanceKm: SURFACE_MAX_DISTANCE_KM,
       regionalStreamRadius: REGIONAL_STREAM_RADIUS,
@@ -129,8 +138,9 @@ export function createSurfacePresentation(canvas) {
       else globalThis.__earth777SurfaceOwnsGamepad = previousGamepadOwnership;
     }
     navigation.dispose();
+    planetaryFarField.dispose();
     baseDispose();
   };
 
-  return { ...surface, navigation };
+  return { ...surface, navigation, planetaryFarField };
 }
