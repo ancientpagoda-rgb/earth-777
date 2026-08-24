@@ -90,7 +90,7 @@ test("regional refinement refreshes the full visible terrain window", () => {
 test("playback epochs refresh the camera core so evolution can recur", () => {
   const source = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
   assert.match(source, /PLAYBACK_TERRAIN_REFRESH_RADIUS = 1/);
-  assert.match(source, /radius: PLAYBACK_TERRAIN_REFRESH_RADIUS/);
+  assert.match(source, /radius: this\.playbackSpeed >= 1_000 \? 0 : PLAYBACK_TERRAIN_REFRESH_RADIUS/);
   assert.match(source, /reason: "playback-epoch"/);
 });
 

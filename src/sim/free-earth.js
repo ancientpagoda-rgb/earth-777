@@ -87,11 +87,12 @@ export class FreeEarthEngine {
   setObserverRelevance(observerRelevance = {}) { this.fidelity.setObserverRelevance(observerRelevance); return this.fidelityDiagnostics(); }
   fidelityDiagnostics() { return this.fidelity.diagnostics(); }
 
-  advance(years) {
+  advance(years, { maxStepYears = 25 } = {}) {
     const target = clamp(Number(years) || 0, 0, TIMELINE_WINDOW_YEARS);
+    const stepLimit = clamp(Number(maxStepYears) || 25, 25, 250);
     let remaining = target;
     while (remaining > 0) {
-      const step = Math.min(25, remaining);
+      const step = Math.min(stepLimit, remaining);
       this._step(step);
       remaining -= step;
     }
