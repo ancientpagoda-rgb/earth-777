@@ -93,3 +93,11 @@ test("regional refinement requests broad patches retained by the worker atlas", 
   assert.match(workerSource, /REGIONAL_TERRAIN_ATLAS_LIMIT = 6/);
   assert.match(workerSource, /regionalTerrainPatches\.push\(patch\)/);
 });
+
+test("regional refinement stages a complete terrain generation before swapping it onscreen", () => {
+  const source = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
+  assert.match(source, /refreshBatchId = \+\+this\.terrainRefreshSerial/);
+  assert.match(source, /batch\.meshes\.size < batch\.expectedKeys\.size/);
+  assert.match(source, /_stageTerrainRefreshMesh\(candidate, mesh\)/);
+  assert.match(source, /pendingAtomicRefreshes/);
+});
