@@ -44,7 +44,10 @@ let regionPanelPromise = null;
 let regionRenderVersion = 0;
 let regionalSciencePromise = null;
 let regionalScienceStage = "empty";
-const SIMULATION_INTERVAL_MS = 100;
+// Four updates per second keeps the timeline visually continuous while letting
+// 100x playback advance in the engine's native 25-year integration step. The
+// previous 100 ms cadence forced ten undersized worker jobs per second.
+const SIMULATION_INTERVAL_MS = 250;
 const UI_UPDATE_INTERVAL_MS = 250;
 const REGION_UPDATE_INTERVAL_MS = 5_000;
 const PERF_HUD_INTERVAL_MS = 400;

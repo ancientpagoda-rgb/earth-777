@@ -136,12 +136,15 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
     };
   }
 
-  _refreshSurfaceContext() {
+  _refreshSurfaceContext({ refreshTerrain = true } = {}) {
     if (!this.surfaceContextActive || !this.origin) return false;
     const context = this._surfaceContext(this.origin.latitude, this.origin.longitude, this.earthState);
     this.lastSurfaceContext = context;
     this.surfaceScienceStatus = context.scienceCoupled ? "science-coupled" : "provisional";
-    this.setGeomorphologyPatch(context.geomorphologyPatch);
+    // Ecology and hydrology may advance during fast-forward without forcing a
+    // complete terrain-window rebuild. The exact geomorphology is committed
+    // when playback pauses or a forced state change occurs.
+    if (refreshTerrain) this.setGeomorphologyPatch(context.geomorphologyPatch);
     const localContext = { latitude: this.origin.latitude, longitude: this.origin.longitude, ...context };
     this.surfaceEcology.setContext(localContext);
     this.surfaceFauna.setContext(localContext);
@@ -150,9 +153,9 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
 
   currentWaterSystem() { return this.lastSurfaceContext?.riverSample ?? null; }
 
-  setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive) {
+  setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive, { refreshTerrain = true } = {}) {
     super.setEarthSystemState(state, seed);
-    if (refreshContext && this.surfaceContextActive) this._refreshSurfaceContext();
+    if (refreshContext && this.surfaceContextActive) this._refreshSurfaceContext({ refreshTerrain });
   }
 
   setOrigin(latitude, longitude) {

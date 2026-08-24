@@ -14,6 +14,8 @@ const DIAGNOSTICS_INTERVAL_MS = 250;
 const INTERACTION_SETTLE_MS = 900;
 const SURFACE_PUMP_ACTIVE_MS = 0.9;
 const SURFACE_PUMP_IDLE_MS = 2.3;
+const SURFACE_STATE_REFRESH_YEARS = 250;
+const SURFACE_STATE_REFRESH_INTERVAL_MS = 3_000;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
@@ -56,6 +58,8 @@ export class EarthView {
     this.lastRenderMs = 0;
     this.lastFrameDeltaMs = 16.7;
     this.lastPerformanceSignature = "";
+    this.lastTerrainStateYear = Number.NaN;
+    this.lastTerrainStateMs = -Infinity;
     this.diagnosticsCache = null;
     this.diagnosticsCacheAt = -Infinity;
     this.rasterWorker = new RasterTaskClient();
@@ -116,7 +120,7 @@ export class EarthView {
         this.surfacePlanetaryFarField?.setTexture?.(this.earthMaterial?.map ?? null);
         this._wireControls(this.surfaceControls, "surface");
         this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
-        this.terrain.setEarthSystemState?.(this.lastState, this.lastState.seed, false);
+        this._applyTerrainState(this.lastState, false);
         this.terrain.onPlanetaryRebase = (event) => this._applySurfaceGeographicFocus(event?.focus ?? event?.origin);
         this.applyPerformanceSettings(true);
         this.resize();
@@ -148,7 +152,18 @@ export class EarthView {
   invalidate() { this.onInvalidate?.(); }
   setInvalidateCallback(callback) { this.onInvalidate = callback; }
   isInteracting(now = performance.now()) { return this.interacting || now < this.continuousUntilMs || this.descent != null || this.surfaceEntry != null; }
-  setSimulationPlaying(playing) { this.simulationPlaying = Boolean(playing); if (playing) this.invalidate(); }
+  setSimulationPlaying(playing) {
+    const next = Boolean(playing);
+    const stopped = this.simulationPlaying && !next;
+    this.simulationPlaying = next;
+    // Fast-forward holds the expensive local terrain context between visual
+    // checkpoints. Commit the exact final state as soon as playback stops.
+    if (stopped && this.terrain && this.lastState) {
+      this._applyTerrainState(this.lastState, this.mode !== "globe");
+      if (this.mode === "surface" && this.terrain.origin) this.updateSurfaceWater();
+    }
+    if (next || stopped) this.invalidate();
+  }
   focusSelection() { return this.descendToSelection(); }
   toggleSurface() {
     if (this.surfaceTransitionPromise) return this.surfaceTransitionPromise;
@@ -247,14 +262,32 @@ export class EarthView {
     if (refresh) this.updateState(this.lastState, true, this.spatialDetail);
   }
 
+  _terrainStateRefreshDue(state, force, now) {
+    if (!this.terrain) return false;
+    if (force || !this.simulationPlaying || !Number.isFinite(this.lastTerrainStateYear)) return true;
+    const yearDelta = Math.abs((Number(state?.yearBP) || 0) - this.lastTerrainStateYear);
+    return yearDelta >= SURFACE_STATE_REFRESH_YEARS
+      && now - this.lastTerrainStateMs >= SURFACE_STATE_REFRESH_INTERVAL_MS;
+  }
+
+  _applyTerrainState(state, refreshContext, refreshTerrain = true, now = performance.now()) {
+    if (!this.terrain || !state) return false;
+    this.terrain.setEarthSystemState?.(state, state.seed, refreshContext, { refreshTerrain });
+    this.lastTerrainStateYear = Number(state.yearBP) || 0;
+    this.lastTerrainStateMs = now;
+    return true;
+  }
+
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
     this.lastState = state;
     this.spatialDetail = clamp(Number(spatialDetail) || 0.35, 0, 1);
     this.terrain?.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
     const needsSurfaceContext = this.mode !== "globe";
-    this.terrain?.setEarthSystemState?.(state, state.seed, needsSurfaceContext);
-    this.applyPerformanceSettings(false);
     const now = performance.now();
+    if (this._terrainStateRefreshDue(state, force, now)) {
+      this._applyTerrainState(state, needsSurfaceContext, force || !this.simulationPlaying, now);
+    }
+    this.applyPerformanceSettings(false);
     if ((force || Math.abs(state.yearBP - this.lastTextureYear) >= EARTH_REFRESH_YEARS) && !this.interacting && (force || now - this.lastEarthRefreshMs >= EARTH_INTERVAL_MS)) this._requestEarthRaster(state);
     if ((force || Math.abs(state.yearBP - this.lastCloudYear) >= CLOUD_REFRESH_YEARS) && !this.interacting && (force || now - this.lastCloudRefreshMs >= CLOUD_INTERVAL_MS)) this._requestCloudRaster(state);
     if (this.mode === "surface" && this.terrain?.origin) this.updateSurfaceWater();
