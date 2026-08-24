@@ -120,7 +120,7 @@ export class EarthView {
         this.surfacePlanetaryFarField?.setTexture?.(this.earthMaterial?.map ?? null);
         this._wireControls(this.surfaceControls, "surface");
         this.terrain.setScienceProviders?.({ hydrology: this.hydroClimate, vegetation: this.vegetation, spatialDetail: this.spatialDetail });
-        this._applyTerrainState(this.lastState, false);
+        this._applyTerrainState(this.lastState, { refreshContext: false });
         this.terrain.onPlanetaryRebase = (event) => this._applySurfaceGeographicFocus(event?.focus ?? event?.origin);
         this.applyPerformanceSettings(true);
         this.resize();
@@ -159,7 +159,7 @@ export class EarthView {
     // Fast-forward holds the expensive local terrain context between visual
     // checkpoints. Commit the exact final state as soon as playback stops.
     if (stopped && this.terrain && this.lastState) {
-      this._applyTerrainState(this.lastState, this.mode !== "globe");
+      this._applyTerrainState(this.lastState, { refreshContext: this.mode !== "globe" });
       if (this.mode === "surface" && this.terrain.origin) this.updateSurfaceWater();
     }
     if (next || stopped) this.invalidate();
@@ -270,9 +270,14 @@ export class EarthView {
       && now - this.lastTerrainStateMs >= SURFACE_STATE_REFRESH_INTERVAL_MS;
   }
 
-  _applyTerrainState(state, refreshContext, refreshTerrain = true, now = performance.now()) {
+  _applyTerrainState(state, {
+    refreshContext = false,
+    refreshTerrain = true,
+    refreshTopography = true,
+    now = performance.now()
+  } = {}) {
     if (!this.terrain || !state) return false;
-    this.terrain.setEarthSystemState?.(state, state.seed, refreshContext, { refreshTerrain });
+    this.terrain.setEarthSystemState?.(state, state.seed, refreshContext, { refreshTerrain, refreshTopography });
     this.lastTerrainStateYear = Number(state.yearBP) || 0;
     this.lastTerrainStateMs = now;
     return true;
@@ -285,7 +290,13 @@ export class EarthView {
     const needsSurfaceContext = this.mode !== "globe";
     const now = performance.now();
     if (this._terrainStateRefreshDue(state, force, now)) {
-      this._applyTerrainState(state, needsSurfaceContext, force || !this.simulationPlaying, now);
+      const refreshExactTerrain = force || !this.simulationPlaying;
+      this._applyTerrainState(state, {
+        refreshContext: needsSurfaceContext,
+        refreshTerrain: refreshExactTerrain,
+        refreshTopography: refreshExactTerrain,
+        now
+      });
     }
     this.applyPerformanceSettings(false);
     if ((force || Math.abs(state.yearBP - this.lastTextureYear) >= EARTH_REFRESH_YEARS) && !this.interacting && (force || now - this.lastEarthRefreshMs >= EARTH_INTERVAL_MS)) this._requestEarthRaster(state);

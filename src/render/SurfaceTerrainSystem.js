@@ -153,8 +153,20 @@ export class SurfaceTerrainSystem extends TerrainChunkManager {
 
   currentWaterSystem() { return this.lastSurfaceContext?.riverSample ?? null; }
 
-  setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive, { refreshTerrain = true } = {}) {
-    super.setEarthSystemState(state, seed);
+  setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive, {
+    refreshTerrain = true,
+    refreshTopography = true
+  } = {}) {
+    if (refreshTopography) {
+      super.setEarthSystemState(state, seed);
+    } else {
+      // Keep the current topographic epoch onscreen during fast-forward. Calling
+      // TerrainChunkManager here would clear every visible chunk whenever the
+      // 2,500-year terrain band changes, exposing the flat planetary fallback
+      // until the full replacement window finished streaming.
+      this.earthState = state ?? null;
+      this.branchSeed = Number(seed) >>> 0;
+    }
     if (refreshContext && this.surfaceContextActive) this._refreshSurfaceContext({ refreshTerrain });
   }
 

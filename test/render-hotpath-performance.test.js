@@ -33,7 +33,7 @@ test("surface science context is inactive while globe-only rendering does not ne
   assert.match(surfaceTerrain, /setSurfaceContextActive\(active/);
   assert.match(surfaceTerrain, /if \(!this\.surfaceContextActive \|\| !this\.origin\) return false/);
   assert.match(earthView, /const needsSurfaceContext = this\.mode !== "globe"/);
-  assert.match(earthView, /setEarthSystemState\?\.\(state, state\.seed, refreshContext, \{ refreshTerrain \}\)/);
+  assert.match(earthView, /setEarthSystemState\?\.\(state, state\.seed, refreshContext, \{ refreshTerrain, refreshTopography \}\)/);
 });
 
 test("surface water reuses cached hydrology context before issuing a fallback query", () => {
@@ -100,12 +100,19 @@ test("fast-forward batches worker advances and throttles expensive surface-state
   assert.match(earthView, /SURFACE_STATE_REFRESH_INTERVAL_MS = 3_000/);
   assert.match(earthView, /this\._terrainStateRefreshDue\(state, force, now\)/);
   assert.match(earthView, /yearDelta >= SURFACE_STATE_REFRESH_YEARS/);
-  assert.match(earthView, /force \|\| !this\.simulationPlaying, now/);
+  assert.match(earthView, /const refreshExactTerrain = force \|\| !this\.simulationPlaying/);
   assert.match(surfaceTerrain, /if \(refreshTerrain\) this\.setGeomorphologyPatch/);
+});
+
+test("fast-forward preserves the current topography until an exact refresh is safe", () => {
+  assert.match(earthView, /refreshTopography: refreshExactTerrain/);
+  assert.match(surfaceTerrain, /if \(refreshTopography\) \{/);
+  assert.match(surfaceTerrain, /this\.earthState = state \?\? null/);
+  assert.match(surfaceTerrain, /2,500-year terrain band changes/);
 });
 
 test("pausing fast-forward commits the exact final surface state", () => {
   assert.match(earthView, /const stopped = this\.simulationPlaying && !next/);
-  assert.match(earthView, /this\._applyTerrainState\(this\.lastState, this\.mode !== "globe"\)/);
+  assert.match(earthView, /this\._applyTerrainState\(this\.lastState, \{ refreshContext: this\.mode !== "globe" \}\)/);
   assert.match(earthView, /this\.mode === "surface"[\s\S]*this\.updateSurfaceWater\(\)/);
 });
