@@ -30,6 +30,18 @@ test("regional framing derives camera distance from footprint and viewport", () 
   assert.ok(frame.position.y > Math.abs(frame.position.z) * 2, "regional entry should be predominantly overhead");
 });
 
+test("aerial scales exaggerate relief while close scales remain restrained", () => {
+  const regional = SURFACE_SCALE_BANDS.find((band) => band.id === "regional");
+  const landscape = SURFACE_SCALE_BANDS.find((band) => band.id === "landscape");
+  const ecology = SURFACE_SCALE_BANDS.find((band) => band.id === "ecology");
+  const ground = SURFACE_SCALE_BANDS.find((band) => band.id === "ground");
+  assert.ok(regional.verticalScale >= 2, `regional relief should remain readable, got ${regional.verticalScale}x`);
+  assert.ok(landscape.verticalScale > 1, `landscape relief should remain readable, got ${landscape.verticalScale}x`);
+  assert.ok(regional.verticalScale > landscape.verticalScale);
+  assert.ok(landscape.verticalScale > ecology.verticalScale);
+  assert.ok(ecology.verticalScale > ground.verticalScale);
+});
+
 test("local branch lakes are suppressed at regional and landscape scale", () => {
   for (const bandId of ["regional", "landscape"]) {
     const policy = surfaceWaterPolicy({
