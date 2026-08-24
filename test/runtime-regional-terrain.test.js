@@ -5,8 +5,10 @@ import {
   buildRegionalTerrainUrl,
   parseRegionalTerrainAscii,
   regionalTerrainFeatherWeightAt,
+  regionalTerrainResidualAtPatches,
   regionalTerrainValueAt
 } from "../src/reconstruction/RuntimeRegionalTerrainPatch.js";
+import { interpolatedEtopoBedrockElevationAt } from "../src/reconstruction/ModernTerrainAnchorSelector.js";
 
 const GRID = `ncols 2\nnrows 2\nxllcorner 10\nyllcorner 20\ncellsize 1\nNODATA_value -9999\n100 200\n300 400\n`;
 
@@ -44,6 +46,26 @@ test("runtime regional refinement fades to zero at patch boundaries", () => {
   assert.ok(regionalTerrainFeatherWeightAt(patch, 0.04, 0.5) < regionalTerrainFeatherWeightAt(patch, 0.5, 0.5));
 });
 
+test("overlapping retained terrain patches blend without doubling relief", () => {
+  const latitude = 1;
+  const longitude = 1;
+  const compact = interpolatedEtopoBedrockElevationAt(latitude, longitude);
+  const patch = {
+    values: new Float32Array(4).fill(compact + 240),
+    ncols: 2,
+    nrows: 2,
+    cellsizeDegrees: 0.01,
+    south: 0,
+    north: 2,
+    west: 0,
+    east: 2
+  };
+  const one = regionalTerrainResidualAtPatches([patch], latitude, longitude);
+  const overlap = regionalTerrainResidualAtPatches([patch, patch], latitude, longitude);
+  assert.ok(Math.abs(one - 240) < 0.01);
+  assert.ok(Math.abs(overlap - one) < 0.01);
+});
+
 test("runtime regional terrain URL requests a complete unmasked surface", () => {
   const url = new URL(buildRegionalTerrainUrl(8.8, -68.5, { spanDegrees: 1.5, resolutionMeters: 400 }));
   assert.equal(url.protocol, "https:");
@@ -62,4 +84,12 @@ test("regional refinement refreshes the full visible terrain window", () => {
   assert.match(refresh, /for \(let dz = -this\.radius; dz <= this\.radius/);
   assert.match(refresh, /for \(let dx = -this\.radius; dx <= this\.radius/);
   assert.doesNotMatch(refresh, /_chunkOverlapsRegionalTerrainPatch/);
+});
+
+test("regional refinement requests broad patches retained by the worker atlas", () => {
+  const terrainSource = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
+  const workerSource = readFileSync(new URL("../src/render/surface-compute.worker.js", import.meta.url), "utf8");
+  assert.match(terrainSource, /spanDegrees: 3\.0, resolutionMeters: 900/);
+  assert.match(workerSource, /REGIONAL_TERRAIN_ATLAS_LIMIT = 6/);
+  assert.match(workerSource, /regionalTerrainPatches\.push\(patch\)/);
 });
