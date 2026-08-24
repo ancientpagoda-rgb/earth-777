@@ -46,6 +46,8 @@ test("regional detail smoothly blends before its finite square border and raster
   assert.match(aerial, /aerialCurvatureBlend = smoothstep\(110\.0, 300\.0/);
   assert.match(aerial, /diffuseColor\.a \*= aerialDetailCoverage/);
   assert.doesNotMatch(aerial, /aerialDither/);
+  assert.match(aerial, /"#include <alphatest_fragment>",[\s\S]*diffuseColor\.a \*= aerialDetailCoverage/);
+  assert.doesNotMatch(aerial, /"#include <dithering_fragment>",[\s\S]*aerialDetailCoverage/);
   assert.match(earthView, /surfacePlanetaryFarField\?\.setTexture/);
   assert.match(rasterRefresh, /surfacePlanetaryFarField\?\.setTexture/);
 });
