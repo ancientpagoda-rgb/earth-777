@@ -8,6 +8,7 @@ import {
   geographicSurfaceFrame,
   globalToSurfaceMatrix
 } from "../src/render/SurfacePlanetFarField.js";
+import { surfaceNearClipKm } from "../src/render/SurfacePresentation.js";
 
 const closeVector = (actual, expected, epsilon = 1e-9) => {
   assert.ok(actual.distanceTo(expected) < epsilon, `${actual.toArray()} != ${expected.toArray()}`);
@@ -25,6 +26,7 @@ test("far field is a full georeferenced Earth tangent beneath the local origin",
   const scene = new THREE.Scene();
   const farField = createSurfacePlanetFarField(scene, { radiusKm: 100, tangentInsetKm: 0.05, widthSegments: 32, heightSegments: 16 });
   assert.equal(farField.mesh.userData.presentation, SURFACE_PLANET_FAR_FIELD_POLICY);
+  assert.equal(farField.material.depthWrite, false);
   assert.equal(farField.mesh.visible, false);
   assert.equal(farField.setOrigin({ latitude: 0, longitude: 0 }), true);
   assert.equal(farField.mesh.visible, true);
@@ -36,13 +38,22 @@ test("far field is a full georeferenced Earth tangent beneath the local origin",
   assert.equal(scene.children.includes(farField.mesh), false);
 });
 
-test("regional detail dissolves before its finite square border and raster updates reach the far Earth", () => {
+test("regional detail smoothly blends before its finite square border and raster updates reach the far Earth", () => {
   const aerial = readFileSync(new URL("../src/render/RegionalAerialMaterial.js", import.meta.url), "utf8");
   const earthView = readFileSync(new URL("../src/render/earth-view.js", import.meta.url), "utf8");
   const rasterRefresh = readFileSync(new URL("../src/render/RasterRefresh.js", import.meta.url), "utf8");
   assert.match(aerial, /aerialDetailCoverage/);
   assert.match(aerial, /aerialCurvatureBlend = smoothstep\(110\.0, 300\.0/);
-  assert.match(aerial, /if \(aerialDither > aerialDetailCoverage\) discard/);
+  assert.match(aerial, /diffuseColor\.a \*= aerialDetailCoverage/);
+  assert.doesNotMatch(aerial, /aerialDither/);
   assert.match(earthView, /surfacePlanetaryFarField\?\.setTexture/);
   assert.match(rasterRefresh, /surfacePlanetaryFarField\?\.setTexture/);
+});
+
+test("surface near plane gains depth precision only for distant aerial views", () => {
+  assert.equal(surfaceNearClipKm(0), 0.00005);
+  assert.equal(surfaceNearClipKm(2), 0.00005);
+  assert.ok(surfaceNearClipKm(90) > 0.02);
+  assert.equal(surfaceNearClipKm(180), 0.05);
+  assert.equal(surfaceNearClipKm(420), 0.05);
 });
