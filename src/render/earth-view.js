@@ -16,6 +16,8 @@ const SURFACE_PUMP_ACTIVE_MS = 0.9;
 const SURFACE_PUMP_IDLE_MS = 2.3;
 const SURFACE_STATE_REFRESH_YEARS = 250;
 const SURFACE_STATE_REFRESH_INTERVAL_MS = 3_000;
+const SURFACE_TOPOGRAPHY_REFRESH_YEARS = 500;
+const SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 6_000;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
@@ -60,6 +62,8 @@ export class EarthView {
     this.lastPerformanceSignature = "";
     this.lastTerrainStateYear = Number.NaN;
     this.lastTerrainStateMs = -Infinity;
+    this.lastTopographyStateYear = Number.NaN;
+    this.lastTopographyStateMs = -Infinity;
     this.diagnosticsCache = null;
     this.diagnosticsCacheAt = -Infinity;
     this.rasterWorker = new RasterTaskClient();
@@ -270,6 +274,13 @@ export class EarthView {
       && now - this.lastTerrainStateMs >= SURFACE_STATE_REFRESH_INTERVAL_MS;
   }
 
+  _playbackTopographyRefreshDue(state, now) {
+    if (!this.simulationPlaying || !Number.isFinite(this.lastTopographyStateYear)) return false;
+    const yearDelta = Math.abs((Number(state?.yearBP) || 0) - this.lastTopographyStateYear);
+    return yearDelta >= SURFACE_TOPOGRAPHY_REFRESH_YEARS
+      && now - this.lastTopographyStateMs >= SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS;
+  }
+
   _applyTerrainState(state, {
     refreshContext = false,
     refreshTerrain = true,
@@ -277,10 +288,14 @@ export class EarthView {
     now = performance.now()
   } = {}) {
     if (!this.terrain || !state) return false;
-    this.terrain.setEarthSystemState?.(state, state.seed, refreshContext, { refreshTerrain, refreshTopography });
+    const topographyAccepted = this.terrain.setEarthSystemState?.(state, state.seed, refreshContext, { refreshTerrain, refreshTopography }) !== false;
     this.lastTerrainStateYear = Number(state.yearBP) || 0;
     this.lastTerrainStateMs = now;
-    return true;
+    if (refreshTopography && topographyAccepted) {
+      this.lastTopographyStateYear = Number(state.yearBP) || 0;
+      this.lastTopographyStateMs = now;
+    }
+    return topographyAccepted;
   }
 
   updateState(state, force = false, spatialDetail = this.spatialDetail) {
@@ -291,10 +306,11 @@ export class EarthView {
     const now = performance.now();
     if (this._terrainStateRefreshDue(state, force, now)) {
       const refreshExactTerrain = force || !this.simulationPlaying;
+      const refreshPlaybackTopography = this._playbackTopographyRefreshDue(state, now);
       this._applyTerrainState(state, {
         refreshContext: needsSurfaceContext,
         refreshTerrain: refreshExactTerrain,
-        refreshTopography: refreshExactTerrain,
+        refreshTopography: refreshExactTerrain || refreshPlaybackTopography,
         now
       });
     }
