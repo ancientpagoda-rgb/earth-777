@@ -60,6 +60,7 @@ ui.elapsed.textContent = "initializing…";
 
 const simulation = new SimulationWorkerClient({
   seed,
+  maxAdvanceChunkYears: 5_000,
   onState: handleSimulationResult,
   onFidelity(nextFidelity) {
     if (nextFidelity) fidelityDiagnostics = nextFidelity;
@@ -328,6 +329,8 @@ function setPlaying(next) {
 function setSpeed(nextSpeed) {
   speed = nextSpeed;
   ui.speedSelect.value = String(nextSpeed);
+  simulation.setPlaybackSpeed(nextSpeed);
+  earthView?.setSimulationSpeed(nextSpeed);
 }
 
 function stepSpeed(direction) {
@@ -389,7 +392,8 @@ function applySimulationResult(result) {
   currentState = state;
   if (state.elapsedYears >= TIMELINE_WINDOW_YEARS && playing) setPlaying(false);
   const force = result.type !== "advance";
-  if (force || !playing || now - lastUiUpdate >= UI_UPDATE_INTERVAL_MS) {
+  const uiUpdateInterval = speed >= 1_000 ? UI_UPDATE_INTERVAL_MS * 2 : UI_UPDATE_INTERVAL_MS;
+  if (force || !playing || now - lastUiUpdate >= uiUpdateInterval) {
     profiler.measure("uiMs", () => updateInterface(state, force, force));
     lastUiUpdate = now;
   }

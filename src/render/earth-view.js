@@ -18,6 +18,9 @@ const SURFACE_STATE_REFRESH_YEARS = 250;
 const SURFACE_STATE_REFRESH_INTERVAL_MS = 3_000;
 const SURFACE_TOPOGRAPHY_REFRESH_YEARS = 400;
 const SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 4_000;
+const SURFACE_HIGH_SPEED_MIN = 1_000;
+const SURFACE_HIGH_SPEED_REFRESH_YEARS = 2_000;
+const SURFACE_HIGH_SPEED_REFRESH_INTERVAL_MS = 6_000;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
@@ -42,6 +45,7 @@ export class EarthView {
     this.pointerStart = null;
     this.interacting = false;
     this.simulationPlaying = false;
+    this.simulationSpeed = 1;
     this.mode = "globe";
     this.descent = null;
     this.surfaceEntry = null;
@@ -168,6 +172,10 @@ export class EarthView {
     }
     if (next || stopped) this.invalidate();
   }
+  setSimulationSpeed(speed) {
+    this.simulationSpeed = Math.max(1, Number(speed) || 1);
+    this.terrain?.setPlaybackSpeed?.(this.simulationSpeed);
+  }
   focusSelection() { return this.descendToSelection(); }
   toggleSurface() {
     if (this.surfaceTransitionPromise) return this.surfaceTransitionPromise;
@@ -277,8 +285,11 @@ export class EarthView {
   _playbackTopographyRefreshDue(state, now) {
     if (!this.simulationPlaying || !Number.isFinite(this.lastTopographyStateYear)) return false;
     const yearDelta = Math.abs((Number(state?.yearBP) || 0) - this.lastTopographyStateYear);
-    return yearDelta >= SURFACE_TOPOGRAPHY_REFRESH_YEARS
-      && now - this.lastTopographyStateMs >= SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS;
+    const highSpeed = this.simulationSpeed >= SURFACE_HIGH_SPEED_MIN;
+    const refreshYears = highSpeed ? SURFACE_HIGH_SPEED_REFRESH_YEARS : SURFACE_TOPOGRAPHY_REFRESH_YEARS;
+    const refreshIntervalMs = highSpeed ? SURFACE_HIGH_SPEED_REFRESH_INTERVAL_MS : SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS;
+    return yearDelta >= refreshYears
+      && now - this.lastTopographyStateMs >= refreshIntervalMs;
   }
 
   _applyTerrainState(state, {

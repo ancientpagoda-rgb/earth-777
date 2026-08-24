@@ -115,10 +115,19 @@ test("fast-forward periodically builds coherent topographic epochs offscreen", (
   assert.match(surfaceTerrain, /2,500-year terrain band changes/);
   assert.match(workerSurfaceTerrain, /const atomicPlaybackRefresh = refreshTopography/);
   assert.match(workerSurfaceTerrain, /this\._syncComputeContext\(true\)/);
-  assert.match(workerSurfaceTerrain, /radius: PLAYBACK_TERRAIN_REFRESH_RADIUS/);
+  assert.match(workerSurfaceTerrain, /radius: this\.playbackSpeed >= 1_000 \? 0 : PLAYBACK_TERRAIN_REFRESH_RADIUS/);
   assert.match(workerSurfaceTerrain, /reason: "playback-epoch"/);
   assert.match(workerSurfaceTerrain, /if \(!this\.pendingTerrainRefreshBatches\.size\) this\._syncComputeContext\(false\)/);
   assert.match(workerSurfaceTerrain, /return false;/);
+});
+
+test("1K and 10K playback coalesce simulation and surface work", () => {
+  assert.match(main, /maxAdvanceChunkYears: 5_000/);
+  assert.match(main, /simulation\.setPlaybackSpeed\(nextSpeed\)/);
+  assert.match(main, /speed >= 1_000 \? UI_UPDATE_INTERVAL_MS \* 2/);
+  assert.match(earthView, /SURFACE_HIGH_SPEED_REFRESH_INTERVAL_MS = 6_000/);
+  assert.match(earthView, /this\.terrain\?\.setPlaybackSpeed\?\.\(this\.simulationSpeed\)/);
+  assert.match(workerSurfaceTerrain, /this\.playbackSpeed >= 1_000 \? 0 : PLAYBACK_TERRAIN_REFRESH_RADIUS/);
 });
 
 test("pausing fast-forward commits the exact final surface state", () => {

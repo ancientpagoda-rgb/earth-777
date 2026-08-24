@@ -52,6 +52,14 @@ test("Free Earth branches are deterministic by seed", () => {
   assert.deepEqual(first.advance(12_000), second.advance(12_000));
 });
 
+test("coarse high-speed integration remains deterministic and reaches the requested year", () => {
+  const first = new FreeEarthEngine(777001).advance(2_500, { maxStepYears: 250 });
+  const second = new FreeEarthEngine(777001).advance(2_500, { maxStepYears: 250 });
+  assert.deepEqual(first, second);
+  assert.equal(first.elapsedYears, 2_500);
+  assert.equal(first.yearBP, 774_500);
+});
+
 test("different branches diverge while concentrations remain physical rather than artificially capped", () => {
   const first = new FreeEarthEngine(777001).advance(25_000);
   const second = new FreeEarthEngine(777002).advance(25_000);

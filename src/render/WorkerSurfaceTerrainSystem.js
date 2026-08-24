@@ -39,6 +39,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.regionalTerrainRefinementTimer = null;
     this.lastRefinementFocus = { x: 0, z: 0 };
     this.lastRequestedRefinementCenter = null;
+    this.playbackSpeed = 1;
   }
 
   _surfaceVisualDrivers() {
@@ -158,9 +159,13 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.baseElevationMeters = this._elevationAt(this.origin.latitude, this.origin.longitude);
     this._syncComputeContext(true);
     return this._queueVisibleTerrainRefresh({
-      radius: PLAYBACK_TERRAIN_REFRESH_RADIUS,
+      radius: this.playbackSpeed >= 1_000 ? 0 : PLAYBACK_TERRAIN_REFRESH_RADIUS,
       reason: "playback-epoch"
     });
+  }
+
+  setPlaybackSpeed(speed) {
+    this.playbackSpeed = Math.max(1, Number(speed) || 1);
   }
 
   _queueVisibleTerrainRefresh({ radius = this.radius, reason = "regional-refinement" } = {}) {

@@ -80,6 +80,31 @@ test("coalesces advance requests while one worker advance is in flight", async (
   assert.equal(advances[1].years, 16);
 });
 
+test("high playback speeds use bounded coarse integration steps", async () => {
+  const { worker, client } = readyClient({ maxAdvanceChunkYears: 5_000 });
+  await client.ready;
+
+  assert.equal(client.setPlaybackSpeed(1_000), 100);
+  client.queueAdvance(250);
+  assert.equal(worker.sent.at(-1).maxStepYears, 100);
+
+  const first = worker.sent.at(-1);
+  worker.emit({
+    type: "advance",
+    requestId: first.requestId,
+    version: first.version,
+    statePatch: { elapsedYears: 250, yearBP: 776750 },
+    stateMode: "delta",
+    patchKeys: 2,
+    durationMs: 2
+  });
+
+  assert.equal(client.setPlaybackSpeed(10_000), 250);
+  client.queueAdvance(2_500);
+  assert.equal(worker.sent.at(-1).years, 2_500);
+  assert.equal(worker.sent.at(-1).maxStepYears, 250);
+});
+
 test("discards stale advance state after a version-changing seek", async () => {
   const { worker, client, states } = readyClient();
   await client.ready;

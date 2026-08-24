@@ -6,6 +6,7 @@ export class SimulationWorkerClient {
     this.onError = onError;
     this.seed = Number(seed) >>> 0;
     this.maxAdvanceChunkYears = Math.max(1, Number(maxAdvanceChunkYears) || 1000);
+    this.advanceStepYears = 25;
     this.version = 0;
     this.nextRequestId = 0;
     this.readyResolved = false;
@@ -135,12 +136,18 @@ export class SimulationWorkerClient {
     this._flushAdvance();
   }
 
+  setPlaybackSpeed(speed) {
+    const next = Math.max(1, Number(speed) || 1);
+    this.advanceStepYears = next >= 10_000 ? 250 : next >= 1_000 ? 100 : 25;
+    return this.advanceStepYears;
+  }
+
   _flushAdvance() {
     if (!this.readyResolved || this.advanceInFlight || this.pendingAdvanceYears <= 0) return;
     const years = Math.min(this.pendingAdvanceYears, this.maxAdvanceChunkYears);
     this.pendingAdvanceYears = 0;
     const version = this.version;
-    const requestId = this._post("advance", { years, version });
+    const requestId = this._post("advance", { years, maxStepYears: this.advanceStepYears, version });
     this.advanceInFlight = { requestId, version };
   }
 
@@ -192,6 +199,7 @@ export class SimulationWorkerClient {
       ready: this.readyResolved,
       advanceInFlight: Boolean(this.advanceInFlight),
       pendingAdvanceYears: this.pendingAdvanceYears,
+      advanceStepYears: this.advanceStepYears,
       lastStateMode: this.lastStateMode,
       lastPatchKeys: this.lastPatchKeys
     };

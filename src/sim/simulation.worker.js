@@ -68,7 +68,9 @@ self.addEventListener("message", (event) => {
       }
       case "advance": {
         if (!engine) throw new Error("Simulation worker was not initialized");
-        engine.advance(Math.max(0, Number(message.years) || 0));
+        engine.advance(Math.max(0, Number(message.years) || 0), {
+          maxStepYears: Math.max(25, Number(message.maxStepYears) || 25)
+        });
         postState("advance", requestId, version, startedAt);
         break;
       }
