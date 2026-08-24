@@ -14,6 +14,8 @@ export function createRegionalAerialMaterial() {
     vertexColors: true,
     side: THREE.FrontSide,
     fog: true,
+    transparent: true,
+    depthWrite: true,
     alphaTest: 0.01,
     toneMapped: false
   });
@@ -61,12 +63,11 @@ export function createRegionalAerialMaterial() {
       )
       .replace(
         "#include <dithering_fragment>",
-        `// Circularly dissolve the finite high-detail mesh into the real Earth
-// sphere underneath it. Dithered discard retains normal depth writes and avoids
-// transparent chunk-sorting seams while removing the square terrain footprint.
+        `// Circularly blend the finite high-detail mesh into the real Earth
+// sphere underneath it. A continuous alpha ramp avoids the conspicuous dark
+// checkerboard that screen-door dithering creates after mobile downsampling.
 float aerialDetailCoverage = 1.0 - smoothstep(285.0, 365.0, vAerialDistanceKm);
-float aerialDither = aerialHash(floor(gl_FragCoord.xy) + floor(vAerialWorldPosition.xz * 3.1));
-if (aerialDither > aerialDetailCoverage) discard;
+diffuseColor.a *= aerialDetailCoverage;
 #include <dithering_fragment>`
       );
   };
@@ -84,7 +85,7 @@ if (aerialDither > aerialDetailCoverage) discard;
     }
   };
   material.userData.planetCurvature = curvature;
-  material.customProgramCacheKey = () => "earth777-regional-aerial-mosaic-v7-planet-blend";
-  material.userData.presentation = "science-colored-aerial-fragment-mosaic-v7-planet-blend";
+  material.customProgramCacheKey = () => "earth777-regional-aerial-mosaic-v8-smooth-planet-blend";
+  material.userData.presentation = "science-colored-aerial-fragment-mosaic-v8-smooth-planet-blend";
   return material;
 }

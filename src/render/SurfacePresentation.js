@@ -12,6 +12,22 @@ export { SURFACE_NAVIGATION_POLICY };
 const SURFACE_MAX_DISTANCE_KM = 420;
 const REGIONAL_STREAM_RADIUS = 4;
 
+export function surfaceNearClipKm(distanceKm, {
+  minimumKm = 0.00005,
+  maximumKm = 0.05,
+  startKm = 2,
+  fullKm = 180
+} = {}) {
+  const distance = Math.max(0, Number(distanceKm) || 0);
+  const start = Math.max(0, Number(startKm) || 0);
+  const full = Math.max(start + 1e-6, Number(fullKm) || start + 1);
+  const minimum = Math.max(0.000001, Number(minimumKm) || 0.00005);
+  const maximum = Math.max(minimum, Number(maximumKm) || minimum);
+  const linear = Math.min(1, Math.max(0, (distance - start) / (full - start)));
+  const smooth = linear * linear * (3 - 2 * linear);
+  return minimum + (maximum - minimum) * smooth;
+}
+
 export function createSurfacePresentation(canvas) {
   const surface = createBaseSurfacePresentation(canvas);
 
@@ -96,6 +112,11 @@ export function createSurfacePresentation(canvas) {
   const baseTerrainUpdate = surface.terrain.update.bind(surface.terrain);
   surface.terrain.update = (cameraPosition) => {
     applyPlanetCurvature();
+    const nextNear = surfaceNearClipKm(surface.camera.position.distanceTo(surface.controls.target));
+    if (Math.abs(surface.camera.near - nextNear) > 0.00001) {
+      surface.camera.near = nextNear;
+      surface.camera.updateProjectionMatrix();
+    }
     const result = baseTerrainUpdate(cameraPosition);
     planetaryFarField.setOrigin(surface.terrain.origin);
     return result;

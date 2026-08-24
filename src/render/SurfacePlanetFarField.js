@@ -4,7 +4,7 @@ import { EARTH_MEAN_RADIUS_KM } from "./SurfacePlanetCurvature.js";
 const DEG = Math.PI / 180;
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
-export const SURFACE_PLANET_FAR_FIELD_POLICY = "georeferenced-full-earth-tangent-continuation-v1";
+export const SURFACE_PLANET_FAR_FIELD_POLICY = "georeferenced-full-earth-tangent-continuation-v2-clean-blend";
 
 export function geographicSurfaceFrame(latitude = 0, longitude = 0) {
   const lat = finite(latitude) * DEG;
@@ -54,7 +54,11 @@ export function createSurfacePlanetFarField(scene, {
     side: THREE.FrontSide,
     fog: true,
     toneMapped: false,
-    depthWrite: true
+    // This sphere is the backdrop beneath the streamed regional mesh. Leaving
+    // its depth unwritten lets the translucent handoff composite cleanly on
+    // mobile GPUs instead of two nearly coincident surfaces fighting for the
+    // same low-precision depth values at planetary viewing distances.
+    depthWrite: false
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.matrixAutoUpdate = false;
