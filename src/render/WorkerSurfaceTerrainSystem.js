@@ -133,6 +133,32 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     return true;
   }
 
+  setEarthSystemState(state, seed = state?.seed, refreshContext = this.surfaceContextActive, options = {}) {
+    const refreshTerrain = options.refreshTerrain !== false;
+    const refreshTopography = options.refreshTopography !== false;
+    const atomicPlaybackRefresh = refreshTopography
+      && !refreshTerrain
+      && this.origin
+      && this.chunks.size > 0;
+
+    if (!atomicPlaybackRefresh) {
+      return super.setEarthSystemState(state, seed, refreshContext, options);
+    }
+
+    // Keep the current epoch visible while the worker builds the next complete
+    // terrain window. If a replacement is already underway, advance the live
+    // ecology/hydrology state but let that coherent snapshot finish first.
+    if (this.pendingTerrainRefreshBatches.size) {
+      super.setEarthSystemState(state, seed, refreshContext, { ...options, refreshTopography: false });
+      return false;
+    }
+
+    super.setEarthSystemState(state, seed, refreshContext, { ...options, refreshTopography: false });
+    this.baseElevationMeters = this._elevationAt(this.origin.latitude, this.origin.longitude);
+    this._syncComputeContext(true);
+    return this._queueVisibleTerrainRefresh();
+  }
+
   _queueVisibleTerrainRefresh() {
     const centerX = Number(this.lastCenter?.x);
     const centerZ = Number(this.lastCenter?.z);
@@ -383,7 +409,9 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
 
   pump(budgetMs = 2.5) {
     if (!this.computeClient?.worker) return super.pump(budgetMs);
-    this._syncComputeContext(false);
+    // A whole-window epoch must be generated from one simulation snapshot.
+    // Defer newer context syncs until the atomic replacement is complete.
+    if (!this.pendingTerrainRefreshBatches.size) this._syncComputeContext(false);
     const budget = Math.max(0.1, Number(budgetMs) || 2.5);
     const started = performance.now();
     const producers = [
