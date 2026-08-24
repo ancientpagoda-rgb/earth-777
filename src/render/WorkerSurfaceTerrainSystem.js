@@ -11,6 +11,7 @@ import {
 } from "./SurfaceStreamingPolicy.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
+const PLAYBACK_TERRAIN_REFRESH_RADIUS = 1;
 
 function rounded(value, digits = 2) {
   const number = Number(value);
@@ -156,19 +157,23 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     super.setEarthSystemState(state, seed, refreshContext, { ...options, refreshTopography: false });
     this.baseElevationMeters = this._elevationAt(this.origin.latitude, this.origin.longitude);
     this._syncComputeContext(true);
-    return this._queueVisibleTerrainRefresh();
+    return this._queueVisibleTerrainRefresh({
+      radius: PLAYBACK_TERRAIN_REFRESH_RADIUS,
+      reason: "playback-epoch"
+    });
   }
 
-  _queueVisibleTerrainRefresh() {
+  _queueVisibleTerrainRefresh({ radius = this.radius, reason = "regional-refinement" } = {}) {
     const centerX = Number(this.lastCenter?.x);
     const centerZ = Number(this.lastCenter?.z);
     if (!Number.isFinite(centerX) || !Number.isFinite(centerZ)) return false;
+    const refreshRadius = Math.max(0, Math.min(this.radius, Math.round(Number(radius) || 0)));
     this.queue = [];
     this.queuedKeys.clear();
     const candidates = [];
     const refreshBatchId = ++this.terrainRefreshSerial;
-    for (let dz = -this.radius; dz <= this.radius; dz += 1) {
-      for (let dx = -this.radius; dx <= this.radius; dx += 1) {
+    for (let dz = -refreshRadius; dz <= refreshRadius; dz += 1) {
+      for (let dx = -refreshRadius; dx <= refreshRadius; dx += 1) {
         const x = centerX + dx;
         const z = centerZ + dz;
         const key = `${x}:${z}`;
@@ -180,6 +185,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     candidates.sort((a, b) => a.distance - b.distance);
     this.pendingTerrainRefreshBatches.set(refreshBatchId, {
       id: refreshBatchId,
+      reason,
       expectedKeys: new Set(candidates.map((candidate) => candidate.key)),
       meshes: new Map()
     });
@@ -520,6 +526,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         requestedSpanDegrees: 3,
         requestedResolutionMeters: 900,
         pendingAtomicRefreshes: this.pendingTerrainRefreshBatches.size,
+        pendingPlaybackEpochs: [...this.pendingTerrainRefreshBatches.values()].filter((batch) => batch.reason === "playback-epoch").length,
         stagedChunks: [...this.pendingTerrainRefreshBatches.values()].reduce((sum, batch) => sum + batch.meshes.size, 0)
       }),
       worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v3-camera-following", lastPump: this.lastSurfacePump })

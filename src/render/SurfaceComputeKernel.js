@@ -102,6 +102,19 @@ function organicField(config, xKm, zKm, salt = 0) {
   return clamp(0.5 + macro * 0.22 + cross * 0.17 + meso * 0.08 + fine * 0.03, 0, 1);
 }
 
+function ecologicalSuccessionAt(config, xKm, zKm) {
+  const elapsedYears = Math.max(0, Number(config.earthState?.elapsedYears) || 0);
+  if (elapsedYears <= 0) return 0;
+  // Bedrock is nearly static on a centennial clock, but vegetation, soil
+  // moisture, wetlands, and openings can reorganize visibly. Advance a smooth,
+  // deterministic succession field instead of making mountains pulse.
+  const phase = elapsedYears / 900;
+  const establishment = smoothstep01(elapsedYears / 400);
+  const broad = Math.sin(xKm * 0.055 + zKm * 0.041 + phase);
+  const cross = Math.cos(xKm * 0.031 - zKm * 0.067 - phase * 0.73);
+  return (broad * 0.075 + cross * 0.045) * establishment;
+}
+
 function surfaceDrivers(config) {
   const drivers = config.surfaceVisualDrivers ?? {};
   return {
@@ -180,9 +193,10 @@ export function regionalLandCoverColorAt(config, xKm, zKm, latitude, elevationMe
   const macro = organicField(config, xKm, zKm, 1);
   const meso = organicField(config, xKm * 1.8, zKm * 1.8, 2);
   const drainage = organicField(config, xKm * 0.62 + zKm * 0.18, zKm * 0.62 - xKm * 0.18, 4);
-  const vigor = clamp(drivers.lai * 0.48 + drivers.npp * 0.28 + drivers.treeDensity * 0.24, 0, 1);
+  const succession = ecologicalSuccessionAt(config, xKm, zKm);
+  const vigor = clamp(drivers.lai * 0.48 + drivers.npp * 0.28 + drivers.treeDensity * 0.24 + succession, 0, 1);
   const lowland = clamp(0.58 - Math.max(-250, reliefMeters) / 1100, 0, 1);
-  const moisture = clamp(drivers.runoff * 0.60 + lowland * 0.22 + (drainage - 0.5) * 0.36, 0, 1);
+  const moisture = clamp(drivers.runoff * 0.60 + lowland * 0.22 + (drainage - 0.5) * 0.36 + succession * 0.58, 0, 1);
   const forestWeight = smoothstep01((macro + vigor * 0.82 - 0.68) / 0.52) * clamp(0.22 + drivers.treeDensity * 0.9, 0, 1);
   const wetlandWeight = smoothstep01((moisture + meso * 0.28 - 0.72) / 0.38) * lowland;
   const dryOpeningWeight = smoothstep01((0.48 - moisture + (0.48 - macro) * 0.22) / 0.42);
@@ -202,6 +216,11 @@ export function regionalLandCoverColorAt(config, xKm, zKm, latitude, elevationMe
   color = mixColor(color, wetland, wetlandWeight * 0.78);
   color = mixColor(color, dryGround, dryOpeningWeight * 0.48);
   color = mixColor(color, sediment, sedimentWeight * 0.36);
+  // Make centuries of local green-up or drying legible at surface scale while
+  // retaining the biome palette and the underlying reconstructed relief.
+  color = succession >= 0
+    ? mixColor(color, forest, succession * 2.4)
+    : mixColor(color, dryGround, -succession * 2.1);
 
   if (groundTint && elevationMeters >= seaLevel) color = mixColor(color, groundTint, 0.18);
 

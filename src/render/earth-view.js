@@ -16,8 +16,8 @@ const SURFACE_PUMP_ACTIVE_MS = 0.9;
 const SURFACE_PUMP_IDLE_MS = 2.3;
 const SURFACE_STATE_REFRESH_YEARS = 250;
 const SURFACE_STATE_REFRESH_INTERVAL_MS = 3_000;
-const SURFACE_TOPOGRAPHY_REFRESH_YEARS = 500;
-const SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 6_000;
+const SURFACE_TOPOGRAPHY_REFRESH_YEARS = 400;
+const SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 4_000;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
