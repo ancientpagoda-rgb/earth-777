@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   buildRegionalTerrainUrl,
   parseRegionalTerrainAscii,
@@ -50,4 +51,15 @@ test("runtime regional terrain URL requests a complete unmasked surface", () => 
   assert.equal(url.searchParams.get("format"), "esriascii");
   assert.equal(url.searchParams.get("mresolution"), "400");
   assert.equal(Number(url.searchParams.get("north")) - Number(url.searchParams.get("south")), 1.5);
+});
+
+test("regional refinement refreshes the full visible terrain window", () => {
+  const source = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
+  const start = source.indexOf("  _queueVisibleTerrainRefresh() {");
+  const end = source.indexOf("\n  _queueConcentricLodRefresh()", start);
+  assert.ok(start >= 0 && end > start);
+  const refresh = source.slice(start, end);
+  assert.match(refresh, /for \(let dz = -this\.radius; dz <= this\.radius/);
+  assert.match(refresh, /for \(let dx = -this\.radius; dx <= this\.radius/);
+  assert.doesNotMatch(refresh, /_chunkOverlapsRegionalTerrainPatch/);
 });
