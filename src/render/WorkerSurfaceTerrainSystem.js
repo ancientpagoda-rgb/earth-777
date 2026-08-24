@@ -130,23 +130,6 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     return true;
   }
 
-  _chunkOverlapsRegionalTerrainPatch(chunkX, chunkZ) {
-    const patch = this.regionalTerrainPatch;
-    if (!patch || !this.origin) return false;
-    const half = Number(this.chunkSizeKm) * 0.5;
-    const centerXKm = Number(chunkX) * Number(this.chunkSizeKm);
-    const centerZKm = Number(chunkZ) * Number(this.chunkSizeKm);
-    const longitudeScale = Math.max(12, KM_PER_DEGREE_LATITUDE * Math.cos(Number(this.origin.latitude) * Math.PI / 180));
-    const south = Number(this.origin.latitude) + (centerZKm - half) / KM_PER_DEGREE_LATITUDE;
-    const north = Number(this.origin.latitude) + (centerZKm + half) / KM_PER_DEGREE_LATITUDE;
-    const west = Number(this.origin.longitude) + (centerXKm - half) / longitudeScale;
-    const east = Number(this.origin.longitude) + (centerXKm + half) / longitudeScale;
-    return north >= Number(patch.south)
-      && south <= Number(patch.north)
-      && east >= Number(patch.west)
-      && west <= Number(patch.east);
-  }
-
   _queueVisibleTerrainRefresh() {
     const centerX = Number(this.lastCenter?.x);
     const centerZ = Number(this.lastCenter?.z);
@@ -158,7 +141,6 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       for (let dx = -this.radius; dx <= this.radius; dx += 1) {
         const x = centerX + dx;
         const z = centerZ + dz;
-        if (!this._chunkOverlapsRegionalTerrainPatch(x, z)) continue;
         const key = `${x}:${z}`;
         const distance = dx * dx + dz * dz;
         candidates.push({ x, z, key, distance, replaceExisting: true, segments: this._segmentsForCandidate({ distance }) });
