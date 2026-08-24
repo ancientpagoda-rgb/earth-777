@@ -11,7 +11,10 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     chunkSizeKm: 84,
     radius: 2,
     segments: 18,
-    verticalScale: 0.90,
+    // Broad relief is physically tiny beside an 84 km frame. Use a declared
+    // 2.4x presentation exaggeration so reconstructed ridges and basins remain
+    // legible from the regional camera; the underlying elevations stay intact.
+    verticalScale: 2.40,
     contourIntervalMeters: 200,
     contourOpacity: 0.025,
     fogNearKm: 150,
@@ -27,7 +30,7 @@ export const SURFACE_SCALE_BANDS = Object.freeze([
     chunkSizeKm: 8,
     radius: 2,
     segments: 24,
-    verticalScale: 0.76,
+    verticalScale: 1.45,
     contourIntervalMeters: 100,
     contourOpacity: 0.06,
     fogNearKm: 18,
