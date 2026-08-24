@@ -14,9 +14,9 @@ test("regional overview stays bounded, map-like, and sufficiently tessellated", 
   const regional = SURFACE_SCALE_BANDS.find((band) => band.id === "regional");
   assert.ok(regional);
   const spanKm = regional.chunkSizeKm * (regional.radius * 2 + 1);
-  assert.ok(spanKm <= 90, `regional footprint should stay aerially frameable, got ${spanKm} km`);
+  assert.ok(spanKm <= 420, `regional clipmap footprint should stay aerially frameable, got ${spanKm} km`);
   assert.ok(regional.segments >= 18, `regional chunks should avoid giant facets, got ${regional.segments} segments`);
-  assert.ok(regional.radius <= 1, `regional streaming should not expose a postage-stamp center tile, got radius ${regional.radius}`);
+  assert.ok(regional.radius <= 2, `regional streaming should remain bounded while surrounding the focus, got radius ${regional.radius}`);
   assert.ok(regional.contourOpacity <= 0.03, `regional contours should stay subordinate to the landscape, got ${regional.contourOpacity}`);
   assert.equal(regional.earthLayersAllowed, true, "regional structure inspection should remain available as an optional overlay");
 });

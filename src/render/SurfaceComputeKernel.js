@@ -2,6 +2,7 @@ import { reconstructedBedrockElevation777At } from "../reconstruction/TerrainRec
 import { regionalTerrainResidualAt, regionalTerrainResidualAtPatches } from "../reconstruction/RuntimeRegionalTerrainPatch.js";
 import { tectonicElevationOffsetMeters } from "../sim/DynamicLithosphere.js";
 import { solveTerrainCoupledHydrology } from "./TerrainCoupledHydrology.js";
+import { gridIndicesForSegments } from "./TerrainGridTopology.js";
 
 const KM_PER_DEGREE_LATITUDE = 111.32;
 const TAU = Math.PI * 2;
@@ -73,6 +74,26 @@ function channelIncisionMeters(config, xKm, zKm) {
   return incisionDepthMeters * profile;
 }
 
+function landscapeEvolutionOffsetMeters(config, xKm, zKm, elevationMeters) {
+  const elapsedYears = Math.max(0, Number(config.earthState?.elapsedYears) || 0);
+  // Landscape evolution is a coupled surface-process signal. Keep the kernel
+  // exactly aligned with the static TerrainChunkManager when those drivers are
+  // absent (tests, fallback rendering, and non-simulated previews).
+  if (!config.surfaceVisualDrivers || elapsedYears <= 0 || elevationMeters < -180) return 0;
+  const drivers = surfaceDrivers(config);
+  const relief = clamp(Math.abs(elevationMeters - Number(config.baseElevationMeters)) / 1800, 0, 1);
+  const lowland = clamp(1 - Math.abs(elevationMeters - (Number(config.earthState?.seaLevel) || 0)) / 280, 0, 1);
+  const drainage = organicField(config, xKm * 0.41, zKm * 0.41, 19);
+  const erosionRateMmPerYear = 0.018 + drivers.runoff * 0.14 + relief * 0.16 + Math.max(0, drainage - 0.58) * 0.09;
+  const depositionRateMmPerYear = lowland * drivers.runoff * (0.045 + (1 - drainage) * 0.07);
+  const integratedYears = Math.min(elapsedYears, 240_000);
+  const fluvialMeters = (depositionRateMmPerYear - erosionRateMmPerYear) * integratedYears / 1000;
+  const seaLevel = Number(config.earthState?.seaLevel) || 0;
+  const coastalExposure = clamp(1 - Math.abs(elevationMeters - seaLevel) / 90, 0, 1);
+  const coastalPlanationMeters = -coastalExposure * drivers.runoff * Math.min(18, integratedYears / 18_000);
+  return clamp(fluvialMeters + coastalPlanationMeters, -140, 70);
+}
+
 function microreliefKm(config, xKm, zKm, elevationMeters) {
   if (elevationMeters < -80) return 0;
   const reliefMeters = Math.abs(elevationMeters - config.baseElevationMeters);
@@ -88,9 +109,10 @@ function displayedTerrainElevationMeters(config, xKm, zKm) {
   const { latitude, longitude } = geographicAt(config, xKm, zKm);
   const bedrock = elevationAt(config, latitude, longitude);
   const channel = channelIncisionMeters(config, xKm, zKm);
+  const landscapeEvolution = landscapeEvolutionOffsetMeters(config, xKm, zKm, bedrock);
   const microKm = microreliefKm(config, xKm, zKm, bedrock);
   const microMeters = config.verticalScale > 0 ? microKm / config.verticalScale * 1000 : 0;
-  return bedrock - channel + microMeters;
+  return bedrock + landscapeEvolution - channel + microMeters;
 }
 
 function organicField(config, xKm, zKm, salt = 0) {
@@ -163,7 +185,8 @@ export function surfaceHeightAt(config, xKm, zKm) {
   const { latitude, longitude } = geographicAt(config, xKm, zKm);
   const elevationMeters = elevationAt(config, latitude, longitude);
   const channel = channelIncisionMeters(config, xKm, zKm);
-  return (elevationMeters - config.baseElevationMeters - channel) / 1000 * config.verticalScale
+  const landscapeEvolution = landscapeEvolutionOffsetMeters(config, xKm, zKm, elevationMeters);
+  return (elevationMeters + landscapeEvolution - config.baseElevationMeters - channel) / 1000 * config.verticalScale
     + microreliefKm(config, xKm, zKm, elevationMeters);
 }
 
@@ -189,6 +212,9 @@ export function regionalLandCoverColorAt(config, xKm, zKm, latitude, elevationMe
   if (elevationMeters < seaLevel - 120 && lakePresence <= 0.05) return [0.055, 0.135, 0.16];
 
   const base = baseTerrainColor(latitude, elevationMeters, reliefMeters);
+  if (!config.surfaceVisualDrivers) {
+    return groundTint && elevationMeters >= seaLevel ? mixColor(base, groundTint, 0.38) : base;
+  }
   const drivers = surfaceDrivers(config);
   const macro = organicField(config, xKm, zKm, 1);
   const meso = organicField(config, xKm * 1.8, zKm * 1.8, 2);
@@ -290,7 +316,7 @@ export function buildTerrainChunkData(config, chunkX, chunkZ) {
   const positions = new Float32Array(vertexSide * vertexSide * 3);
   const colors = new Float32Array(vertexSide * vertexSide * 3);
   const elevations = new Float32Array(vertexSide * vertexSide);
-  const indices = new Uint32Array(segments * segments * 6);
+  const sharedIndices = gridIndicesForSegments(segments);
   const half = config.chunkSizeKm / 2;
   const centerX = chunkX * config.chunkSizeKm;
   const centerZ = chunkZ * config.chunkSizeKm;
@@ -325,18 +351,6 @@ export function buildTerrainChunkData(config, chunkX, chunkZ) {
     }
   }
 
-  let indexOffset = 0;
-  for (let z = 0; z < segments; z += 1) {
-    for (let x = 0; x < segments; x += 1) {
-      const a = z * vertexSide + x;
-      const b = a + 1;
-      const c = a + vertexSide;
-      const d = c + 1;
-      indices[indexOffset++] = a; indices[indexOffset++] = c; indices[indexOffset++] = b;
-      indices[indexOffset++] = b; indices[indexOffset++] = c; indices[indexOffset++] = d;
-    }
-  }
-
   const hydrology = solveTerrainCoupledHydrology({
     elevations,
     positions,
@@ -355,7 +369,10 @@ export function buildTerrainChunkData(config, chunkX, chunkZ) {
   let streamVertexCount = 0;
   let wetlandVertexCount = 0;
   let lakeVertexCount = 0;
-  for (let index = 0; index < elevations.length; index += 1) {
+  // The fallback renderer has no coupled water/vegetation state, so preserve
+  // its exact geometry and colors. Surface mode supplies these drivers and gets
+  // the full routed-water presentation below.
+  if (config.surfaceVisualDrivers) for (let index = 0; index < elevations.length; index += 1) {
     const colorOffset = index * 3;
     let color = [colors[colorOffset], colors[colorOffset + 1], colors[colorOffset + 2]];
     const wetland = Number(hydrology.wetlandStrength[index]) || 0;
@@ -384,12 +401,13 @@ export function buildTerrainChunkData(config, chunkX, chunkZ) {
     colors[colorOffset + 2] = color[2];
   }
 
-  const normals = computeNormals(positions, indices);
+  const normals = computeNormals(positions, sharedIndices);
   return {
     positions,
     colors,
     elevations,
-    indices,
+    // All chunks with the same segment count share this topology template.
+    indices: sharedIndices.slice(),
     normals,
     hydrology: Object.freeze({
       policy: hydrology.policy,

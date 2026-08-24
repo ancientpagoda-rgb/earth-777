@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { SurfaceTerrainSystem } from "./SurfaceTerrainSystem.js";
 import { SurfaceComputeClient } from "./SurfaceComputeClient.js";
 import { WorkerSurfaceEcologyManager } from "./WorkerSurfaceEcologyManager.js";
+import { TerrainEpochMorpher } from "./TerrainEpochMorpher.js";
 import {
   SURFACE_STREAMING_POLICY,
   localKilometersToGeographic,
@@ -30,6 +31,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.terrainCompleted = [];
     this.terrainRefreshSerial = 0;
     this.pendingTerrainRefreshBatches = new Map();
+    this.terrainEpochMorpher = new TerrainEpochMorpher();
     this.maxTerrainInFlight = 1;
     this.computeContextSignature = "";
     this.regionalTerrainPatch = null;
@@ -40,6 +42,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.lastRefinementFocus = { x: 0, z: 0 };
     this.lastRequestedRefinementCenter = null;
     this.playbackSpeed = 1;
+    this.playbackActive = false;
+    this.runtimeQualityScale = 1;
   }
 
   _surfaceVisualDrivers() {
@@ -76,7 +80,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     return streamingSegmentsForCandidate({
       bandId: this.viewScaleBand ?? "regional",
       baseSegments: this.segments,
-      distanceSquared: candidate?.distance ?? 0
+      distanceSquared: candidate?.distance ?? 0,
+      qualityScale: this.runtimeQualityScale
     });
   }
 
@@ -89,10 +94,12 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       this.origin.longitude.toFixed(6),
       this.baseElevationMeters.toFixed(3),
       this.topographySignature,
+      `surface-epoch:${Math.floor((Number(this.earthState?.elapsedYears) || 0) / 400)}`,
       this.geomorphologySignature,
       this.chunkSizeKm,
       this.radius,
       this.segments,
+      rounded(this.runtimeQualityScale, 2),
       this.verticalScale,
       this.biomeProfile?.groundColor?.join(",") ?? "none",
       drivers.biomeCode || "x",
@@ -117,6 +124,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.terrainInFlightKeys.clear();
     this.terrainCompleted = [];
     this.computeClient.setContext({
+      cacheKey: signature,
       origin: { ...this.origin },
       baseElevationMeters: this.baseElevationMeters,
       earthState: this.earthState,
@@ -166,6 +174,18 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
 
   setPlaybackSpeed(speed) {
     this.playbackSpeed = Math.max(1, Number(speed) || 1);
+  }
+
+  setPlaybackActive(active) {
+    this.playbackActive = Boolean(active);
+  }
+
+  setRuntimeQualityScale(scale) {
+    const next = Math.max(0.55, Math.min(1, Number(scale) || 1));
+    if (Math.abs(next - this.runtimeQualityScale) < 0.02) return false;
+    this.runtimeQualityScale = next;
+    this._queueConcentricLodRefresh();
+    return true;
   }
 
   _queueVisibleTerrainRefresh({ radius = this.radius, reason = "regional-refinement" } = {}) {
@@ -221,11 +241,16 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     batch.meshes.set(candidate.key, mesh);
     if (batch.meshes.size < batch.expectedKeys.size) return 0;
 
-    // Replace the complete visible window in one frame. Showing some new-atlas
-    // chunks beside old-atlas chunks produces the vertical walls seen at patch
-    // boundaries even when every final edge is mathematically feathered.
+    const morphEpoch = batch.reason === "playback-epoch";
+    const morphStartedAt = performance.now();
+    // Playback epochs retain existing GPU geometry and smoothly approach the
+    // worker-computed target. Geographic atlas changes still swap atomically.
     for (const [key, nextMesh] of batch.meshes) {
       const previous = this.chunks.get(key);
+      if (morphEpoch && previous && this.terrainEpochMorpher.start(key, previous, nextMesh, {
+        now: morphStartedAt,
+        durationMs: this.playbackSpeed >= 1_000 ? 1_500 : 1_100
+      })) continue;
       if (previous) {
         this.scene.remove(previous);
         previous.geometry.dispose();
@@ -425,6 +450,9 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     if (!this.pendingTerrainRefreshBatches.size) this._syncComputeContext(false);
     const budget = Math.max(0.1, Number(budgetMs) || 2.5);
     const started = performance.now();
+    const morphWork = this.terrainEpochMorpher.update(started, {
+      isCurrent: (key, mesh) => this.chunks.get(key) === mesh
+    });
     const producers = [
       {
         id: "terrain-worker",
@@ -435,18 +463,18 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       {
         id: "ecology-worker",
         maxSliceMs: 0.62,
-        hasWork: () => this.surfaceEcology?.hasWork() === true,
+        hasWork: () => !(this.playbackActive && this.playbackSpeed >= 10_000) && this.surfaceEcology?.hasWork() === true,
         run: (sliceMs) => this.surfaceEcology?.pump(sliceMs) ?? 0
       },
       {
         id: "fauna",
         maxSliceMs: 0.75,
-        hasWork: () => this.surfaceFauna?.hasWork() === true,
+        hasWork: () => !(this.playbackActive && this.playbackSpeed >= 1_000) && this.surfaceFauna?.hasWork() === true,
         run: (sliceMs) => this.surfaceFauna?.pump(sliceMs, this.activeFaunaCells) ?? 0
       }
     ];
 
-    let workUnits = 0;
+    let workUnits = morphWork;
     const producersRun = [];
     for (let offset = 0; offset < producers.length; offset += 1) {
       const producer = producers[(this.workCursor + offset) % producers.length];
@@ -473,6 +501,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     return this.queue.length > 0
       || this.terrainInFlight > 0
       || this.terrainCompleted.length > 0
+      || this.terrainEpochMorpher.hasWork()
       || this.surfaceEcology?.hasWork() === true
       || this.surfaceFauna?.hasWork() === true;
   }
@@ -499,6 +528,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       queuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length + base.ecology.queuedChunks,
       terrainQueuedChunks: base.terrainQueuedChunks + this.terrainInFlight + this.terrainCompleted.length,
       surfaceCompute: this.computeClient?.diagnostics?.() ?? { available: false, status: "unavailable" },
+      terrainEpochMorphing: this.terrainEpochMorpher.diagnostics(),
       regionalSurfacePresentation: "science-driven-natural-mosaic-v1",
       multiresolutionStreaming: Object.freeze({
         policy: SURFACE_STREAMING_POLICY,
@@ -540,6 +570,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
 
   clear() {
     this._discardTerrainRefreshBatches?.();
+    this.terrainEpochMorpher?.dispose?.();
     super.clear();
     this.terrainGeneration = (this.terrainGeneration ?? 0) + 1;
     this.terrainInFlightKeys?.clear?.();
@@ -552,6 +583,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     if (this.regionalTerrainRefinementTimer != null) clearTimeout(this.regionalTerrainRefinementTimer);
     this.regionalTerrainRefinementTimer = null;
     this._discardTerrainRefreshBatches();
+    this.terrainEpochMorpher.dispose();
     super.dispose();
     this.computeClient?.dispose();
     this.computeClient = null;

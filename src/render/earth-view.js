@@ -21,6 +21,8 @@ const SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 4_000;
 const SURFACE_HIGH_SPEED_MIN = 1_000;
 const SURFACE_HIGH_SPEED_REFRESH_YEARS = 2_000;
 const SURFACE_HIGH_SPEED_REFRESH_INTERVAL_MS = 6_000;
+const HIGH_SPEED_PIXEL_RATIO_MULTIPLIER = 0.78;
+const MOBILE_PIXEL_RATIO_MULTIPLIER = 0.88;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
@@ -46,6 +48,9 @@ export class EarthView {
     this.interacting = false;
     this.simulationPlaying = false;
     this.simulationSpeed = 1;
+    this.mobileProfile = (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches)
+      || (typeof navigator !== "undefined" && Number(navigator.deviceMemory) > 0 && Number(navigator.deviceMemory) <= 4);
+    this.documentVisible = typeof document === "undefined" || !document.hidden;
     this.mode = "globe";
     this.descent = null;
     this.surfaceEntry = null;
@@ -71,7 +76,10 @@ export class EarthView {
     this.diagnosticsCache = null;
     this.diagnosticsCacheAt = -Infinity;
     this.rasterWorker = new RasterTaskClient();
-    this.performanceController = new AdaptivePerformanceController({ targetFps: 60, initialTier: "high" });
+    this.performanceController = new AdaptivePerformanceController({
+      targetFps: this.mobileProfile ? 45 : 60,
+      initialTier: this.mobileProfile ? "balanced" : "high"
+    });
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
 
@@ -123,6 +131,8 @@ export class EarthView {
         this.surfaceCamera = surface.camera;
         this.surfaceControls = surface.controls;
         this.terrain = surface.terrain;
+        this.terrain.setPlaybackSpeed?.(this.simulationSpeed);
+        this.terrain.setPlaybackActive?.(this.simulationPlaying);
         this.surfaceWater = surface.water;
         this.surfacePlanetaryFarField = surface.planetaryFarField ?? null;
         this.surfacePlanetaryFarField?.setTexture?.(this.earthMaterial?.map ?? null);
@@ -164,6 +174,7 @@ export class EarthView {
     const next = Boolean(playing);
     const stopped = this.simulationPlaying && !next;
     this.simulationPlaying = next;
+    this.terrain?.setPlaybackActive?.(next);
     // Fast-forward holds the expensive local terrain context between visual
     // checkpoints. Commit the exact final state as soon as playback stops.
     if (stopped && this.terrain && this.lastState) {
@@ -175,6 +186,11 @@ export class EarthView {
   setSimulationSpeed(speed) {
     this.simulationSpeed = Math.max(1, Number(speed) || 1);
     this.terrain?.setPlaybackSpeed?.(this.simulationSpeed);
+    this.applyPerformanceSettings(true);
+  }
+  setDocumentVisible(visible) {
+    this.documentVisible = Boolean(visible);
+    if (this.documentVisible) this.invalidate();
   }
   focusSelection() { return this.descendToSelection(); }
   toggleSurface() {
@@ -362,14 +378,19 @@ export class EarthView {
 
   applyPerformanceSettings(force = false) {
     const settings = this.performanceController.settings(this.spatialDetail);
-    const ratio = Math.min(devicePixelRatio || 1, 1, settings.pixelRatioCap);
-    const signature = [settings.visualLod, ratio.toFixed(3), settings.effectiveTerrainRadius, settings.effectiveTerrainSegments, settings.quality >= 0.55 ? 1 : 0].join("|");
+    const highSpeed = this.simulationSpeed >= SURFACE_HIGH_SPEED_MIN;
+    const ratioMultiplier = (highSpeed ? HIGH_SPEED_PIXEL_RATIO_MULTIPLIER : 1) * (this.mobileProfile ? MOBILE_PIXEL_RATIO_MULTIPLIER : 1);
+    const ratio = Math.min(devicePixelRatio || 1, 1, settings.pixelRatioCap) * ratioMultiplier;
+    const effectiveTerrainRadius = highSpeed ? Math.min(2, settings.effectiveTerrainRadius) : settings.effectiveTerrainRadius;
+    const effectiveTerrainSegments = highSpeed ? Math.min(16, settings.effectiveTerrainSegments) : settings.effectiveTerrainSegments;
+    const signature = [settings.visualLod, ratio.toFixed(3), effectiveTerrainRadius, effectiveTerrainSegments, settings.quality >= 0.55 ? 1 : 0, highSpeed ? 1 : 0].join("|");
     if (!force && signature === this.lastPerformanceSignature) return false;
     this.lastPerformanceSignature = signature;
     if (force || Math.abs(this.renderer.getPixelRatio() - ratio) > 0.02) { this.renderer.setPixelRatio(ratio); this.resize(); }
     this.clouds.visible = settings.quality >= 0.55;
     this.atmosphere.visible = settings.quality >= 0.55;
-    this.terrain?.configure?.({ radius: settings.effectiveTerrainRadius, segments: settings.effectiveTerrainSegments });
+    this.terrain?.configure?.({ radius: effectiveTerrainRadius, segments: effectiveTerrainSegments });
+    this.terrain?.setRuntimeQualityScale?.(highSpeed ? 0.72 : this.mobileProfile ? 0.86 : 1);
     this.diagnosticsCacheAt = -Infinity;
     return true;
   }
@@ -423,6 +444,7 @@ export class EarthView {
   }
 
   render(deltaSeconds, now = performance.now()) {
+    if (!this.documentVisible) return false;
     this.lastFrameDeltaMs = Math.max(0.1, deltaSeconds * 1000);
     const started = performance.now();
     let continuous = false;
@@ -447,7 +469,7 @@ export class EarthView {
       this.renderer.render(this.surfaceScene, this.surfaceCamera);
     }
     this.lastRenderMs = performance.now() - started;
-    if (this.mode !== "globe" && (this.interacting || this.descent || this.surfaceEntry) && this.lastFrameDeltaMs < 80 && this.performanceController.sample(this.lastFrameDeltaMs, now)) { this.applyPerformanceSettings(false); continuous = true; }
+    if (this.mode !== "globe" && this.lastFrameDeltaMs < 80 && this.performanceController.sample(this.lastFrameDeltaMs, now)) { this.applyPerformanceSettings(false); continuous = true; }
     return continuous || now < this.continuousUntilMs;
   }
 
@@ -463,6 +485,7 @@ export class EarthView {
       geometries: this.renderer.info.memory.geometries, textures: this.renderer.info.memory.textures,
       earthBuildInFlight: this.earthBuildInFlight, cloudBuildInFlight: this.cloudBuildInFlight,
       surfaceLoaded: Boolean(this.terrain), surfaceLoading: this.surfaceLoading,
+      mobileProfile: this.mobileProfile, documentVisible: this.documentVisible,
       raster: this.rasterWorker.diagnostics(), performance: this.performanceController.diagnostics(), terrain
     });
     this.diagnosticsCacheAt = now;

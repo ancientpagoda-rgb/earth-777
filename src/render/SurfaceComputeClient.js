@@ -1,3 +1,5 @@
+import { SurfaceChunkCache } from "./SurfaceChunkCache.js";
+
 export class SurfaceComputeClient {
   constructor() {
     this.worker = typeof Worker === "function"
@@ -6,6 +8,10 @@ export class SurfaceComputeClient {
     this.contextId = 0;
     this.nextId = 1;
     this.pending = new Map();
+    this.terrainInFlightByKey = new Map();
+    this.contextCacheKey = "none";
+    this.chunkCache = new SurfaceChunkCache();
+    this.cancelledRequests = 0;
     this.lastTerrainMs = 0;
     this.lastEcologyMs = 0;
     this.lastRegionalTerrainMs = 0;
@@ -19,7 +25,18 @@ export class SurfaceComputeClient {
 
   setContext(context) {
     this.contextId += 1;
-    if (this.worker) this.worker.postMessage({ type: "context", contextId: this.contextId, context });
+    this.contextCacheKey = String(context?.cacheKey ?? this.contextId);
+    for (const [id, pending] of this.pending) {
+      if (pending.type === "regionalTerrain") continue;
+      this.pending.delete(id);
+      this.cancelledRequests += 1;
+      pending.resolve(null);
+    }
+    this.terrainInFlightByKey.clear();
+    if (this.worker) {
+      this.worker.postMessage({ type: "cancelBeforeContext", contextId: this.contextId });
+      this.worker.postMessage({ type: "context", contextId: this.contextId, context });
+    }
     return this.contextId;
   }
 
@@ -43,7 +60,29 @@ export class SurfaceComputeClient {
   }
 
   terrain(chunkX, chunkZ, options = {}) {
-    return this._request("terrain", { chunkX, chunkZ, options });
+    const segments = Math.max(1, Math.round(Number(options.segments) || 18));
+    const requestContextId = this.contextId;
+    const key = `${this.contextCacheKey}|${chunkX}:${chunkZ}:${segments}`;
+    if (this.terrainInFlightByKey.has(key)) return this.terrainInFlightByKey.get(key);
+    const request = this.chunkCache.get(key).then((cached) => {
+      if (requestContextId !== this.contextId) return null;
+      if (cached) return {
+        type: "terrain",
+        contextId: requestContextId,
+        chunkX,
+        chunkZ,
+        segments,
+        milliseconds: 0,
+        cacheSource: "persistent-or-memory",
+        ...cached
+      };
+      return this._request("terrain", { chunkX, chunkZ, options }).then((result) => {
+        if (result) this.chunkCache.put(key, result);
+        return result;
+      });
+    }).finally(() => this.terrainInFlightByKey.delete(key));
+    this.terrainInFlightByKey.set(key, request);
+    return request;
   }
 
   ecology(payload) {
@@ -80,6 +119,7 @@ export class SurfaceComputeClient {
     this.status = "error";
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    this.terrainInFlightByKey.clear();
   }
 
   diagnostics() {
@@ -93,7 +133,9 @@ export class SurfaceComputeClient {
       lastRegionalTerrainMs: this.lastRegionalTerrainMs,
       completedTerrain: this.completedTerrain,
       completedEcology: this.completedEcology,
-      completedRegionalTerrain: this.completedRegionalTerrain
+      completedRegionalTerrain: this.completedRegionalTerrain,
+      cancelledRequests: this.cancelledRequests,
+      terrainCache: this.chunkCache.diagnostics()
     });
   }
 
@@ -101,6 +143,8 @@ export class SurfaceComputeClient {
     this._failAll(new Error("Surface compute worker disposed"));
     this.worker?.terminate();
     this.worker = null;
+    this.terrainInFlightByKey.clear();
+    this.chunkCache.clearMemory();
     this.status = "disposed";
   }
 }

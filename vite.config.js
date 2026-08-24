@@ -15,7 +15,13 @@ export default defineConfig(({ command }) => ({
     target: "es2022",
     manifest: true,
     rollupOptions: {
-      output: { manualChunks: scienceChunks }
+      output: {
+        manualChunks: scienceChunks,
+        onlyExplicitManualChunks: true,
+        // Large terrain science is shared by deferred surface/region chunks.
+        // Do not hoist those transitive imports into the eager application entry.
+        hoistTransitiveImports: false
+      }
     }
   },
   worker: {
