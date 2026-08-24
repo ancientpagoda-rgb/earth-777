@@ -3,10 +3,10 @@ import { geographicDestination } from "./SurfacePlanetaryStreaming.js";
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const wrapLongitude = (value) => ((Number(value) + 540) % 360) - 180;
 
-export const SURFACE_STREAMING_POLICY = "camera-following-concentric-lod-v2-planetary";
+export const SURFACE_STREAMING_POLICY = "camera-following-clipmap-rings-v3-planetary";
 
-export function streamingSegmentsForCandidate({ bandId = "regional", baseSegments = 18, distanceSquared = 0 } = {}) {
-  const base = Math.max(6, Math.round(Number(baseSegments) || 18));
+export function streamingSegmentsForCandidate({ bandId = "regional", baseSegments = 18, distanceSquared = 0, qualityScale = 1 } = {}) {
+  const base = Math.max(6, Math.round((Number(baseSegments) || 18) * clamp(qualityScale, 0.55, 1)));
   const distance = Math.sqrt(Math.max(0, Number(distanceSquared) || 0));
 
   // Spend triangles where they are visible. The outer world buffer exists to
@@ -17,7 +17,11 @@ export function streamingSegmentsForCandidate({ bandId = "regional", baseSegment
     return Math.max(base, Math.min(48, Math.round(base * multiplier)));
   }
   if (distance < 1.6) return base;
-  const multiplier = bandId === "regional" ? 0.56 : bandId === "landscape" ? 0.66 : 0.78;
+  if (distance < 2.7) {
+    const multiplier = bandId === "regional" ? 0.62 : bandId === "landscape" ? 0.70 : 0.78;
+    return Math.max(8, Math.round(base * multiplier));
+  }
+  const multiplier = bandId === "regional" ? 0.44 : bandId === "landscape" ? 0.52 : 0.64;
   return Math.max(8, Math.round(base * multiplier));
 }
 

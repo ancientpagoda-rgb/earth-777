@@ -7,6 +7,7 @@ let regionalTerrainPatch = null;
 let regionalTerrainPatches = [];
 let regionalTerrainGeneration = 0;
 let regionalTerrainRequestGeneration = 0;
+let cancelBeforeContextId = 0;
 const REGIONAL_TERRAIN_ATLAS_LIMIT = 6;
 
 function transferListForTerrain(result) {
@@ -35,6 +36,10 @@ self.addEventListener("message", async (event) => {
     if (message.type === "context") {
       contextId = Number(message.contextId) || 0;
       context = message.context ?? null;
+      return;
+    }
+    if (message.type === "cancelBeforeContext") {
+      cancelBeforeContextId = Math.max(cancelBeforeContextId, Number(message.contextId) || 0);
       return;
     }
     if (message.type === "clearRegionalTerrain") {
@@ -72,7 +77,7 @@ self.addEventListener("message", async (event) => {
       });
       return;
     }
-    if (!context || Number(message.contextId) !== contextId) {
+    if (!context || Number(message.contextId) !== contextId || Number(message.contextId) < cancelBeforeContextId) {
       self.postMessage({ type: "stale", id: message.id, contextId: message.contextId });
       return;
     }
@@ -89,6 +94,10 @@ self.addEventListener("message", async (event) => {
           : null
       };
       const result = buildTerrainChunkData(terrainContext, message.chunkX, message.chunkZ);
+      if (Number(message.contextId) !== contextId || Number(message.contextId) < cancelBeforeContextId) {
+        self.postMessage({ type: "stale", id: message.id, contextId: message.contextId });
+        return;
+      }
       self.postMessage({
         type: "terrain",
         id: message.id,

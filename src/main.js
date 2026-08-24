@@ -564,6 +564,12 @@ ui.sourcesClose.addEventListener("click", closeSources);
 ui.sourcesModal.addEventListener("click", (event) => { if (event.target === ui.sourcesModal) closeSources(); });
 
 document.addEventListener("visibilitychange", () => {
+  earthView?.setDocumentVisible?.(!document.hidden);
+  if (document.hidden) {
+    pendingSimulationYears = 0;
+    simulation.clearPendingAdvance();
+    return;
+  }
   if (!document.hidden) {
     lastFrame = performance.now();
     lastSimulationUpdate = lastFrame;
@@ -576,6 +582,7 @@ addEventListener("gamepaddisconnected", () => requestFrame());
 
 function frame(now) {
   rafId = null;
+  if (document.hidden) return;
   const deltaSeconds = Math.min(0.1, Math.max(0, (now - lastFrame) / 1000));
   lastFrame = now;
   profiler.frame(now);
@@ -610,3 +617,10 @@ updateInteractionHint("DRAG · ZOOM · SELECT");
 setSpeed(speed);
 updateInterface(currentState, true);
 requestFrame();
+
+// Repeat visits can reuse the large scientific terrain and worker chunks, but
+// service-worker setup waits until the first interactive frame is complete.
+const registerRepeatVisitCache = () => import("./runtime/register-service-worker.js")
+  .then(({ registerEarth777ServiceWorker }) => registerEarth777ServiceWorker())
+  .catch(() => {});
+addEventListener("load", () => setTimeout(registerRepeatVisitCache, 1_200), { once: true });

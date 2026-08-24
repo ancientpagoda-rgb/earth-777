@@ -9,6 +9,7 @@ const surfacePresentationBase = readFileSync(new URL("../src/render/SurfacePrese
 const workerSurfaceTerrain = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
 const workerSurfaceEcology = readFileSync(new URL("../src/render/WorkerSurfaceEcologyManager.js", import.meta.url), "utf8");
 const surfaceComputeClient = readFileSync(new URL("../src/render/SurfaceComputeClient.js", import.meta.url), "utf8");
+const surfaceChunkCache = readFileSync(new URL("../src/render/SurfaceChunkCache.js", import.meta.url), "utf8");
 const surfaceComputeWorker = readFileSync(new URL("../src/render/surface-compute.worker.js", import.meta.url), "utf8");
 const simulationWorker = readFileSync(new URL("../src/sim/simulation.worker.js", import.meta.url), "utf8");
 const simulationClient = readFileSync(new URL("../src/sim/SimulationWorkerClient.js", import.meta.url), "utf8");
@@ -55,6 +56,14 @@ test("surface terrain and vegetation CPU generation use a transferable worker wi
   assert.match(workerSurfaceTerrain, /return super\.pump\(budgetMs\)/);
   assert.match(workerSurfaceEcology, /this\.computeClient\.ecology/);
   assert.match(workerSurfaceEcology, /return super\.pump\(budgetMs\)/);
+});
+
+test("surface work cancels stale contexts and caches reusable terrain chunks", () => {
+  assert.match(surfaceComputeClient, /cancelBeforeContext/);
+  assert.match(surfaceComputeClient, /terrainInFlightByKey/);
+  assert.match(surfaceComputeClient, /SurfaceChunkCache/);
+  assert.match(surfaceChunkCache, /indexedDB\.open/);
+  assert.match(surfaceChunkCache, /MAX_PERSISTED_ENTRIES = 96/);
 });
 
 test("regional observation and reconstruction science remain code-split out of startup", () => {
@@ -116,6 +125,8 @@ test("terrain data, reconstruction logic, lithosphere, and Three.js have explici
   assert.match(vite, /terrain-etopo/);
   assert.match(vite, /terrain-reconstruction/);
   assert.match(vite, /dynamic-lithosphere/);
+  assert.match(vite, /onlyExplicitManualChunks: true/);
+  assert.match(vite, /hoistTransitiveImports: false/);
 });
 
 test("CI bundle budget caps eager JavaScript and requires deferred surface mode", () => {

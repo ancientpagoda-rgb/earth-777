@@ -43,7 +43,7 @@ test("surface water reuses cached hydrology context before issuing a fallback qu
 });
 
 test("interaction prioritizes smooth frames before rebuilding all surface detail", () => {
-  assert.match(earthView, /initialTier: "high"/);
+  assert.match(earthView, /initialTier: this\.mobileProfile \? "balanced" : "high"/);
   assert.match(earthView, /SURFACE_PUMP_ACTIVE_MS = 0\.9/);
   assert.match(earthView, /SURFACE_PUMP_IDLE_MS = 2\.3/);
   assert.match(earthView, /this\.interacting \? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS/);
@@ -91,8 +91,9 @@ test("globe interaction reuses cached diagnostics instead of rebuilding terrain 
   assert.match(earthView, /return this\.diagnosticsCache/);
 });
 
-test("adaptive visual retuning cannot resize the globe during an active drag", () => {
-  assert.match(earthView, /this\.mode !== "globe" && \(this\.interacting \|\| this\.descent \|\| this\.surfaceEntry\)/);
+test("adaptive visual retuning remains surface-only while sampling sustained frame pressure", () => {
+  assert.match(earthView, /this\.mode !== "globe" && this\.lastFrameDeltaMs < 80/);
+  assert.doesNotMatch(earthView, /if \(this\.lastFrameDeltaMs < 80/);
 });
 
 test("fast-forward batches worker advances and throttles expensive surface-state rebuilds", () => {
@@ -128,6 +129,15 @@ test("1K and 10K playback coalesce simulation and surface work", () => {
   assert.match(earthView, /SURFACE_HIGH_SPEED_REFRESH_INTERVAL_MS = 6_000/);
   assert.match(earthView, /this\.terrain\?\.setPlaybackSpeed\?\.\(this\.simulationSpeed\)/);
   assert.match(workerSurfaceTerrain, /this\.playbackSpeed >= 1_000 \? 0 : PLAYBACK_TERRAIN_REFRESH_RADIUS/);
+  assert.match(earthView, /HIGH_SPEED_PIXEL_RATIO_MULTIPLIER/);
+  assert.match(workerSurfaceTerrain, /this\.playbackActive && this\.playbackSpeed >= 1_000/);
+});
+
+test("playback epochs morph cached target geometry instead of reallocating the visible mesh", () => {
+  assert.match(workerSurfaceTerrain, /TerrainEpochMorpher/);
+  assert.match(workerSurfaceTerrain, /batch\.reason === "playback-epoch"/);
+  assert.match(workerSurfaceTerrain, /terrainEpochMorpher\.start/);
+  assert.match(workerSurfaceTerrain, /terrainEpochMorpher\.update/);
 });
 
 test("pausing fast-forward commits the exact final surface state", () => {
