@@ -27,6 +27,8 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.terrainInFlight = 0;
     this.terrainInFlightKeys = new Set();
     this.terrainCompleted = [];
+    this.terrainRefreshSerial = 0;
+    this.pendingTerrainRefreshBatches = new Map();
     this.maxTerrainInFlight = 1;
     this.computeContextSignature = "";
     this.regionalTerrainPatch = null;
@@ -108,6 +110,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     const signature = this._contextSignature();
     if (!force && signature === this.computeContextSignature) return false;
     this.computeContextSignature = signature;
+    this._discardTerrainRefreshBatches();
     this.terrainGeneration += 1;
     this.terrainInFlightKeys.clear();
     this.terrainCompleted = [];
@@ -137,22 +140,68 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.queue = [];
     this.queuedKeys.clear();
     const candidates = [];
+    const refreshBatchId = ++this.terrainRefreshSerial;
     for (let dz = -this.radius; dz <= this.radius; dz += 1) {
       for (let dx = -this.radius; dx <= this.radius; dx += 1) {
         const x = centerX + dx;
         const z = centerZ + dz;
         const key = `${x}:${z}`;
         const distance = dx * dx + dz * dz;
-        candidates.push({ x, z, key, distance, replaceExisting: true, segments: this._segmentsForCandidate({ distance }) });
+        candidates.push({ x, z, key, distance, replaceExisting: true, refreshBatchId, segments: this._segmentsForCandidate({ distance }) });
         this.queuedKeys.add(key);
       }
     }
     candidates.sort((a, b) => a.distance - b.distance);
+    this.pendingTerrainRefreshBatches.set(refreshBatchId, {
+      id: refreshBatchId,
+      expectedKeys: new Set(candidates.map((candidate) => candidate.key)),
+      meshes: new Map()
+    });
     this.queue.push(...candidates);
     return candidates.length > 0;
   }
 
+  _discardTerrainRefreshBatch(batchId) {
+    const batch = this.pendingTerrainRefreshBatches.get(batchId);
+    if (!batch) return false;
+    for (const mesh of batch.meshes.values()) mesh.geometry?.dispose?.();
+    this.pendingTerrainRefreshBatches.delete(batchId);
+    return true;
+  }
+
+  _discardTerrainRefreshBatches() {
+    for (const batchId of [...this.pendingTerrainRefreshBatches.keys()]) this._discardTerrainRefreshBatch(batchId);
+  }
+
+  _stageTerrainRefreshMesh(candidate, mesh) {
+    const batch = this.pendingTerrainRefreshBatches.get(candidate.refreshBatchId);
+    if (!batch) {
+      mesh.geometry?.dispose?.();
+      return 0;
+    }
+    const priorStaged = batch.meshes.get(candidate.key);
+    if (priorStaged) priorStaged.geometry?.dispose?.();
+    batch.meshes.set(candidate.key, mesh);
+    if (batch.meshes.size < batch.expectedKeys.size) return 0;
+
+    // Replace the complete visible window in one frame. Showing some new-atlas
+    // chunks beside old-atlas chunks produces the vertical walls seen at patch
+    // boundaries even when every final edge is mathematically feathered.
+    for (const [key, nextMesh] of batch.meshes) {
+      const previous = this.chunks.get(key);
+      if (previous) {
+        this.scene.remove(previous);
+        previous.geometry.dispose();
+      }
+      this.chunks.set(key, nextMesh);
+      this.scene.add(nextMesh);
+    }
+    this.pendingTerrainRefreshBatches.delete(candidate.refreshBatchId);
+    return batch.meshes.size;
+  }
+
   _queueConcentricLodRefresh() {
+    if (this.pendingTerrainRefreshBatches.size) return 0;
     if (!Number.isFinite(Number(this.lastCenter?.x)) || !Number.isFinite(Number(this.lastCenter?.z))) return 0;
     const replacements = [];
     for (const [key, mesh] of this.chunks) {
@@ -281,10 +330,17 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     while (this.terrainCompleted.length && performance.now() - started < budgetMs) {
       const { candidate, result } = this.terrainCompleted.shift();
       this.queuedKeys.delete(candidate.key);
-      if (!result || !this._candidateStillWanted(candidate)) continue;
+      if (!result || !this._candidateStillWanted(candidate)) {
+        if (candidate.refreshBatchId) this._discardTerrainRefreshBatch(candidate.refreshBatchId);
+        continue;
+      }
       const previous = this.chunks.get(candidate.key);
       if (previous && !candidate.replaceExisting) continue;
       const mesh = this._meshFromResult(result, candidate);
+      if (candidate.refreshBatchId) {
+        work += this._stageTerrainRefreshMesh(candidate, mesh);
+        continue;
+      }
       if (previous) {
         this.scene.remove(previous);
         previous.geometry.dispose();
@@ -434,13 +490,16 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
         policy: "retained-overlapping-regional-patches-v1",
         patchLimit: 6,
         requestedSpanDegrees: 3,
-        requestedResolutionMeters: 900
+        requestedResolutionMeters: 900,
+        pendingAtomicRefreshes: this.pendingTerrainRefreshBatches.size,
+        stagedChunks: [...this.pendingTerrainRefreshBatches.values()].reduce((sum, batch) => sum + batch.meshes.size, 0)
       }),
       worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v3-camera-following", lastPump: this.lastSurfacePump })
     });
   }
 
   clear() {
+    this._discardTerrainRefreshBatches?.();
     super.clear();
     this.terrainGeneration = (this.terrainGeneration ?? 0) + 1;
     this.terrainInFlightKeys?.clear?.();
@@ -452,6 +511,7 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
     this.regionalTerrainRequestToken += 1;
     if (this.regionalTerrainRefinementTimer != null) clearTimeout(this.regionalTerrainRefinementTimer);
     this.regionalTerrainRefinementTimer = null;
+    this._discardTerrainRefreshBatches();
     super.dispose();
     this.computeClient?.dispose();
     this.computeClient = null;
