@@ -179,7 +179,11 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
       this.regionalTerrainRefinementTimer = null;
       if (token !== this.regionalTerrainRequestToken || !this.computeClient?.worker) return;
       this.regionalTerrainPatchStatus = "loading";
-      this.computeClient.regionalTerrain(center.latitude, center.longitude, { spanDegrees: 1.0, resolutionMeters: 600 })
+      // One 3-degree patch covers most of the broad regional presentation while
+      // the compute worker retains recent neighboring patches as the camera moves.
+      // At 900 m source spacing this remains far denser than the regional mesh
+      // without imposing the payload of a continent-sized raw grid.
+      this.computeClient.regionalTerrain(center.latitude, center.longitude, { spanDegrees: 3.0, resolutionMeters: 900 })
         .then((result) => {
           if (token !== this.regionalTerrainRequestToken || !this.origin || !result?.patch) return;
           this.regionalTerrainPatch = result.patch;
@@ -425,6 +429,12 @@ export class WorkerSurfaceTerrainSystem extends SurfaceTerrainSystem {
           north: this.regionalTerrainPatch.north
         }) : null,
         error: this.regionalTerrainPatchError
+      }),
+      regionalTerrainAtlas: Object.freeze({
+        policy: "retained-overlapping-regional-patches-v1",
+        patchLimit: 6,
+        requestedSpanDegrees: 3,
+        requestedResolutionMeters: 900
       }),
       worldStreaming: Object.freeze({ ...base.worldStreaming, policy: "surface-worker-transfer-v3-camera-following", lastPump: this.lastSurfacePump })
     });
