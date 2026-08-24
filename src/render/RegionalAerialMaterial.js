@@ -62,13 +62,15 @@ export function createRegionalAerialMaterial() {
         "#include <clipping_planes_pars_fragment>\nvarying float vAerialDistanceKm;"
       )
       .replace(
-        "#include <dithering_fragment>",
+        "#include <alphatest_fragment>",
         `// Circularly blend the finite high-detail mesh into the real Earth
 // sphere underneath it. A continuous alpha ramp avoids the conspicuous dark
 // checkerboard that screen-door dithering creates after mobile downsampling.
+// Apply coverage before alpha test/output; changing diffuseColor after
+// opaque_fragment has already written gl_FragColor cannot affect the image.
 float aerialDetailCoverage = 1.0 - smoothstep(285.0, 365.0, vAerialDistanceKm);
 diffuseColor.a *= aerialDetailCoverage;
-#include <dithering_fragment>`
+#include <alphatest_fragment>`
       );
   };
 
@@ -85,7 +87,7 @@ diffuseColor.a *= aerialDetailCoverage;
     }
   };
   material.userData.planetCurvature = curvature;
-  material.customProgramCacheKey = () => "earth777-regional-aerial-mosaic-v8-smooth-planet-blend";
-  material.userData.presentation = "science-colored-aerial-fragment-mosaic-v8-smooth-planet-blend";
+  material.customProgramCacheKey = () => "earth777-regional-aerial-mosaic-v9-effective-planet-blend";
+  material.userData.presentation = "science-colored-aerial-fragment-mosaic-v9-effective-planet-blend";
   return material;
 }
