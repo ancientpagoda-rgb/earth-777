@@ -4,8 +4,10 @@ import { buildEcologyChunkPlan, buildTerrainChunkData } from "./SurfaceComputeKe
 let contextId = 0;
 let context = null;
 let regionalTerrainPatch = null;
+let regionalTerrainPatches = [];
 let regionalTerrainGeneration = 0;
 let regionalTerrainRequestGeneration = 0;
+const REGIONAL_TERRAIN_ATLAS_LIMIT = 6;
 
 function transferListForTerrain(result) {
   return [result.positions.buffer, result.colors.buffer, result.elevations.buffer, result.indices.buffer, result.normals.buffer];
@@ -17,13 +19,13 @@ function transferListForEcology(result) {
 
 function activeContext() {
   if (!context) return null;
-  if (!regionalTerrainPatch || context.regionalTerrainPatchActive === false) return context;
+  if (!regionalTerrainPatches.length || context.regionalTerrainPatchActive === false) return context;
+  const smoothingRadiusCells = Number(context.regionalTerrainSmoothingRadiusCells) || 0;
+  const activePatches = regionalTerrainPatches.map((patch) => ({ ...patch, smoothingRadiusCells }));
   return {
     ...context,
-    regionalTerrainPatch: {
-      ...regionalTerrainPatch,
-      smoothingRadiusCells: Number(context.regionalTerrainSmoothingRadiusCells) || 0
-    }
+    regionalTerrainPatch: activePatches.at(-1),
+    regionalTerrainPatches: activePatches
   };
 }
 
@@ -39,6 +41,7 @@ self.addEventListener("message", async (event) => {
       regionalTerrainGeneration += 1;
       regionalTerrainRequestGeneration += 1;
       regionalTerrainPatch = null;
+      regionalTerrainPatches = [];
       return;
     }
     if (message.type === "invalidateRegionalTerrainRequest") {
@@ -55,6 +58,10 @@ self.addEventListener("message", async (event) => {
         return;
       }
       regionalTerrainPatch = patch;
+      const existingIndex = regionalTerrainPatches.findIndex((candidate) => candidate.requestUrl === patch.requestUrl);
+      if (existingIndex >= 0) regionalTerrainPatches.splice(existingIndex, 1);
+      regionalTerrainPatches.push(patch);
+      if (regionalTerrainPatches.length > REGIONAL_TERRAIN_ATLAS_LIMIT) regionalTerrainPatches.shift();
       const { values, ...metadata } = patch;
       self.postMessage({
         type: "regionalTerrain",

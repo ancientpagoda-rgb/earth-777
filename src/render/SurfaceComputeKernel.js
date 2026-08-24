@@ -1,5 +1,5 @@
 import { reconstructedBedrockElevation777At } from "../reconstruction/TerrainReconstruction777.js";
-import { regionalTerrainResidualAt } from "../reconstruction/RuntimeRegionalTerrainPatch.js";
+import { regionalTerrainResidualAt, regionalTerrainResidualAtPatches } from "../reconstruction/RuntimeRegionalTerrainPatch.js";
 import { tectonicElevationOffsetMeters } from "../sim/DynamicLithosphere.js";
 import { solveTerrainCoupledHydrology } from "./TerrainCoupledHydrology.js";
 
@@ -34,7 +34,9 @@ function geomorphicOffsetAt(config, latitude, longitude) {
 
 function elevationAt(config, latitude, longitude) {
   const reconstructed = reconstructedBedrockElevation777At(latitude, longitude);
-  const regionalResidual = regionalTerrainResidualAt(config.regionalTerrainPatch, latitude, longitude);
+  const regionalResidual = Array.isArray(config.regionalTerrainPatches)
+    ? regionalTerrainResidualAtPatches(config.regionalTerrainPatches, latitude, longitude)
+    : regionalTerrainResidualAt(config.regionalTerrainPatch, latitude, longitude);
   if (!config.earthState) return reconstructed + regionalResidual + geomorphicOffsetAt(config, latitude, longitude);
   return reconstructed
     + regionalResidual
