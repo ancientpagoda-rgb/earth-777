@@ -122,6 +122,10 @@ export function createSurfacePresentation(canvas) {
   );
   water.rotation.x = -Math.PI / 2;
   water.renderOrder = 1;
+  // Visibility is enabled explicitly by SurfaceScaleController only at local
+  // ecology/ground scales. Hidden-by-default also prevents a one-frame square
+  // flash while the first surface band is being resolved.
+  water.visible = false;
   scene.add(water);
 
   // Sea level is useful as a scientific reference, but the rectangular guide can

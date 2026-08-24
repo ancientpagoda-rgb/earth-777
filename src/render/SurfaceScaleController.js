@@ -195,6 +195,11 @@ export function surfaceWaterPolicy({
   return Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "no-water" });
 }
 
+export function surfaceWaterMeshVisible(bandId, policy = {}) {
+  const localScale = bandId === "ecology" || bandId === "ground";
+  return Boolean(localScale && policy.visible && policy.presentation === "surface");
+}
+
 function cameraDistanceKm(cameraPosition, target) {
   if (!cameraPosition || !target) return 0;
   const dx = (Number(cameraPosition.x) || 0) - (Number(target.x) || 0);
@@ -332,7 +337,10 @@ class SurfaceScaleController {
       for (const page of pool.pages ?? []) page.visible = visible;
     }
 
-    if (this.water) this.water.visible = Boolean(this.waterPolicy.visible && this.waterPolicy.presentation === "surface");
+    // The water object is a finite local plane. Never expose that rectangle in
+    // landscape/regional views; broad water is already represented by terrain
+    // hydrology and the georeferenced planetary raster beneath it.
+    if (this.water) this.water.visible = surfaceWaterMeshVisible(band.id, this.waterPolicy);
     if (this.seaLevelOutline) this.seaLevelOutline.visible = Boolean(this.waterPolicy.visible && this.waterPolicy.presentation === "reference-outline");
     if (this.earthLayers?.group) this.earthLayers.group.visible = this._earthLayersVisible(band);
   }

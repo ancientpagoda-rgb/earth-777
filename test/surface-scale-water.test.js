@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SURFACE_SCALE_BANDS, surfaceFrameForBand, surfaceScaleBandForDistance, surfaceWaterPolicy } from "../src/render/SurfaceScaleController.js";
+import { SURFACE_SCALE_BANDS, surfaceFrameForBand, surfaceScaleBandForDistance, surfaceWaterMeshVisible, surfaceWaterPolicy } from "../src/render/SurfaceScaleController.js";
 import { ATMOSPHERE_REFERENCE_TOP_KM, DEEP_EARTH_BOUNDARIES_KM, EARTH_LAYER_PRESENTATION, earthLayerFarSideVisibility, surfaceEarthLayerLayout, surfaceEarthLayerProfile } from "../src/render/SurfaceEarthLayers.js";
 
 test("surface scale bands descend from region to ground", () => {
@@ -54,6 +54,14 @@ test("local lakes materialize only close to the surface and remain bounded", () 
   assert.equal(ground.visible, true);
   assert.equal(ground.presentation, "surface");
   assert.ok(ground.spanFraction <= 0.58);
+});
+
+test("finite water plane stays hidden at aerial scales", () => {
+  const surfacePolicy = { visible: true, presentation: "surface" };
+  assert.equal(surfaceWaterMeshVisible("regional", surfacePolicy), false);
+  assert.equal(surfaceWaterMeshVisible("landscape", surfacePolicy), false);
+  assert.equal(surfaceWaterMeshVisible("ecology", surfacePolicy), true);
+  assert.equal(surfaceWaterMeshVisible("ground", surfacePolicy), true);
 });
 
 test("regional ocean uses a sea-level reference outline instead of a filled rectangle", () => {
