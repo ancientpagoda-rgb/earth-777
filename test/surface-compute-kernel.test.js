@@ -73,3 +73,26 @@ test("worker ecology planning is deterministic for an identical scientific conte
   assert.equal(first.crown.length, first.trunk.length);
   manager.dispose();
 });
+
+test("centennial surface epochs visibly advance ecological succession", () => {
+  const scene = new THREE.Scene();
+  const manager = new TerrainChunkManager(scene, { chunkSizeKm: 84, radius: 2, segments: 12, verticalScale: 2.4 });
+  manager.setOrigin(9.6, -73.9);
+  const base = {
+    ...staticConfig(manager),
+    surfaceVisualDrivers: {
+      lai: 4.8,
+      npp: 1450,
+      runoffMmPerYear: 780,
+      treeDensity: 0.72,
+      grassDensity: 0.55,
+      shrubDensity: 0.32
+    }
+  };
+  const first = buildTerrainChunkData({ ...base, earthState: { elapsedYears: 400, seaLevel: 0 } }, 0, 0);
+  const second = buildTerrainChunkData({ ...base, earthState: { elapsedYears: 800, seaLevel: 0 } }, 0, 0);
+  let colorDelta = 0;
+  for (let index = 0; index < first.colors.length; index += 1) colorDelta += Math.abs(first.colors[index] - second.colors[index]);
+  assert.ok(colorDelta > 2.5, `expected visible epoch color change, received ${colorDelta}`);
+  manager.dispose();
+});

@@ -77,13 +77,21 @@ test("runtime regional terrain URL requests a complete unmasked surface", () => 
 
 test("regional refinement refreshes the full visible terrain window", () => {
   const source = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
-  const start = source.indexOf("  _queueVisibleTerrainRefresh() {");
+  const start = source.indexOf("  _queueVisibleTerrainRefresh(");
   const end = source.indexOf("\n  _queueConcentricLodRefresh()", start);
   assert.ok(start >= 0 && end > start);
   const refresh = source.slice(start, end);
-  assert.match(refresh, /for \(let dz = -this\.radius; dz <= this\.radius/);
-  assert.match(refresh, /for \(let dx = -this\.radius; dx <= this\.radius/);
+  assert.match(refresh, /radius = this\.radius/);
+  assert.match(refresh, /for \(let dz = -refreshRadius; dz <= refreshRadius/);
+  assert.match(refresh, /for \(let dx = -refreshRadius; dx <= refreshRadius/);
   assert.doesNotMatch(refresh, /_chunkOverlapsRegionalTerrainPatch/);
+});
+
+test("playback epochs refresh the camera core so evolution can recur", () => {
+  const source = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
+  assert.match(source, /PLAYBACK_TERRAIN_REFRESH_RADIUS = 1/);
+  assert.match(source, /radius: PLAYBACK_TERRAIN_REFRESH_RADIUS/);
+  assert.match(source, /reason: "playback-epoch"/);
 });
 
 test("regional refinement requests broad patches retained by the worker atlas", () => {

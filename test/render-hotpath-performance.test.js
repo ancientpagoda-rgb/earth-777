@@ -106,8 +106,8 @@ test("fast-forward batches worker advances and throttles expensive surface-state
 });
 
 test("fast-forward periodically builds coherent topographic epochs offscreen", () => {
-  assert.match(earthView, /SURFACE_TOPOGRAPHY_REFRESH_YEARS = 500/);
-  assert.match(earthView, /SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 6_000/);
+  assert.match(earthView, /SURFACE_TOPOGRAPHY_REFRESH_YEARS = 400/);
+  assert.match(earthView, /SURFACE_TOPOGRAPHY_REFRESH_INTERVAL_MS = 4_000/);
   assert.match(earthView, /this\._playbackTopographyRefreshDue\(state, now\)/);
   assert.match(earthView, /refreshTopography: refreshExactTerrain \|\| refreshPlaybackTopography/);
   assert.match(surfaceTerrain, /if \(refreshTopography\) \{/);
@@ -115,7 +115,8 @@ test("fast-forward periodically builds coherent topographic epochs offscreen", (
   assert.match(surfaceTerrain, /2,500-year terrain band changes/);
   assert.match(workerSurfaceTerrain, /const atomicPlaybackRefresh = refreshTopography/);
   assert.match(workerSurfaceTerrain, /this\._syncComputeContext\(true\)/);
-  assert.match(workerSurfaceTerrain, /return this\._queueVisibleTerrainRefresh\(\)/);
+  assert.match(workerSurfaceTerrain, /radius: PLAYBACK_TERRAIN_REFRESH_RADIUS/);
+  assert.match(workerSurfaceTerrain, /reason: "playback-epoch"/);
   assert.match(workerSurfaceTerrain, /if \(!this\.pendingTerrainRefreshBatches\.size\) this\._syncComputeContext\(false\)/);
   assert.match(workerSurfaceTerrain, /return false;/);
 });
