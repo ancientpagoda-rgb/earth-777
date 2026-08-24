@@ -5,8 +5,10 @@ import { readFileSync } from "node:fs";
 const earthView = readFileSync(new URL("../src/render/earth-view.js", import.meta.url), "utf8");
 const globePresentation = readFileSync(new URL("../src/render/GlobePresentation.js", import.meta.url), "utf8");
 const surfacePresentation = readFileSync(new URL("../src/render/SurfacePresentation.js", import.meta.url), "utf8");
+const surfacePresentationBase = readFileSync(new URL("../src/render/SurfacePresentationBase.js", import.meta.url), "utf8");
 const rasterRefresh = readFileSync(new URL("../src/render/RasterRefresh.js", import.meta.url), "utf8");
 const surfaceTerrain = readFileSync(new URL("../src/render/SurfaceTerrainSystem.js", import.meta.url), "utf8");
+const main = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
 
 test("surface render hot path checks pending work without materializing diagnostics", () => {
   assert.match(earthView, /terrain\.hasPendingWork\?\.\(\)/);
@@ -31,7 +33,7 @@ test("surface science context is inactive while globe-only rendering does not ne
   assert.match(surfaceTerrain, /setSurfaceContextActive\(active/);
   assert.match(surfaceTerrain, /if \(!this\.surfaceContextActive \|\| !this\.origin\) return false/);
   assert.match(earthView, /const needsSurfaceContext = this\.mode !== "globe"/);
-  assert.match(earthView, /setEarthSystemState\?\.\(state, state\.seed, needsSurfaceContext\)/);
+  assert.match(earthView, /setEarthSystemState\?\.\(state, state\.seed, refreshContext, \{ refreshTerrain \}\)/);
 });
 
 test("surface water reuses cached hydrology context before issuing a fallback query", () => {
@@ -48,9 +50,9 @@ test("interaction prioritizes smooth frames before rebuilding all surface detail
 
 test("mouse-wheel zoom follows the conventional direction in globe and surface views", () => {
   assert.match(globePresentation, /controls\.zoomSpeed = 1\.0/);
-  assert.match(surfacePresentation, /controls\.zoomSpeed = 1\.0/);
+  assert.match(surfacePresentationBase, /controls\.zoomSpeed = 1\.0/);
   assert.doesNotMatch(globePresentation, /zoomSpeed = -/);
-  assert.doesNotMatch(surfacePresentation, /zoomSpeed = -/);
+  assert.doesNotMatch(surfacePresentationBase, /zoomSpeed = -/);
 });
 
 test("globe zoom keeps a single damping model throughout the gesture", () => {
@@ -90,4 +92,20 @@ test("globe interaction reuses cached diagnostics instead of rebuilding terrain 
 
 test("adaptive visual retuning cannot resize the globe during an active drag", () => {
   assert.match(earthView, /this\.mode !== "globe" && \(this\.interacting \|\| this\.descent \|\| this\.surfaceEntry\)/);
+});
+
+test("fast-forward batches worker advances and throttles expensive surface-state rebuilds", () => {
+  assert.match(main, /SIMULATION_INTERVAL_MS = 250/);
+  assert.match(earthView, /SURFACE_STATE_REFRESH_YEARS = 250/);
+  assert.match(earthView, /SURFACE_STATE_REFRESH_INTERVAL_MS = 3_000/);
+  assert.match(earthView, /this\._terrainStateRefreshDue\(state, force, now\)/);
+  assert.match(earthView, /yearDelta >= SURFACE_STATE_REFRESH_YEARS/);
+  assert.match(earthView, /force \|\| !this\.simulationPlaying, now/);
+  assert.match(surfaceTerrain, /if \(refreshTerrain\) this\.setGeomorphologyPatch/);
+});
+
+test("pausing fast-forward commits the exact final surface state", () => {
+  assert.match(earthView, /const stopped = this\.simulationPlaying && !next/);
+  assert.match(earthView, /this\._applyTerrainState\(this\.lastState, this\.mode !== "globe"\)/);
+  assert.match(earthView, /this\.mode === "surface"[\s\S]*this\.updateSurfaceWater\(\)/);
 });

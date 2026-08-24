@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const main = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
 const earthView = readFileSync(new URL("../src/render/earth-view.js", import.meta.url), "utf8");
 const surfacePresentation = readFileSync(new URL("../src/render/SurfacePresentation.js", import.meta.url), "utf8");
+const surfacePresentationBase = readFileSync(new URL("../src/render/SurfacePresentationBase.js", import.meta.url), "utf8");
 const workerSurfaceTerrain = readFileSync(new URL("../src/render/WorkerSurfaceTerrainSystem.js", import.meta.url), "utf8");
 const workerSurfaceEcology = readFileSync(new URL("../src/render/WorkerSurfaceEcologyManager.js", import.meta.url), "utf8");
 const surfaceComputeClient = readFileSync(new URL("../src/render/SurfaceComputeClient.js", import.meta.url), "utf8");
@@ -44,7 +45,7 @@ test("surface scene and terrain stack are absent from the eager EarthView module
 });
 
 test("surface terrain and vegetation CPU generation use a transferable worker with a compatibility fallback", () => {
-  assert.match(surfacePresentation, /WorkerSurfaceTerrainSystem/);
+  assert.match(surfacePresentationBase, /WorkerSurfaceTerrainSystem/);
   assert.match(surfaceComputeClient, /surface-compute\.worker\.js/);
   assert.match(surfaceComputeWorker, /buildTerrainChunkData/);
   assert.match(surfaceComputeWorker, /buildEcologyChunkPlan/);
