@@ -148,6 +148,29 @@ export function regionalTerrainResidualAt(patch, latitude, longitude) {
   return residual * regionalTerrainFeatherWeightAt(patch, latitude, longitude);
 }
 
+export function regionalTerrainResidualAtPatches(patches, latitude, longitude) {
+  if (!Array.isArray(patches) || patches.length === 0) return 0;
+  const compact = interpolatedEtopoBedrockElevationAt(latitude, longitude);
+  let weightedResidual = 0;
+  let totalWeight = 0;
+
+  for (const patch of patches) {
+    const weight = regionalTerrainFeatherWeightAt(patch, latitude, longitude);
+    if (!(weight > 0)) continue;
+    const highResolution = smoothedRegionalTerrainValueAt(patch, latitude, longitude);
+    if (!Number.isFinite(highResolution)) continue;
+    const residual = clamp(highResolution - compact, -MAX_ABS_RESIDUAL_METERS, MAX_ABS_RESIDUAL_METERS);
+    weightedResidual += residual * weight;
+    totalWeight += weight;
+  }
+
+  if (!(totalWeight > 0)) return 0;
+  // Normalize overlaps so neighboring retained patches blend rather than
+  // doubling their relief. A lone feathered edge still fades smoothly to the
+  // compact global ETOPO reconstruction.
+  return weightedResidual / totalWeight * Math.min(1, totalWeight);
+}
+
 export function buildRegionalTerrainUrl(latitude, longitude, {
   spanDegrees = DEFAULT_SPAN_DEGREES,
   resolutionMeters = DEFAULT_RESOLUTION_METERS
