@@ -84,7 +84,7 @@ export function createSurfacePresentation(canvas) {
   // Regional entry starts with a broad coarse world-stream buffer rather than a
   // finite map. Planetary floating-origin rebasing below lets this same local
   // buffer move around the whole globe without local coordinates growing large.
-  const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 84, radius: 2, segments: 18, verticalScale: 0.90 });
+  const terrain = new WorkerSurfaceTerrainSystem(scene, { chunkSizeKm: 84, radius: 2, segments: 18, verticalScale: 2.40 });
 
   // Regional/landscape rendering is an aerial reconstruction. Broad color comes
   // from simulated vegetation, hydrology and elevation vertex data; this shared
