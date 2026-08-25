@@ -133,6 +133,16 @@ jobs:
             exit "$PLAYTEST_STATUS"
           fi
 
+          set +e
+          node test/cdp-lite-smoke.mjs "$WS_ENDPOINT" 2>&1 | tee -a earth-777-playtest.log
+          LITE_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$LITE_STATUS" -ne 0 ]; then
+            cat /tmp/earth-777-preview.log
+            cat /tmp/earth-777-chrome.log
+            exit "$LITE_STATUS"
+          fi
+
       - name: Upload interaction playtest report
         if: always()
         uses: actions/upload-artifact@v4
