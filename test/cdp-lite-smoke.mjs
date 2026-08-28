@@ -98,6 +98,12 @@ const frameTime = await evaluate(`new Promise((resolve) => {
   requestAnimationFrame(tick);
 })`);
 
+await evaluate(`document.querySelector("#play")?.click()`);
+const textureBeforePausedReset = await evaluate(`Number(document.body.dataset.textureVersion ?? 0)`);
+await evaluate(`document.querySelector("#branch")?.click()`);
+await wait(350);
+const pausedResetTexture = await evaluate(`Number(document.body.dataset.textureVersion ?? 0)`);
+
 const fatalMessages = runtimeMessages.filter((message) =>
   message.method === "Runtime.exceptionThrown" || message.params?.entry?.level === "error"
 );
@@ -123,10 +129,11 @@ const checks = [
   [layerState?.active === "temperature", "Lite temperature layer did not activate"],
   [layerState?.url.includes("layer=temperature"), "Lite layer state was not written to the URL"],
   [Number(frameTime) > 0 && Number(frameTime) < 80, `Lite animation frames were too slow (${frameTime} ms)`],
+  [pausedResetTexture > textureBeforePausedReset, "Lite paused world reset did not force a fresh globe texture"],
   [fatalMessages.length === 0, "Lite runtime errors were reported"]
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
 
-console.log(JSON.stringify({ initial, acceleratedYear, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, messages: runtimeMessages }, null, 2));
+console.log(JSON.stringify({ initial, acceleratedYear, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, pausedResetTexture, messages: runtimeMessages }, null, 2));
 socket.close();
 if (failures.length) throw new Error(failures.join("; "));
