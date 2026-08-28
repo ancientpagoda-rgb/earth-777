@@ -47,6 +47,7 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
     mode: document.querySelector("#mode")?.textContent ?? "",
     worker: document.body.dataset.worker ?? "",
     quality: document.body.dataset.quality ?? "",
+    texture: document.body.dataset.texture ?? "",
     layers: document.querySelectorAll(".layer").length
   }))()`);
   if (initial?.ready === "complete" && initial?.canvas > 0 && initial?.status === "") break;
@@ -97,6 +98,12 @@ const frameTime = await evaluate(`new Promise((resolve) => {
   requestAnimationFrame(tick);
 })`);
 
+await evaluate(`document.querySelector("#play")?.click()`);
+const textureBeforePausedReset = await evaluate(`Number(document.body.dataset.textureVersion ?? 0)`);
+await evaluate(`document.querySelector("#branch")?.click()`);
+await wait(350);
+const pausedResetTexture = await evaluate(`Number(document.body.dataset.textureVersion ?? 0)`);
+
 const fatalMessages = runtimeMessages.filter((message) =>
   message.method === "Runtime.exceptionThrown" || message.params?.entry?.level === "error"
 );
@@ -108,6 +115,7 @@ const checks = [
   [initial?.temperature !== "—" && initial?.sea !== "—", "Lite climate readouts did not initialize"],
   [initial?.worker === "ready", "Lite worker did not initialize"],
   [["lean", "full"].includes(initial?.quality), "Lite adaptive quality did not resolve"],
+  [/^(384x192|512x256)$/.test(initial?.texture ?? ""), `Lite globe texture is not using the smoother render path (${initial?.texture ?? "missing"})`],
   [initial?.layers === 5, "Lite visual layer controls are incomplete"],
   [acceleratedYear && acceleratedYear !== initial?.year, "1K× playback did not advance the year"],
   [historyDrawn, "Lite history graph did not draw"],
@@ -121,10 +129,11 @@ const checks = [
   [layerState?.active === "temperature", "Lite temperature layer did not activate"],
   [layerState?.url.includes("layer=temperature"), "Lite layer state was not written to the URL"],
   [Number(frameTime) > 0 && Number(frameTime) < 80, `Lite animation frames were too slow (${frameTime} ms)`],
+  [pausedResetTexture > textureBeforePausedReset, "Lite paused world reset did not force a fresh globe texture"],
   [fatalMessages.length === 0, "Lite runtime errors were reported"]
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
 
-console.log(JSON.stringify({ initial, acceleratedYear, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, messages: runtimeMessages }, null, 2));
+console.log(JSON.stringify({ initial, acceleratedYear, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, pausedResetTexture, messages: runtimeMessages }, null, 2));
 socket.close();
 if (failures.length) throw new Error(failures.join("; "));
