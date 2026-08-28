@@ -47,6 +47,7 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
     mode: document.querySelector("#mode")?.textContent ?? "",
     worker: document.body.dataset.worker ?? "",
     quality: document.body.dataset.quality ?? "",
+    texture: document.body.dataset.texture ?? "",
     layers: document.querySelectorAll(".layer").length
   }))()`);
   if (initial?.ready === "complete" && initial?.canvas > 0 && initial?.status === "") break;
@@ -108,6 +109,7 @@ const checks = [
   [initial?.temperature !== "—" && initial?.sea !== "—", "Lite climate readouts did not initialize"],
   [initial?.worker === "ready", "Lite worker did not initialize"],
   [["lean", "full"].includes(initial?.quality), "Lite adaptive quality did not resolve"],
+  [/^(384x192|512x256)$/.test(initial?.texture ?? ""), `Lite globe texture is not using the smoother render path (${initial?.texture ?? "missing"})`],
   [initial?.layers === 5, "Lite visual layer controls are incomplete"],
   [acceleratedYear && acceleratedYear !== initial?.year, "1K× playback did not advance the year"],
   [historyDrawn, "Lite history graph did not draw"],
