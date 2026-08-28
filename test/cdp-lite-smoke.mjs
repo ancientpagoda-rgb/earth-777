@@ -31,7 +31,7 @@ const evaluate = async (expression) => {
 await send("Runtime.enable");
 await send("Log.enable");
 await send("Page.enable");
-await send("Page.navigate", { url: "http://127.0.0.1:4173/earth-777/lite/" });
+await send("Page.navigate", { url: "http://127.0.0.1:4173/earth-777/lite/?seed=777&year=0&layer=terrain&lat=0&lon=25" });
 
 let initial = null;
 for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -44,7 +44,10 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
     year: document.querySelector("#year")?.textContent ?? "",
     temperature: document.querySelector("#temperature")?.textContent ?? "—",
     sea: document.querySelector("#sea")?.textContent ?? "—",
-    mode: document.querySelector("#mode")?.textContent ?? ""
+    mode: document.querySelector("#mode")?.textContent ?? "",
+    worker: document.body.dataset.worker ?? "",
+    quality: document.body.dataset.quality ?? "",
+    layers: document.querySelectorAll(".layer").length
   }))()`);
   if (initial?.ready === "complete" && initial?.canvas > 0 && initial?.status === "") break;
 }
@@ -52,6 +55,7 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
 await evaluate(`document.querySelector('[data-speed="1000"]')?.click()`);
 await wait(650);
 const acceleratedYear = await evaluate(`document.querySelector("#year")?.textContent ?? ""`);
+const historyDrawn = await evaluate(`document.querySelector("#history-temp")?.getAttribute("points")?.length > 0`);
 
 await evaluate(`document.querySelector("#mode")?.click()`);
 await wait(350);
@@ -59,11 +63,28 @@ const surface = await evaluate(`(() => ({
   active: document.body.classList.contains("surface"),
   button: document.querySelector("#mode")?.textContent ?? "",
   place: document.querySelector("#place")?.textContent ?? "",
-  canvas: document.querySelectorAll("canvas").length
+  canvas: document.querySelectorAll("canvas").length,
+  plants: Number(document.body.dataset.surfacePlants ?? 0),
+  rivers: Number(document.body.dataset.surfaceRivers ?? 0)
 }))()`);
 await evaluate(`document.querySelector("#mode")?.click()`);
 await wait(150);
 const returned = await evaluate(`!document.body.classList.contains("surface") && document.querySelector("#mode")?.textContent === "DESCEND"`);
+
+const viewport = await evaluate(`({ width: innerWidth, height: innerHeight })`);
+await send("Input.dispatchMouseEvent", { type: "mousePressed", x: viewport.width / 2, y: viewport.height / 2, button: "left", clickCount: 1 });
+await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: viewport.width / 2, y: viewport.height / 2, button: "left", clickCount: 1 });
+await wait(120);
+const selectedUrl = await evaluate(`location.href`);
+
+await evaluate(`document.querySelector('[data-layer="temperature"]')?.click()`);
+await wait(120);
+const layerState = await evaluate(`({
+  active: document.body.dataset.layer,
+  pressed: document.querySelector('[data-layer="temperature"]')?.classList.contains("on"),
+  ariaPressed: document.querySelector('[data-layer="temperature"]')?.getAttribute("aria-pressed"),
+  url: location.href
+})`);
 
 const frameTime = await evaluate(`new Promise((resolve) => {
   let frames = 0;
@@ -85,16 +106,25 @@ const checks = [
   [initial?.status === "", `Lite load status reported ${initial?.status ?? "unknown"}`],
   [initial?.canvas === 1, "Lite renderer did not create exactly one canvas"],
   [initial?.temperature !== "—" && initial?.sea !== "—", "Lite climate readouts did not initialize"],
+  [initial?.worker === "ready", "Lite worker did not initialize"],
+  [["lean", "full"].includes(initial?.quality), "Lite adaptive quality did not resolve"],
+  [initial?.layers === 5, "Lite visual layer controls are incomplete"],
   [acceleratedYear && acceleratedYear !== initial?.year, "1K× playback did not advance the year"],
+  [historyDrawn, "Lite history graph did not draw"],
   [surface?.active && surface?.button === "RETURN TO GLOBE", "Lite surface mode did not activate"],
   [Boolean(surface?.place), "Lite surface location readout is empty"],
   [surface?.canvas === 1, "Lite surface transition replaced or duplicated the canvas"],
+  [surface?.plants > 0, "Lite surface vegetation did not instantiate"],
+  [surface?.rivers >= 0, "Lite surface river diagnostics are invalid"],
   [returned, "Lite surface mode did not return to globe"],
+  [selectedUrl.includes("lat=") && selectedUrl.includes("lon="), "Lite globe selection did not update the shareable URL"],
+  [layerState?.active === "temperature", "Lite temperature layer did not activate"],
+  [layerState?.url.includes("layer=temperature"), "Lite layer state was not written to the URL"],
   [Number(frameTime) > 0 && Number(frameTime) < 80, `Lite animation frames were too slow (${frameTime} ms)`],
   [fatalMessages.length === 0, "Lite runtime errors were reported"]
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
 
-console.log(JSON.stringify({ initial, acceleratedYear, surface, returned, frameTime, messages: runtimeMessages }, null, 2));
+console.log(JSON.stringify({ initial, acceleratedYear, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, messages: runtimeMessages }, null, 2));
 socket.close();
 if (failures.length) throw new Error(failures.join("; "));
