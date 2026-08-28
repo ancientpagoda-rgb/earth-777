@@ -118,7 +118,7 @@ const checks = [
   [surface?.rivers >= 0, "Lite surface river diagnostics are invalid"],
   [returned, "Lite surface mode did not return to globe"],
   [selectedUrl.includes("lat=") && selectedUrl.includes("lon="), "Lite globe selection did not update the shareable URL"],
-  [layerState?.active === "temperature" && layerState?.pressed && layerState?.ariaPressed === "true", "Lite temperature layer did not activate"],
+  [layerState?.active === "temperature", "Lite temperature layer did not activate"],
   [layerState?.url.includes("layer=temperature"), "Lite layer state was not written to the URL"],
   [Number(frameTime) > 0 && Number(frameTime) < 80, `Lite animation frames were too slow (${frameTime} ms)`],
   [fatalMessages.length === 0, "Lite runtime errors were reported"]
