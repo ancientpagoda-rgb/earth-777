@@ -22,6 +22,8 @@
     "data:ingest": "npm run data:paleo && npm run data:terrain && npm run data:climate && npm run data:vegetation && npm run data:soil && npm run data:pft-drivers",
     "test": "node --test test/*.test.js",
     "test:acceptance:lite": "node test/cdp-lite-acceptance.mjs",
+    "test:acceptance:lite:baseline": "node scripts/run-lite-acceptance-with-baseline.mjs",
+    "baseline:lite": "node scripts/record-lite-baseline.mjs",
     "data:pft-drivers": "python3 scripts/ingest-biome4-pft-drivers.py"
   },
   "dependencies": {
