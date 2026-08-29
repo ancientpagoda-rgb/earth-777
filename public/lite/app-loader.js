@@ -26,8 +26,7 @@ let source = sourceText.replace(
 // Surface mode is a direct-manipulation map: the terrain under the pointer must
 // follow the mouse on both axes. Longitude already has that grab-and-pan sign,
 // but the generated vertical formula used the opposite sign, so dragging up/down
-// moved the terrain away from the pointer. Correct only that generated expression;
-// touch pinch and wheel zoom semantics remain unchanged.
+// moved the terrain away from the pointer. Correct only that generated expression.
 const surfacePanMarker = "surfaceLat=clamp(surfaceLat-(now.y-old.y)/innerHeight*surfaceSpanKm/111,-89,89);";
 if (!source.includes(surfacePanMarker)) {
   throw new Error('Lite surface mouse-pan contract missing from generated app source');
@@ -35,6 +34,110 @@ if (!source.includes(surfacePanMarker)) {
 source = source.replace(
   surfacePanMarker,
   "surfaceLat=clamp(surfaceLat+(now.y-old.y)/innerHeight*surfaceSpanKm/111,-89,89);",
+);
+
+// Seamless Planetary Zoom keeps the user in surface mode while the presentation
+// continuously hands off from the local tangent reconstruction to the existing
+// globe. The geographic center stays authoritative throughout the handoff, so
+// zooming back in reconstructs the same location instead of teleporting or
+// switching to a second navigation state.
+const surfaceModeStateMarker = "let mode='globe',surfaceLat=selectedLat??0,surfaceLon=selectedLon??0,surfaceSpanKm=620,surfaceDirty=true;";
+if (!source.includes(surfaceModeStateMarker)) {
+  throw new Error('Lite surface-mode state contract missing from generated app source');
+}
+source = source.replace(surfaceModeStateMarker, [
+  surfaceModeStateMarker,
+  "const PLANETARY_BLEND_START_KM=1400,PLANETARY_BLEND_END_KM=12000,PLANETARY_DETAIL_CUTOFF_KM=12000,PLANETARY_MAX_SPAN_KM=40000,PLANETARY_DRAG_SPAN_KM=20000;",
+  "const planetaryMaterialState=[],planetaryMaterialSeen=new Set(),planetaryPoint=new THREE.Vector3(),planetaryNorth=new THREE.Vector3(),planetaryFace=new THREE.Vector3(0,0,1),planetaryAxisZ=new THREE.Vector3(0,0,1),planetaryCenterQ=new THREE.Quaternion(),planetaryRollQ=new THREE.Quaternion();",
+  "globeRoot.traverse(object=>{const list=Array.isArray(object.material)?object.material:[object.material];for(const material of list){if(!material||planetaryMaterialSeen.has(material))continue;planetaryMaterialSeen.add(material);planetaryMaterialState.push({material,opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite})}});",
+  "function planetaryZoomBlend(){const raw=clamp((Math.log(surfaceSpanKm)-Math.log(PLANETARY_BLEND_START_KM))/(Math.log(PLANETARY_BLEND_END_KM)-Math.log(PLANETARY_BLEND_START_KM)),0,1);return raw*raw*(3-2*raw)}",
+  "function planetaryFarZoom(){const raw=clamp((Math.log(surfaceSpanKm)-Math.log(PLANETARY_BLEND_END_KM))/(Math.log(PLANETARY_MAX_SPAN_KM)-Math.log(PLANETARY_BLEND_END_KM)),0,1);return raw*raw*(3-2*raw)}",
+  "function surfaceDragSpanKm(){return Math.min(surfaceSpanKm,PLANETARY_DRAG_SPAN_KM)}",
+  "function centerGlobeOnSurface(){const lat=surfaceLat*Math.PI/180,lon=surfaceLon*Math.PI/180,sinLat=Math.sin(lat),cosLat=Math.cos(lat),sinLon=Math.sin(lon),cosLon=Math.cos(lon);planetaryPoint.set(cosLat*cosLon,FY*sinLat,-cosLat*sinLon).normalize();planetaryCenterQ.setFromUnitVectors(planetaryPoint,planetaryFace);planetaryNorth.set(-sinLat*cosLon,FY*cosLat,sinLat*sinLon).normalize().applyQuaternion(planetaryCenterQ);planetaryRollQ.setFromAxisAngle(planetaryAxisZ,Math.atan2(planetaryNorth.x,planetaryNorth.y));globeRoot.quaternion.copy(planetaryRollQ).multiply(planetaryCenterQ).normalize()}",
+  "function setPlanetaryGlobeOpacity(alpha){const value=clamp(alpha,0,1);globeRoot.visible=value>.002;for(const state of planetaryMaterialState){const transparent=value<.999?true:state.transparent;if(state.material.transparent!==transparent){state.material.transparent=transparent;state.material.needsUpdate=true}state.material.opacity=state.opacity*value;state.material.depthWrite=value>.92?state.depthWrite:false}}",
+  "function restorePlanetaryPresentation(){for(const state of planetaryMaterialState){if(state.material.transparent!==state.transparent){state.material.transparent=state.transparent;state.material.needsUpdate=true}state.material.opacity=state.opacity;state.material.depthWrite=state.depthWrite}surfaceMesh.material.opacity=1;surfaceMesh.material.transparent=false;waterMesh.material.opacity=.58;plantMesh.material.opacity=1;animalMesh.material.opacity=1;riverLines.material.opacity=.92;delete document.body.dataset.surfaceSpanKm;delete document.body.dataset.surfaceZoomBlend;delete document.body.dataset.planetaryZoom}",
+  "function applySurfaceZoomPresentation(){if(mode!=='surface')return;const t=planetaryZoomBlend(),far=planetaryFarZoom(),local=1-t;if(t>.001)centerGlobeOnSurface();setPlanetaryGlobeOpacity(t);surfaceGroup.visible=t<.999;surfaceMesh.material.transparent=true;surfaceMesh.material.opacity=local;waterMesh.material.opacity=.58*local;plantMesh.material.transparent=true;plantMesh.material.opacity=local;animalMesh.material.transparent=true;animalMesh.material.opacity=local;riverLines.material.opacity=.92*local;if(surfaceSpanKm>1800){plantMesh.visible=false;animalMesh.visible=false}if(surfaceSpanKm>6000)riverLines.visible=false;const cameraZ=t<.999?mix(6.8,3.25,t):mix(3.25,5.5,far);camera.position.set(0,mix(4.25,.12,t),cameraZ);camera.lookAt(0,mix(-.25,0,t),0);document.body.dataset.surfaceSpanKm=surfaceSpanKm.toFixed(1);document.body.dataset.surfaceZoomBlend=t.toFixed(4);document.body.dataset.planetaryZoom=t>=.999?'globe':t>.001?'transition':'surface'}"
+].join('\n  '));
+
+// Once the globe has fully taken over, stop spending time rebuilding the local
+// terrain/ecology mesh. Zooming back below the handoff threshold marks the
+// surface dirty again through the normal wheel/pinch path and reconstructs it.
+const rebuildMarker = "if(mode!=='surface')return;\n    const scale=12/surfaceSpanKm";
+if (!source.includes(rebuildMarker)) {
+  throw new Error('Lite surface rebuild contract missing from generated app source');
+}
+source = source.replace(
+  rebuildMarker,
+  "if(mode!=='surface')return;\n    if(surfaceSpanKm>=PLANETARY_DETAIL_CUTOFF_KM){surfaceDirty=false;applySurfaceZoomPresentation();return;}\n    const scale=12/surfaceSpanKm",
+);
+
+// Re-apply the handoff after every local rebuild because rebuildSurface owns the
+// visibility of plants, animals and river geometry at ordinary surface scales.
+const rebuildEndMarker = "  }\n  const ray=new THREE.Raycaster();";
+if (!source.includes(rebuildEndMarker)) {
+  throw new Error('Lite surface rebuild-end contract missing from generated app source');
+}
+source = source.replace(
+  rebuildEndMarker,
+  "    applySurfaceZoomPresentation();\n  }\n  const ray=new THREE.Raycaster();",
+);
+
+// At planetary scale, dragging still changes the authoritative geographic center,
+// which is then used to rotate the globe. Cap the physical span used by drag so a
+// full-width gesture remains about a half-turn instead of becoming hypersensitive.
+const surfaceLonPanMarker = "surfaceLon=wrapLon(surfaceLon-(now.x-old.x)/innerWidth*surfaceSpanKm/(111*cos));";
+if (!source.includes(surfaceLonPanMarker)) {
+  throw new Error('Lite surface longitude-pan contract missing from generated app source');
+}
+source = source.replace(
+  surfaceLonPanMarker,
+  "surfaceLon=wrapLon(surfaceLon-(now.x-old.x)/innerWidth*surfaceDragSpanKm()/(111*cos));",
+);
+const correctedSurfaceLatPanMarker = "surfaceLat=clamp(surfaceLat+(now.y-old.y)/innerHeight*surfaceSpanKm/111,-89,89);";
+if (!source.includes(correctedSurfaceLatPanMarker)) {
+  throw new Error('Lite corrected surface latitude-pan contract missing from generated app source');
+}
+source = source.replace(
+  correctedSurfaceLatPanMarker,
+  "surfaceLat=clamp(surfaceLat+(now.y-old.y)/innerHeight*surfaceDragSpanKm()/111,-89,89);applySurfaceZoomPresentation();",
+);
+
+// Wheel and pinch can now traverse the whole local->planet range without changing
+// mode. Every input update immediately refreshes camera, crossfade and diagnostics.
+const pinchZoomMarker = "surfaceSpanKm=clamp(surfaceSpanKm*factor,70,1800);surfaceDirty=true";
+if (!source.includes(pinchZoomMarker)) {
+  throw new Error('Lite surface pinch-zoom contract missing from generated app source');
+}
+source = source.replace(
+  pinchZoomMarker,
+  "surfaceSpanKm=clamp(surfaceSpanKm*factor,70,PLANETARY_MAX_SPAN_KM);surfaceDirty=true;applySurfaceZoomPresentation()",
+);
+const wheelZoomMarker = "surfaceSpanKm=clamp(surfaceSpanKm*Math.exp(e.deltaY*.0012),70,1800);surfaceDirty=true";
+if (!source.includes(wheelZoomMarker)) {
+  throw new Error('Lite surface wheel-zoom contract missing from generated app source');
+}
+source = source.replace(
+  wheelZoomMarker,
+  "surfaceSpanKm=clamp(surfaceSpanKm*Math.exp(e.deltaY*.0012),70,PLANETARY_MAX_SPAN_KM);surfaceDirty=true;applySurfaceZoomPresentation()",
+);
+
+// Surface reset must also restore the local presentation immediately, while an
+// explicit Return to Globe restores the globe materials before leaving surface mode.
+const surfaceResetMarker = "else{surfaceSpanKm=620;surfaceDirty=true}";
+if (!source.includes(surfaceResetMarker)) {
+  throw new Error('Lite surface reset contract missing from generated app source');
+}
+source = source.replace(
+  surfaceResetMarker,
+  "else{surfaceSpanKm=620;surfaceDirty=true;applySurfaceZoomPresentation()}",
+);
+const exitSurfaceMarker = "function exitSurface(){mode='globe';";
+if (!source.includes(exitSurfaceMarker)) {
+  throw new Error('Lite surface exit contract missing from generated app source');
+}
+source = source.replace(
+  exitSurfaceMarker,
+  "function exitSurface(){restorePlanetaryPresentation();mode='globe';",
 );
 
 const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
