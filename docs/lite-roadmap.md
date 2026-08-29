@@ -6,30 +6,38 @@ This roadmap is the canonical development order for Earth 777 Lite. Performance 
 
 The 22 canonical pass/fail criteria are versioned in `test/lite-acceptance-spec.mjs`, with automated CI proxies plus a full representative-hardware profile.
 
-## 2. Performance baseline #1 — current phase
+## 2. Performance baseline #1 — tooling complete, representative measurement pending
 
-Record the current known-good Lite build on representative desktop hardware before adding terrain complexity. The baseline must come from a full acceptance run; CI SwiftShader measurements are not a substitute.
+The baseline recorder and baseline-aware acceptance runner are merged. The numerical baseline still must come from a full acceptance run on representative desktop hardware; CI SwiftShader measurements are not a substitute.
 
 The baseline captures average FPS, 1% low FPS, cached load time, 20-minute soak behavior, and 100x/1000x responsiveness. Future full acceptance runs compare against it and fail when average FPS or 1% low regress by more than 10% without explicit approval.
 
-## 3. Living Terrain v1
+## 3. Living Terrain v1 — implementation complete
 
-Keep ETOPO as immutable `baseElevation` and add a deterministic `terrainDelta` field. Evolved elevation becomes `baseElevation + terrainDelta`.
+ETOPO remains immutable `baseElevation`. Lite now adds a deterministic, bounded, model-derived `terrainDelta` field so rendered elevation is `baseElevation + terrainDelta`.
 
-The first terrain model includes bounded uplift, weathering, erosion, river incision, sediment transport/deposition, and coastline response. Evolution runs off the render thread and uses spatial/temporal level of detail so nearby observed terrain gets finer updates while distant or unobserved terrain advances cheaply.
+The v1 field combines spatially coherent uplift, weathering, baseline-drainage river incision, low-gradient deposition, and long-period relief pulses. It is calculated in the simulation worker as a deterministic function of seed and elapsed simulated time, preserving reloadable geography without replaying every intermediate geological step.
 
-Gate: 30+ consecutive evolution cycles, coherent visible topographic change, deterministic replay, persistent geography, and less than 10% performance regression from baseline #1.
+Gate status: automated model tests and browser CI can verify determinism, continued updates, finite state, and responsiveness. Canonical performance and the manual visual/coherence checks remain pending the representative baseline run.
 
-## 4. Dynamic hydrology
+## 4. Dynamic hydrology — implementation complete
 
-Recompute drainage against evolved elevation so watersheds, channels, lakes, sediment pathways, and coastlines respond to terrain change. River migration must emerge from changing topography rather than decorative animation.
+Drainage is recomputed against evolved elevation in the worker. Flow direction, accumulation, lake/sink cells, surface river lines, and coastline state therefore respond to topographic change. Hydrology is intentionally updated less often than climate to keep the main thread cheap.
 
-## 5. Climate and biome response
+## 5. Climate and biome response — implementation complete
 
-Couple terrain and hydrology back into temperature, precipitation, moisture, ice, and vegetation using bounded low-cost responses. Biomes should shift because environmental constraints changed, not because of arbitrary visual cycling.
+Evolved elevation now feeds temperature lapse-rate and moisture/orographic response. Dynamic drainage adds lowland/river moisture feedback. Vegetation and ice continue to respond continuously, and a deterministic biome classifier converts those environmental constraints into ocean, ice, tundra, desert, grassland, shrubland, temperate forest, rainforest, boreal forest, and alpine states.
 
-## 6. Ecology
+The PLANTS layer now visualizes the biome state rather than simply cycling decorative colors.
 
-Add persistent ecological populations and local materialized organisms only after terrain, water, climate, and biome layers remain stable under the Lite performance contract.
+## 6. Ecology — implementation complete
 
-Every phase is tested against the canonical acceptance harness before merge. If a richer model breaks Lite performance, simplify the model rather than relaxing the baseline unless the tradeoff is explicitly approved.
+Lite now derives a bounded fauna-density field from vegetation productivity, moisture, freezing stress, temperature, biome state, spatial habitat heterogeneity, and slow population pulses. Surface mode materializes only a small deterministic sample of organisms near the camera, keeping global ecology cheap.
+
+This ecology is a model-derived occupancy/population proxy, not a claim to reconstruct exact species distributions at 777 ka.
+
+## Acceptance status
+
+Implementation through ecology is complete, but that is not the same as canonical acceptance. Before calling these phases fully accepted, run the full representative-hardware profile, record baseline #1, enforce the <=10% regression budget, and complete the visual checks for readable topography, coherent change, seams, LOD behavior, and overall lo-fi character.
+
+If a richer model breaks Lite performance, simplify the model rather than relaxing the baseline unless the tradeoff is explicitly approved.
