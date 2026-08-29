@@ -77,27 +77,34 @@ source = source.replace(
 );
 document.body.dataset.surfaceNaturalism = 'biome-character-v1';
 
-// Seamless Planetary Zoom keeps the user in surface mode while the presentation
-// continuously hands off from the local tangent reconstruction to the existing
-// globe. The geographic center stays authoritative throughout the handoff, so
-// zooming back in reconstructs the same location instead of teleporting or
-// switching to a second navigation state.
+// Navigation 2.0 uses one camera state across the surface-to-globe continuum.
+// The local terrain starts bending before the globe can appear, so the handoff is
+// tangent surface -> curved region -> hemisphere -> globe rather than a sphere
+// cross-fading inside an otherwise flat sheet.
 const surfaceModeStateMarker = "let mode='globe',surfaceLat=selectedLat??0,surfaceLon=selectedLon??0,surfaceSpanKm=620,surfaceDirty=true;";
 if (!source.includes(surfaceModeStateMarker)) {
   throw new Error('Lite surface-mode state contract missing from generated app source');
 }
 source = source.replace(surfaceModeStateMarker, [
   surfaceModeStateMarker,
-  "const PLANETARY_BLEND_START_KM=5200,PLANETARY_BLEND_END_KM=12000,PLANETARY_GLOBE_REVEAL_KM=5200,PLANETARY_DETAIL_CUTOFF_KM=12000,PLANETARY_MAX_SPAN_KM=40000,PLANETARY_DRAG_SPAN_KM=20000;",
+  "const PLANETARY_CURVE_START_KM=1800,PLANETARY_CURVE_FULL_KM=9000,PLANETARY_BLEND_START_KM=9000,PLANETARY_BLEND_END_KM=14000,PLANETARY_GLOBE_REVEAL_KM=9000,PLANETARY_DETAIL_CUTOFF_KM=14000,PLANETARY_MAX_SPAN_KM=40000,PLANETARY_DRAG_SPAN_KM=20000,EARTH_RADIUS_KM=6371;",
+  "let surfaceOrbitYaw=0,surfaceOrbitPitch=0,surfaceOrbitRoll=0,surfaceFocusX=0,surfaceFocusY=0;",
   "const planetaryMaterialState=[],planetaryMaterialSeen=new Set(),planetaryPoint=new THREE.Vector3(),planetaryNorth=new THREE.Vector3(),planetaryFace=new THREE.Vector3(0,0,1),planetaryAxisZ=new THREE.Vector3(0,0,1),planetaryCenterQ=new THREE.Quaternion(),planetaryRollQ=new THREE.Quaternion();",
   "globeRoot.traverse(object=>{const list=Array.isArray(object.material)?object.material:[object.material];for(const material of list){if(!material||planetaryMaterialSeen.has(material))continue;planetaryMaterialSeen.add(material);planetaryMaterialState.push({material,opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite})}});",
-  "function planetaryZoomBlend(){const raw=clamp((Math.log(surfaceSpanKm)-Math.log(PLANETARY_BLEND_START_KM))/(Math.log(PLANETARY_BLEND_END_KM)-Math.log(PLANETARY_BLEND_START_KM)),0,1);return raw*raw*(3-2*raw)}",
-  "function planetaryFarZoom(){const raw=clamp((Math.log(surfaceSpanKm)-Math.log(PLANETARY_BLEND_END_KM))/(Math.log(PLANETARY_MAX_SPAN_KM)-Math.log(PLANETARY_BLEND_END_KM)),0,1);return raw*raw*(3-2*raw)}",
+  "function smoothRange(value,start,end){const raw=clamp((Math.log(Math.max(value,start))-Math.log(start))/(Math.log(end)-Math.log(start)),0,1);return raw*raw*(3-2*raw)}",
+  "function planetaryCurveBlend(){return surfaceSpanKm<=PLANETARY_CURVE_START_KM?0:smoothRange(surfaceSpanKm,PLANETARY_CURVE_START_KM,PLANETARY_CURVE_FULL_KM)}",
+  "function planetaryZoomBlend(){return surfaceSpanKm<=PLANETARY_BLEND_START_KM?0:smoothRange(surfaceSpanKm,PLANETARY_BLEND_START_KM,PLANETARY_BLEND_END_KM)}",
+  "function planetaryFarZoom(){return surfaceSpanKm<=PLANETARY_BLEND_END_KM?0:smoothRange(surfaceSpanKm,PLANETARY_BLEND_END_KM,PLANETARY_MAX_SPAN_KM)}",
   "function surfaceDragSpanKm(){return Math.min(surfaceSpanKm,PLANETARY_DRAG_SPAN_KM)}",
+  "function surfaceWheelRate(e){return e.shiftKey?.0024:e.ctrlKey?.00045:.0012}",
   "function centerGlobeOnSurface(){const lat=surfaceLat*Math.PI/180,lon=surfaceLon*Math.PI/180,sinLat=Math.sin(lat),cosLat=Math.cos(lat),sinLon=Math.sin(lon),cosLon=Math.cos(lon);planetaryPoint.set(cosLat*cosLon,FY*sinLat,-cosLat*sinLon).normalize();planetaryCenterQ.setFromUnitVectors(planetaryPoint,planetaryFace);planetaryNorth.set(-sinLat*cosLon,FY*cosLat,sinLat*sinLon).normalize().applyQuaternion(planetaryCenterQ);planetaryRollQ.setFromAxisAngle(planetaryAxisZ,Math.atan2(planetaryNorth.x,planetaryNorth.y));globeRoot.quaternion.copy(planetaryRollQ).multiply(planetaryCenterQ).normalize()}",
   "function setPlanetaryGlobeOpacity(alpha){if(surfaceSpanKm<PLANETARY_GLOBE_REVEAL_KM){globeRoot.visible=false;for(const state of planetaryMaterialState){state.material.opacity=0;state.material.transparent=true;state.material.depthWrite=false}return}const value=clamp(alpha,0,1);globeRoot.visible=value>.002;for(const state of planetaryMaterialState){const transparent=value<.999?true:state.transparent;if(state.material.transparent!==transparent){state.material.transparent=transparent;state.material.needsUpdate=true}state.material.opacity=state.opacity*value;state.material.depthWrite=value>.92?state.depthWrite:false}}",
-  "function restorePlanetaryPresentation(){for(const state of planetaryMaterialState){if(state.material.transparent!==state.transparent){state.material.transparent=state.transparent;state.material.needsUpdate=true}state.material.opacity=state.opacity;state.material.depthWrite=state.depthWrite}surfaceMesh.material.opacity=1;surfaceMesh.material.transparent=false;surfaceMesh.material.needsUpdate=true;waterMesh.material.opacity=activeBiomeWaterOpacity;plantMesh.material.opacity=1;animalMesh.material.opacity=1;riverLines.material.opacity=activeBiomeRiverOpacity;delete document.body.dataset.surfaceSpanKm;delete document.body.dataset.surfaceZoomBlend;delete document.body.dataset.planetaryZoom}",
-  "function applySurfaceZoomPresentation(){if(mode!=='surface')return;applyBiomeSurfaceCharacter(false);const t=planetaryZoomBlend(),far=planetaryFarZoom(),local=1-t;selectionMarker.visible=false;if(t>.001)centerGlobeOnSurface();setPlanetaryGlobeOpacity(t);surfaceGroup.visible=t<.999;surfaceMesh.material.transparent=true;surfaceMesh.material.opacity=local;waterMesh.material.opacity=activeBiomeWaterOpacity*local;plantMesh.material.transparent=true;plantMesh.material.opacity=local;animalMesh.material.transparent=true;animalMesh.material.opacity=local;riverLines.material.opacity=activeBiomeRiverOpacity*local;if(surfaceSpanKm>1800){plantMesh.visible=false;animalMesh.visible=false}if(surfaceSpanKm>6000)riverLines.visible=false;const cameraZ=t<.999?mix(6.8,3.25,t):mix(3.25,5.5,far);camera.position.set(0,mix(4.25,.12,t),cameraZ);camera.lookAt(0,mix(-.25,0,t),0);document.body.dataset.surfaceSpanKm=surfaceSpanKm.toFixed(1);document.body.dataset.surfaceZoomBlend=t.toFixed(4);document.body.dataset.planetaryZoom=t>=.999?'globe':t>.001?'transition':'surface'}"
+  "function curveGeometryToPlanet(geometry,amount,scale){const position=geometry?.attributes?.position;if(!position||amount<=0)return;const array=position.array;for(let i=0;i+2<array.length;i+=3){const ox=array[i],oy=array[i+1],oz=array[i+2],xKm=ox/scale,zKm=oz/scale,d=Math.hypot(xKm,zKm);if(d<1e-6)continue;const theta=Math.min(1.25,d/EARTH_RADIUS_KM),factor=EARTH_RADIUS_KM*Math.sin(theta)/d,sag=EARTH_RADIUS_KM*(Math.cos(theta)-1)*scale;array[i]=mix(ox,xKm*factor*scale,amount);array[i+1]=oy+sag*amount;array[i+2]=mix(oz,zKm*factor*scale,amount)}position.needsUpdate=true;geometry.computeBoundingSphere?.()}",
+  "function applyPlanetaryCurvature(){const amount=planetaryCurveBlend();if(amount<=0){document.body.dataset.surfaceCurvature='0.0000';return}const scale=12/surfaceSpanKm;curveGeometryToPlanet(surfaceMesh.geometry,amount,scale);curveGeometryToPlanet(riverGeom,amount,scale);document.body.dataset.surfaceCurvature=amount.toFixed(4)}",
+  "function applySurfaceCameraPose(t,far){const baseTargetY=mix(-.25,0,t),baseZ=t<.999?mix(6.8,3.25,t):mix(3.25,5.5,far),baseY=mix(4.25,.12,t),radius=Math.max(.25,Math.hypot(baseZ,baseY-baseTargetY)),defaultPitch=Math.atan2(baseY-baseTargetY,baseZ),pitch=clamp(defaultPitch+surfaceOrbitPitch,-1.2,1.35),horizontal=Math.max(.05,Math.cos(pitch)*radius),targetY=baseTargetY+surfaceFocusY;camera.position.set(surfaceFocusX+Math.sin(surfaceOrbitYaw)*horizontal,targetY+Math.sin(pitch)*radius,Math.cos(surfaceOrbitYaw)*horizontal);camera.up.set(0,1,0);camera.lookAt(surfaceFocusX,targetY,0);if(surfaceOrbitRoll)camera.rotateZ(surfaceOrbitRoll)}",
+  "function resetSurfaceCameraOrientation(){surfaceOrbitYaw=0;surfaceOrbitPitch=0;surfaceOrbitRoll=0;surfaceFocusX=0;surfaceFocusY=0;document.body.dataset.surfaceCamera='default';if(mode==='surface')applySurfaceZoomPresentation()}",
+  "function restorePlanetaryPresentation(){for(const state of planetaryMaterialState){if(state.material.transparent!==state.transparent){state.material.transparent=state.transparent;state.material.needsUpdate=true}state.material.opacity=state.opacity;state.material.depthWrite=state.depthWrite}surfaceMesh.material.opacity=1;surfaceMesh.material.transparent=false;surfaceMesh.material.needsUpdate=true;waterMesh.material.opacity=activeBiomeWaterOpacity;plantMesh.material.opacity=1;animalMesh.material.opacity=1;riverLines.material.opacity=activeBiomeRiverOpacity;delete document.body.dataset.surfaceSpanKm;delete document.body.dataset.surfaceZoomBlend;delete document.body.dataset.planetaryZoom;delete document.body.dataset.surfaceCurvature}",
+  "function applySurfaceZoomPresentation(){if(mode!=='surface')return;applyBiomeSurfaceCharacter(false);const curve=planetaryCurveBlend(),t=planetaryZoomBlend(),far=planetaryFarZoom(),local=1-t;selectionMarker.visible=false;if(t>.001)centerGlobeOnSurface();setPlanetaryGlobeOpacity(t);surfaceGroup.visible=t<.999;surfaceMesh.material.transparent=true;surfaceMesh.material.opacity=local;waterMesh.material.opacity=activeBiomeWaterOpacity*local*(1-curve);plantMesh.material.transparent=true;plantMesh.material.opacity=local;animalMesh.material.transparent=true;animalMesh.material.opacity=local;riverLines.material.opacity=activeBiomeRiverOpacity*local;if(surfaceSpanKm>1800){plantMesh.visible=false;animalMesh.visible=false}if(surfaceSpanKm>9000)riverLines.visible=false;applySurfaceCameraPose(t,far);document.body.dataset.surfaceSpanKm=surfaceSpanKm.toFixed(1);document.body.dataset.surfaceZoomBlend=t.toFixed(4);document.body.dataset.surfaceCurvature=curve.toFixed(4);document.body.dataset.planetaryZoom=t>=.999?'globe':t>.001?'transition':curve>.001?'curved-surface':'surface'}"
 ].join('\n  '));
 
 // Once the globe has fully taken over, stop spending time rebuilding the local
@@ -112,20 +119,38 @@ source = source.replace(
   "if(mode!=='surface')return;\n    if(surfaceSpanKm>=PLANETARY_DETAIL_CUTOFF_KM){surfaceDirty=false;applySurfaceZoomPresentation();return;}\n    const scale=12/surfaceSpanKm",
 );
 
-// Re-apply biome character and the planetary handoff after each local rebuild.
-// The density multiplier is applied only here, after the base vegetation count is
-// regenerated from the actual evolving green field, so repeated zoom callbacks
-// cannot progressively erase the vegetation.
+// Re-apply biome character, bend the newly rebuilt local geometry, then apply the
+// camera/globe handoff. Curvature runs only after the base mesh has been regenerated,
+// so it never accumulates on an already-bent surface.
 const rebuildEndMarker = "  }\n  const ray=new THREE.Raycaster();";
 if (!source.includes(rebuildEndMarker)) {
   throw new Error('Lite surface rebuild-end contract missing from generated app source');
 }
 source = source.replace(
   rebuildEndMarker,
-  "    applyBiomeSurfaceCharacter(true);applySurfaceZoomPresentation();\n  }\n  const ray=new THREE.Raycaster();",
+  "    applyBiomeSurfaceCharacter(true);applyPlanetaryCurvature();applySurfaceZoomPresentation();\n  }\n  const ray=new THREE.Raycaster();",
 );
 
-// At planetary scale, dragging still changes the authoritative geographic center,
+// Navigation 2.0 intercepts only the extra mouse buttons. Left-drag remains the
+// authoritative geographic travel gesture already implemented by Lite. Right-drag
+// orbits the camera, shift+right-drag rolls the horizon, and middle-drag pans the
+// camera focus without changing latitude/longitude.
+const navigationHookMarker = "  const ray=new THREE.Raycaster();";
+if (!source.includes(navigationHookMarker)) {
+  throw new Error('Lite navigation hook contract missing from generated app source');
+}
+source = source.replace(navigationHookMarker, [
+  "  const navPointer={active:false,id:-1,button:-1,x:0,y:0,roll:false};",
+  "  function navigationPointerDown(e){if(mode!=='surface'||(e.button!==1&&e.button!==2))return;e.preventDefault();e.stopImmediatePropagation();navPointer.active=true;navPointer.id=e.pointerId;navPointer.button=e.button;navPointer.x=e.clientX;navPointer.y=e.clientY;navPointer.roll=e.button===2&&e.shiftKey;stage.setPointerCapture?.(e.pointerId);document.body.dataset.surfaceMouseMode=navPointer.roll?'roll':e.button===2?'orbit':'pan'}",
+  "  function navigationPointerMove(e){if(!navPointer.active||e.pointerId!==navPointer.id)return;e.preventDefault();e.stopImmediatePropagation();const dx=e.clientX-navPointer.x,dy=e.clientY-navPointer.y;navPointer.x=e.clientX;navPointer.y=e.clientY;if(navPointer.button===2){if(navPointer.roll){surfaceOrbitRoll=clamp(surfaceOrbitRoll-dx/innerWidth*Math.PI*1.6,-Math.PI*.48,Math.PI*.48)}else{surfaceOrbitYaw-=dx/innerWidth*Math.PI*2.2;surfaceOrbitPitch=clamp(surfaceOrbitPitch+dy/innerHeight*Math.PI*1.35,-1.05,.9)}}else{const panScale=clamp(Math.pow(surfaceSpanKm/620,.18),.7,2.2);surfaceFocusX=clamp(surfaceFocusX-dx/innerWidth*8*panScale,-5,5);surfaceFocusY=clamp(surfaceFocusY+dy/innerHeight*5*panScale,-3.5,3.5)}applySurfaceZoomPresentation();document.body.dataset.surfaceCamera=`${surfaceOrbitYaw.toFixed(3)},${surfaceOrbitPitch.toFixed(3)},${surfaceOrbitRoll.toFixed(3)},${surfaceFocusX.toFixed(3)},${surfaceFocusY.toFixed(3)}`}",
+  "  function navigationPointerUp(e){if(!navPointer.active||e.pointerId!==navPointer.id)return;e.preventDefault();e.stopImmediatePropagation();navPointer.active=false;stage.releasePointerCapture?.(e.pointerId);document.body.dataset.surfaceMouseMode='idle'}",
+  "  function focusSurfaceFromDoubleClick(e){if(mode!=='surface')return;if(e.button===2){e.preventDefault();e.stopImmediatePropagation();resetSurfaceCameraOrientation();return}if(e.button!==0)return;e.preventDefault();const rect=renderer.domElement.getBoundingClientRect(),ndc=new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-((e.clientY-rect.top)/rect.height*2-1));ray.setFromCamera(ndc,camera);let focused=false;if(surfaceGroup.visible&&surfaceMesh.visible){const hit=ray.intersectObject(surfaceMesh,false)[0];if(hit){const p=surfaceGroup.worldToLocal(hit.point.clone()),scale=12/surfaceSpanKm,cos=Math.max(.2,Math.cos(surfaceLat*Math.PI/180));surfaceLon=wrapLon(surfaceLon+p.x/scale/(111*cos));surfaceLat=clamp(surfaceLat-p.z/scale/111,-89,89);focused=true}}if(!focused&&globeRoot.visible){const hit=ray.intersectObjects(globeRoot.children,true).find(item=>item.object.visible);if(hit){const p=globeRoot.worldToLocal(hit.point.clone()).normalize(),xz=Math.hypot(p.x,p.z);surfaceLat=clamp(Math.atan2(p.y/FY,xz)*180/Math.PI,-89,89);surfaceLon=wrapLon(Math.atan2(-p.z,p.x)*180/Math.PI);focused=true}}if(focused){surfaceFocusX=0;surfaceFocusY=0;surfaceSpanKm=Math.max(70,surfaceSpanKm*(surfaceSpanKm>PLANETARY_BLEND_START_KM?.3:.45));surfaceDirty=true;applySurfaceZoomPresentation();document.body.dataset.surfaceMouseMode='focus'}}",
+  "  stage.addEventListener('contextmenu',e=>{if(mode==='surface')e.preventDefault()},{capture:true});",
+  "  stage.addEventListener('pointerdown',navigationPointerDown,true);stage.addEventListener('pointermove',navigationPointerMove,true);stage.addEventListener('pointerup',navigationPointerUp,true);stage.addEventListener('pointercancel',navigationPointerUp,true);stage.addEventListener('dblclick',focusSurfaceFromDoubleClick,true);",
+  navigationHookMarker
+].join('\n'));
+
+// At planetary scale, left-drag still changes the authoritative geographic center,
 // which is then used to rotate the globe. Cap the physical span used by drag so a
 // full-width gesture remains about a half-turn instead of becoming hypersensitive.
 const surfaceLonPanMarker = "surfaceLon=wrapLon(surfaceLon-(now.x-old.x)/innerWidth*surfaceSpanKm/(111*cos));";
@@ -145,8 +170,9 @@ source = source.replace(
   "surfaceLat=clamp(surfaceLat+(now.y-old.y)/innerHeight*surfaceDragSpanKm()/111,-89,89);applySurfaceZoomPresentation();",
 );
 
-// Wheel and pinch can now traverse the whole local->planet range without changing
-// mode. Every input update immediately refreshes camera, crossfade and diagnostics.
+// Wheel and pinch traverse the whole local->planet range without changing mode.
+// Shift makes wheel zoom coarse and Ctrl makes it precise; unmodified wheel keeps
+// the established Lite zoom rate.
 const pinchZoomMarker = "surfaceSpanKm=clamp(surfaceSpanKm*factor,70,1800);surfaceDirty=true";
 if (!source.includes(pinchZoomMarker)) {
   throw new Error('Lite surface pinch-zoom contract missing from generated app source');
@@ -161,18 +187,18 @@ if (!source.includes(wheelZoomMarker)) {
 }
 source = source.replace(
   wheelZoomMarker,
-  "surfaceSpanKm=clamp(surfaceSpanKm*Math.exp(e.deltaY*.0012),70,PLANETARY_MAX_SPAN_KM);surfaceDirty=true;applySurfaceZoomPresentation()",
+  "surfaceSpanKm=clamp(surfaceSpanKm*Math.exp(e.deltaY*surfaceWheelRate(e)),70,PLANETARY_MAX_SPAN_KM);surfaceDirty=true;applySurfaceZoomPresentation()",
 );
 
-// Surface reset must also restore the local presentation immediately, while an
-// explicit Return to Globe restores the globe materials before leaving surface mode.
+// Surface reset restores both zoom and camera orientation. An explicit Return to
+// Globe restores the globe materials before leaving surface mode.
 const surfaceResetMarker = "else{surfaceSpanKm=620;surfaceDirty=true}";
 if (!source.includes(surfaceResetMarker)) {
   throw new Error('Lite surface reset contract missing from generated app source');
 }
 source = source.replace(
   surfaceResetMarker,
-  "else{surfaceSpanKm=620;surfaceDirty=true;applySurfaceZoomPresentation()}",
+  "else{surfaceSpanKm=620;surfaceDirty=true;resetSurfaceCameraOrientation();applySurfaceZoomPresentation()}",
 );
 const exitSurfaceMarker = "function exitSurface(){mode='globe';";
 if (!source.includes(exitSurfaceMarker)) {
@@ -182,6 +208,8 @@ source = source.replace(
   exitSurfaceMarker,
   "function exitSurface(){restorePlanetaryPresentation();mode='globe';",
 );
+
+document.body.dataset.surfaceNavigation = 'navigation-2-curved-handoff';
 
 const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
 try {
