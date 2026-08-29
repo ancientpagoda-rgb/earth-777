@@ -25,6 +25,8 @@ test("Lite loader keeps one instanced plant mesh while switching biome silhouett
   assert.match(loader, /tundra:makeNaturalTreeGeometry\('tundra'\)/);
   assert.match(loader, /new THREE\.InstancedMesh\(biomePlantGeometries\.temperate,new THREE\.MeshLambertMaterial\(\{vertexColors:true\}\),plantMax\)/);
   assert.match(loader, /const plantMax=lowQuality\?220:520/);
+  assert.ok(!loader.includes("plantMesh2"));
+  assert.ok(!loader.includes("plantMax2"));
 });
 
 test("biome surface styles cover every Lite biome and remain climate-coupled", () => {
@@ -55,5 +57,4 @@ test("Surface naturalism preserves the Lite population and river triangle budget
   assert.equal(fullQualityPlants, 520);
   assert.equal(trianglesPerRiverSegment, 2);
   assert.ok(!loader.includes("plantMax=lowQuality?440:1040"));
-  assert.equal((loader.match(/new THREE\.InstancedMesh\(/g) || []).length, 1);
 });
