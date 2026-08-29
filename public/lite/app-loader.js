@@ -18,9 +18,23 @@ const workerReadyMarker = "document.body.dataset.worker='ready';";
 if (!sourceText.includes(workerReadyMarker)) {
   throw new Error('Lite worker-ready contract missing from generated app source');
 }
-const source = sourceText.replace(
+let source = sourceText.replace(
   workerReadyMarker,
   `simBusy=false;${workerReadyMarker}`,
+);
+
+// Surface mode is a direct-manipulation map: the terrain under the pointer must
+// follow the mouse on both axes. Longitude already has that grab-and-pan sign,
+// but the generated vertical formula used the opposite sign, so dragging up/down
+// moved the terrain away from the pointer. Correct only that generated expression;
+// touch pinch and wheel zoom semantics remain unchanged.
+const surfacePanMarker = "surfaceLat=clamp(surfaceLat-(now.y-old.y)/innerHeight*surfaceSpanKm/111,-89,89);";
+if (!source.includes(surfacePanMarker)) {
+  throw new Error('Lite surface mouse-pan contract missing from generated app source');
+}
+source = source.replace(
+  surfacePanMarker,
+  "surfaceLat=clamp(surfaceLat+(now.y-old.y)/innerHeight*surfaceSpanKm/111,-89,89);",
 );
 
 const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
