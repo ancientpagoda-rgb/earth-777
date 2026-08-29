@@ -21,6 +21,7 @@
     "data:ice-gia": "node scripts/ingest-ice-gia-777.mjs",
     "data:ingest": "npm run data:paleo && npm run data:terrain && npm run data:climate && npm run data:vegetation && npm run data:soil && npm run data:pft-drivers",
     "test": "node --test test/*.test.js",
+    "test:acceptance:lite": "node test/cdp-lite-acceptance.mjs",
     "data:pft-drivers": "python3 scripts/ingest-biome4-pft-drivers.py"
   },
   "dependencies": {
