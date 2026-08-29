@@ -73,8 +73,54 @@ const surface = await evaluate(`(() => ({
   place: document.querySelector("#place")?.textContent ?? "",
   canvas: document.querySelectorAll("canvas").length,
   plants: Number(document.body.dataset.surfacePlants ?? 0),
-  rivers: Number(document.body.dataset.surfaceRivers ?? 0)
+  rivers: Number(document.body.dataset.surfaceRivers ?? 0),
+  spanKm: Number(document.body.dataset.surfaceSpanKm ?? 0),
+  zoomBlend: Number(document.body.dataset.surfaceZoomBlend ?? -1),
+  planetaryZoom: document.body.dataset.planetaryZoom ?? ""
 }))()`);
+
+// The accepted planetary-zoom contract must stay in surface mode all the way to
+// a complete Earth view, then return to the same geographic center without a
+// second canvas or explicit mode switch.
+await evaluate(`(() => {
+  const canvas = document.querySelector('canvas');
+  for (let i = 0; i < 10; i += 1) {
+    canvas?.dispatchEvent(new WheelEvent('wheel', { deltaY: 600, bubbles: true, cancelable: true }));
+  }
+  return true;
+})()`);
+await wait(350);
+const planetarySurface = await evaluate(`(() => ({
+  active: document.body.classList.contains("surface"),
+  button: document.querySelector("#mode")?.textContent ?? "",
+  canvas: document.querySelectorAll("canvas").length,
+  status: document.querySelector("#status")?.textContent ?? "",
+  spanKm: Number(document.body.dataset.surfaceSpanKm ?? 0),
+  zoomBlend: Number(document.body.dataset.surfaceZoomBlend ?? -1),
+  planetaryZoom: document.body.dataset.planetaryZoom ?? ""
+}))()`);
+
+await evaluate(`(() => {
+  const canvas = document.querySelector('canvas');
+  for (let i = 0; i < 10; i += 1) {
+    canvas?.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, bubbles: true, cancelable: true }));
+  }
+  return true;
+})()`);
+await wait(500);
+const surfaceReturnedFromPlanet = await evaluate(`(() => ({
+  active: document.body.classList.contains("surface"),
+  button: document.querySelector("#mode")?.textContent ?? "",
+  place: document.querySelector("#place")?.textContent ?? "",
+  canvas: document.querySelectorAll("canvas").length,
+  plants: Number(document.body.dataset.surfacePlants ?? 0),
+  spanKm: Number(document.body.dataset.surfaceSpanKm ?? 0),
+  zoomBlend: Number(document.body.dataset.surfaceZoomBlend ?? -1),
+  planetaryZoom: document.body.dataset.planetaryZoom ?? ""
+}))()`);
+const surfaceCoordinate = String(surface?.place ?? "").split(" · ")[0];
+const returnedCoordinate = String(surfaceReturnedFromPlanet?.place ?? "").split(" · ")[0];
+
 await evaluate(`document.querySelector("#mode")?.click()`);
 await wait(150);
 const returned = await evaluate(`!document.body.classList.contains("surface") && document.querySelector("#mode")?.textContent === "DESCEND"`);
@@ -132,6 +178,16 @@ const checks = [
   [surface?.canvas === 1, "Lite surface transition replaced or duplicated the canvas"],
   [surface?.plants > 0, "Lite surface vegetation did not instantiate"],
   [surface?.rivers >= 0, "Lite surface river diagnostics are invalid"],
+  [surface?.spanKm > 0 && surface?.zoomBlend === 0 && surface?.planetaryZoom === "surface", "Lite local surface zoom diagnostics did not initialize"],
+  [planetarySurface?.active && planetarySurface?.button === "RETURN TO GLOBE", "Planetary zoom switched out of surface mode"],
+  [planetarySurface?.canvas === 1 && planetarySurface?.status === "", "Planetary zoom lost the renderer or entered an error state"],
+  [planetarySurface?.spanKm >= 39000, `Planetary zoom did not reach globe scale (${planetarySurface?.spanKm ?? 0} km)`],
+  [planetarySurface?.zoomBlend >= 0.999 && planetarySurface?.planetaryZoom === "globe", "Planetary zoom did not complete the local-to-globe handoff"],
+  [surfaceReturnedFromPlanet?.active && surfaceReturnedFromPlanet?.button === "RETURN TO GLOBE", "Zooming back in left surface mode"],
+  [surfaceReturnedFromPlanet?.canvas === 1 && surfaceReturnedFromPlanet?.planetaryZoom === "surface", "Zooming back in did not restore the local surface presentation"],
+  [surfaceReturnedFromPlanet?.spanKm <= 100 && surfaceReturnedFromPlanet?.zoomBlend === 0, `Zooming back in did not reach local scale (${surfaceReturnedFromPlanet?.spanKm ?? 0} km)`],
+  [surfaceCoordinate && surfaceCoordinate === returnedCoordinate, "Planetary zoom did not return to the same geographic center"],
+  [surfaceReturnedFromPlanet?.plants > 0, "Local ecology did not restore after returning from planetary scale"],
   [returned, "Lite surface mode did not return to globe"],
   [selectedUrl.includes("lat=") && selectedUrl.includes("lon="), "Lite globe selection did not update the shareable URL"],
   [layerState?.active === "temperature", "Lite temperature layer did not activate"],
@@ -142,6 +198,6 @@ const checks = [
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
 
-console.log(JSON.stringify({ initial, acceleratedSpeed, acceleratedYear, accelerationLatencyMs, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, pausedResetTexture, messages: runtimeMessages }, null, 2));
+console.log(JSON.stringify({ initial, acceleratedSpeed, acceleratedYear, accelerationLatencyMs, historyDrawn, surface, planetarySurface, surfaceReturnedFromPlanet, returned, selectedUrl, layerState, frameTime, pausedResetTexture, messages: runtimeMessages }, null, 2));
 socket.close();
 if (failures.length) throw new Error(failures.join("; "));
