@@ -15,7 +15,7 @@ const smooth = (value) => {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
 };
-const blend = (spanKm, startKm = 1400, endKm = 12000) => smooth(
+const blend = (spanKm, startKm = 5200, endKm = 12000) => smooth(
   (Math.log(spanKm) - Math.log(startKm)) / (Math.log(endKm) - Math.log(startKm)),
 );
 
@@ -28,8 +28,9 @@ test("Lite generated source still exposes the planetary-zoom patch points", () =
 });
 
 test("Lite loader installs one continuous surface-to-globe zoom state", () => {
-  assert.match(loader, /PLANETARY_BLEND_START_KM=1400/);
+  assert.match(loader, /PLANETARY_BLEND_START_KM=5200/);
   assert.match(loader, /PLANETARY_BLEND_END_KM=12000/);
+  assert.match(loader, /PLANETARY_GLOBE_REVEAL_KM=5200/);
   assert.match(loader, /PLANETARY_DETAIL_CUTOFF_KM=12000/);
   assert.match(loader, /PLANETARY_MAX_SPAN_KM=40000/);
   assert.match(loader, /PLANETARY_DRAG_SPAN_KM=20000/);
@@ -40,11 +41,17 @@ test("Lite loader installs one continuous surface-to-globe zoom state", () => {
   assert.match(loader, /document\.body\.dataset\.planetaryZoom/);
 });
 
-test("planetary handoff is monotonic and reaches a full-globe presentation", () => {
+test("planetary handoff keeps the globe completely hidden at regional surface scale", () => {
   assert.equal(blend(620), 0);
-  assert.equal(blend(1400), 0);
-  assert.ok(blend(3000) > 0 && blend(3000) < 0.5);
-  assert.ok(blend(7000) > 0.5 && blend(7000) < 1);
+  assert.equal(blend(3172), 0);
+  assert.equal(blend(5200), 0);
+  assert.match(loader, /if\(surfaceSpanKm<PLANETARY_GLOBE_REVEAL_KM\)\{globeRoot\.visible=false;/);
+  assert.match(loader, /state\.material\.opacity=0;state\.material\.transparent=true;state\.material\.depthWrite=false/);
+});
+
+test("planetary handoff is monotonic and reaches a full-globe presentation", () => {
+  assert.ok(blend(7000) > 0 && blend(7000) < 0.5);
+  assert.ok(blend(8500) > 0.5 && blend(8500) < 1);
   assert.equal(blend(12000), 1);
   assert.equal(blend(40000), 1);
 
