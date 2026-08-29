@@ -54,8 +54,15 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
 }
 
 await evaluate(`document.querySelector('[data-speed="1000"]')?.click()`);
-await wait(650);
-const acceleratedYear = await evaluate(`document.querySelector("#year")?.textContent ?? ""`);
+const acceleratedSpeed = await evaluate(`document.querySelector('.speed.on')?.dataset.speed ?? ""`);
+const accelerationStarted = Date.now();
+let acceleratedYear = initial?.year ?? "";
+for (let attempt = 0; attempt < 20; attempt += 1) {
+  await wait(100);
+  acceleratedYear = await evaluate(`document.querySelector("#year")?.textContent ?? ""`);
+  if (acceleratedYear && acceleratedYear !== initial?.year) break;
+}
+const accelerationLatencyMs = Date.now() - accelerationStarted;
 const historyDrawn = await evaluate(`document.querySelector("#history-temp")?.getAttribute("points")?.length > 0`);
 
 await evaluate(`document.querySelector("#mode")?.click()`);
@@ -117,7 +124,8 @@ const checks = [
   [["lean", "full"].includes(initial?.quality), "Lite adaptive quality did not resolve"],
   [/^(384x192|512x256)$/.test(initial?.texture ?? ""), `Lite globe texture is not using the smoother render path (${initial?.texture ?? "missing"})`],
   [initial?.layers === 5, "Lite visual layer controls are incomplete"],
-  [acceleratedYear && acceleratedYear !== initial?.year, "1K× playback did not advance the year"],
+  [acceleratedSpeed === "1000", `1K× speed control did not activate (${acceleratedSpeed || "missing"})`],
+  [acceleratedYear && acceleratedYear !== initial?.year, `1K× playback did not advance the year within ${accelerationLatencyMs} ms`],
   [historyDrawn, "Lite history graph did not draw"],
   [surface?.active && surface?.button === "RETURN TO GLOBE", "Lite surface mode did not activate"],
   [Boolean(surface?.place), "Lite surface location readout is empty"],
@@ -134,6 +142,6 @@ const checks = [
 ];
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
 
-console.log(JSON.stringify({ initial, acceleratedYear, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, pausedResetTexture, messages: runtimeMessages }, null, 2));
+console.log(JSON.stringify({ initial, acceleratedSpeed, acceleratedYear, accelerationLatencyMs, historyDrawn, surface, returned, selectedUrl, layerState, frameTime, pausedResetTexture, messages: runtimeMessages }, null, 2));
 socket.close();
 if (failures.length) throw new Error(failures.join("; "));
