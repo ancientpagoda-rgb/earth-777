@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   LITE_ACCEPTANCE_CRITERIA,
   LITE_ACCEPTANCE_THRESHOLDS,
@@ -51,6 +52,12 @@ test("critical criteria have automated or proxy coverage", () => {
     assert.ok(criterion, `missing criterion ${id}`);
     assert.notEqual(criterion.automation, "manual", `${id} unexpectedly manual-only`);
   }
+});
+
+test("Lite surface mouse drag uses direct-manipulation vertical panning", () => {
+  const loader = readFileSync(new URL("../public/lite/app-loader.js", import.meta.url), "utf8");
+  assert.match(loader, /surfacePanMarker/);
+  assert.match(loader, /surfaceLat=clamp\(surfaceLat\+\(now\.y-old\.y\)\/innerHeight\*surfaceSpanKm\/111,-89,89\)/);
 });
 
 test("Living Terrain is deterministic and visibly changes over a 100x observation horizon", () => {
