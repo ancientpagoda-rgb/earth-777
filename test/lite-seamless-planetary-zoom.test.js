@@ -48,6 +48,20 @@ test("Lite loader curves the regional surface before revealing the globe", () =>
   assert.equal(curve(9000), 1);
 });
 
+test("planetary globe is tangent-aligned with the curved local surface", () => {
+  assert.match(loader, /planetaryGlobeBaseScale=globeRoot\.scale\.clone\(\)/);
+  assert.match(loader, /planetaryGlobeNativeRadius=Math\.max\(\.001,planetaryGlobeBounds\.getBoundingSphere/);
+  assert.match(loader, /function alignGlobeToCurvedSurface\(\)/);
+  assert.match(loader, /targetRadius=EARTH_RADIUS_KM\*sceneScale/);
+  assert.match(loader, /globeRoot\.scale\.copy\(planetaryGlobeBaseScale\)\.multiplyScalar\(multiplier\)/);
+  assert.match(loader, /globeRoot\.position\.y-=targetRadius\*FY/);
+  assert.match(loader, /applySurfaceCameraPose\(t,far,planetRadius\)/);
+  assert.match(loader, /targetY=mix\(baseTargetY,-planetRadius\*FY,t\)/);
+  const spanKm = 9159;
+  const sceneRadius = 6371 * (12 / spanKm);
+  assert.ok(sceneRadius > 8 && sceneRadius < 9, "the 9,159 km screenshot should use an Earth-sized scene radius, not a small dome");
+});
+
 test("planetary handoff remains monotonic and reaches a full globe", () => {
   assert.equal(blend(9000), 0);
   assert.ok(blend(11000) > 0 && blend(11000) < 1);
@@ -61,7 +75,7 @@ test("planetary handoff remains monotonic and reaches a full globe", () => {
 
 test("Navigation 2.0 separates travel, orbit, roll and camera pan", () => {
   assert.match(loader, /let surfaceOrbitYaw=0,surfaceOrbitPitch=0,surfaceOrbitRoll=0,surfaceFocusX=0,surfaceFocusY=0/);
-  assert.match(loader, /function applySurfaceCameraPose\(t,far\)/);
+  assert.match(loader, /function applySurfaceCameraPose\(t,far,planetRadius\)/);
   assert.match(loader, /e\.button!==1&&e\.button!==2/);
   assert.match(loader, /navPointer\.roll=e\.button===2&&e\.shiftKey/);
   assert.match(loader, /surfaceOrbitYaw-=dx\/innerWidth\*Math\.PI\*2\.2/);
