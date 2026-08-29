@@ -118,8 +118,8 @@ const surfaceReturnedFromPlanet = await evaluate(`(() => ({
   zoomBlend: Number(document.body.dataset.surfaceZoomBlend ?? -1),
   planetaryZoom: document.body.dataset.planetaryZoom ?? ""
 }))()`);
-const surfaceCoordinate = String(surface?.place ?? "").split(" · ").slice(0, 2).join(" · ");
-const returnedCoordinate = String(surfaceReturnedFromPlanet?.place ?? "").split(" · ").slice(0, 2).join(" · ");
+const surfaceCoordinate = String(surface?.place ?? "").split(" · ")[0];
+const returnedCoordinate = String(surfaceReturnedFromPlanet?.place ?? "").split(" · ")[0];
 
 await evaluate(`document.querySelector("#mode")?.click()`);
 await wait(150);
