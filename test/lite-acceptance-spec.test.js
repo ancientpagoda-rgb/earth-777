@@ -24,17 +24,21 @@ test("canonical performance thresholds are locked", () => {
   assert.equal(LITE_ACCEPTANCE_THRESHOLDS.zoomCycles, 20);
 });
 
-test("critical criteria have automated coverage", () => {
+test("critical criteria have automated or proxy coverage", () => {
   for (const id of [
     "performance",
-    "hundred-x-responsive",
-    "thousand-x-responsive",
-    "soak",
-    "cached-load",
-    "single-action-descent",
-    "zoom-stability",
-    "console-clean",
-    "regression-budget",
+    "high-speed-simulation",
+    "no-degradation",
+    "load-time",
+    "infinite-surface",
+    "persistent-geography",
+    "continuous-evolution",
+    "simulation-continuity",
+    "region-to-surface",
+    "zoom",
+    "navigation",
+    "console-cleanliness",
+    "regression-rule",
   ]) {
     const criterion = acceptanceCriterion(id);
     assert.ok(criterion, `missing criterion ${id}`);
