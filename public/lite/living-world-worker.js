@@ -45,6 +45,7 @@ let terrainMeanAbs = 0;
 let terrainMaxAbs = 0;
 let biomeChanges = 0;
 let faunaLand = 0;
+let highSpeedPhase = 0;
 
 function targetTemperature(k, x, y) {
   const lat = 90 - (y + 0.5) / SH * 180;
@@ -153,6 +154,7 @@ function initialize(s, years) {
   biomeVersion = 0;
   ecologyVersion = 0;
   hydrologyChanges = 0;
+  highSpeedPhase = 0;
 
   rebuildTerrain();
   rebuildHydrology(true);
@@ -178,12 +180,25 @@ function initialize(s, years) {
 function advance(dt) {
   elapsed += dt;
   sea = -20 + 38 * Math.sin(elapsed / 10500) + 17 * Math.sin(elapsed / 3100 + 0.7);
-  rebuildTerrain();
-  rebuildHydrology(false);
+
+  // 1K× is explicitly allowed to reduce visual-model update frequency. Keep the
+  // clock/climate responsive on every state while alternating the heavier terrain,
+  // hydrology, biome and ecology work. 100× and below still update every cycle.
+  const highSpeed = dt >= 50;
+  if (highSpeed) highSpeedPhase += 1;
+  else highSpeedPhase = 0;
+  const updateHeavyLayers = !highSpeed || highSpeedPhase % 2 === 0;
+  if (updateHeavyLayers) {
+    rebuildTerrain();
+    rebuildHydrology(false);
+  }
 
   for (let y = 0; y < SH; y += 1) {
     const north = Math.max(0, y - 1);
     const south = Math.min(SH - 1, y + 1);
+    const lat = 90 - (y + 0.5) / SH * 180;
+    const shift = Math.sin(elapsed / 4100) * 0.16;
+    const band = 0.12 + 0.78 * Math.pow(Math.cos((lat - shift * 35) * Math.PI / 180), 2);
     for (let x = 0; x < SW; x += 1) {
       const k = y * SW + x;
       const z = evolved[k];
@@ -192,9 +207,6 @@ function advance(dt) {
       const tt = targetTemperature(k, x, y);
       const ocean = z < sea;
       const nt = mix(temp[k], tt, 1 - Math.exp(-dt / (ocean ? 420 : 85)));
-      const lat = 90 - (y + 0.5) / SH * 180;
-      const shift = Math.sin(elapsed / 4100) * 0.16;
-      const band = 0.12 + 0.78 * Math.pow(Math.cos((lat - shift * 35) * Math.PI / 180), 2);
       const neighbor = wet[west] * 0.40
         + wet[east] * 0.12
         + wet[north * SW + x] * 0.24
@@ -220,7 +232,7 @@ function advance(dt) {
   [wet, m2] = [m2, wet];
   [frozen, i2] = [i2, frozen];
   [green, v2] = [v2, green];
-  rebuildLivingLayers();
+  if (updateHeavyLayers) rebuildLivingLayers();
   emit();
 }
 
