@@ -34,7 +34,7 @@ test("biome surface styles cover every Lite biome and remain climate-coupled", (
     assert.ok(loader.includes(`${biome.includes(' ') ? `'${biome}'` : biome}:{key:`), `missing style for ${biome}`);
   }
   assert.match(loader, /function surfaceBiomeStyle\(\)\{const name=BIOME_NAMES\[biome\[stateIndex\(surfaceLat,surfaceLon\)\]\]/);
-  assert.match(loader, /applyBiomeSurfaceCharacter\(true\);applySurfaceZoomPresentation\(\)/);
+  assert.match(loader, /applyBiomeSurfaceCharacter\(true\);applyPlanetaryCurvature\(\);applySurfaceZoomPresentation\(\)/);
   assert.match(loader, /surfacePlantDensity=style\.density\.toFixed\(2\)/);
   assert.match(loader, /surfaceMesh\.material\.color\.setHex\(activeLayer==='terrain'\?style\.ground:0xffffff\)/);
 });
