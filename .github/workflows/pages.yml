@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          node --test test/free-earth.test.js test/simplified-ui.test.js test/lite-acceptance-spec.test.js test/lite-seamless-planetary-zoom.test.js 2>&1 | tee earth-777-unit-tests.log
+          node --test test/free-earth.test.js test/simplified-ui.test.js test/lite-acceptance-spec.test.js test/lite-seamless-planetary-zoom.test.js test/lite-surface-naturalism.test.js 2>&1 | tee earth-777-unit-tests.log
           TEST_STATUS=${PIPESTATUS[0]}
           set -e
           exit "$TEST_STATUS"

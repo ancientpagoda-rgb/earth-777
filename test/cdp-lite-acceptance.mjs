@@ -62,6 +62,7 @@ await send("Runtime.enable");
 await send("Log.enable");
 await send("Page.enable");
 await send("Performance.enable");
+await send("HeapProfiler.enable");
 
 async function pageState() {
   return evaluate(`(() => ({
@@ -149,7 +150,12 @@ async function sampleFrames(durationMs) {
   })`);
 }
 
+// Measure retained JavaScript heap rather than allocation noise waiting for an
+// arbitrary browser GC cycle. A real leak survives collection, while short CI
+// runs no longer fail merely because V8 had not collected transient objects yet.
 async function heapUsage() {
+  const collected = await send("HeapProfiler.collectGarbage");
+  if (collected.error) throw new Error(`HeapProfiler.collectGarbage failed: ${collected.error.message || "unknown error"}`);
   const response = await send("Runtime.getHeapUsage");
   return Number(response.result?.usedSize ?? 0);
 }
@@ -395,8 +401,8 @@ const soakPassed = fpsLoss <= T.maxSoakFpsLossFraction && !monotonicallyClimbing
 setResult(
   "no-degradation",
   soakPassed ? (profile === "full" ? "PASS" : "PROXY_PASS") : "FAIL",
-  `${profile === "full" ? "20-minute" : "15-second CI proxy"} soak: FPS change ${(fpsLoss * 100).toFixed(1)}%; heap change ${heapChange === null ? "n/a" : `${(heapChange * 100).toFixed(1)}%`}.`,
-  { fpsBefore: soakPerfBefore, fpsAfter: soakPerfAfter, fpsLossFraction: fpsLoss, heapSeries, heapChangeFraction: heapChange },
+  `${profile === "full" ? "20-minute" : "15-second CI proxy"} soak: FPS change ${(fpsLoss * 100).toFixed(1)}%; retained heap change ${heapChange === null ? "n/a" : `${(heapChange * 100).toFixed(1)}%`}.`,
+  { fpsBefore: soakPerfBefore, fpsAfter: soakPerfAfter, fpsLossFraction: fpsLoss, heapSeries, heapChangeFraction: heapChange, heapSampling: "post-gc" },
 );
 
 const contextState = await pageState();

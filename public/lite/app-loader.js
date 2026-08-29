@@ -36,6 +36,44 @@ source = source.replace(
   "surfaceLat=clamp(surfaceLat+(now.y-old.y)/innerHeight*surfaceSpanKm/111,-89,89);",
 );
 
+// Surface Naturalism keeps the existing one-instanced-mesh vegetation budget but
+// replaces the single green cone with a tiny trunk + faceted crown geometry. The
+// vertex-colored geometry stays one material / one instanced draw path so the
+// planetary-opacity handoff and Lite performance model remain unchanged.
+const plantMeshMarker = "const plantMax=lowQuality?220:520,plantMesh=new THREE.InstancedMesh(new THREE.ConeGeometry(.026,.13,5),new THREE.MeshLambertMaterial({color:0x4eaa62}),plantMax);plantMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);surfaceGroup.add(plantMesh);const plantDummy=new THREE.Object3D();";
+if (!source.includes(plantMeshMarker)) {
+  throw new Error('Lite surface plant geometry contract missing from generated app source');
+}
+source = source.replace(plantMeshMarker, [
+  "function makeNaturalTreeGeometry(){const trunkSource=new THREE.CylinderGeometry(.008,.011,.066,5,1,false),crownSource=new THREE.IcosahedronGeometry(.041,0);trunkSource.translate(0,.033,0);crownSource.scale(1,.9,1);crownSource.translate(0,.105,0);const trunk=trunkSource.index?trunkSource.toNonIndexed():trunkSource,crown=crownSource.index?crownSource.toNonIndexed():crownSource,tp=trunk.attributes.position.array,cp=crown.attributes.position.array,p=new Float32Array(tp.length+cp.length),c=new Float32Array(tp.length+cp.length),trunkColor=new THREE.Color(0x684831),crownColor=new THREE.Color(0x4f9858);p.set(tp);p.set(cp,tp.length);for(let i=0;i<tp.length;i+=3){c[i]=trunkColor.r;c[i+1]=trunkColor.g;c[i+2]=trunkColor.b}for(let i=tp.length;i<c.length;i+=3){c[i]=crownColor.r;c[i+1]=crownColor.g;c[i+2]=crownColor.b}const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(p,3));geometry.setAttribute('color',new THREE.BufferAttribute(c,3));geometry.computeVertexNormals();return geometry}",
+  "const plantMax=lowQuality?220:520,plantMesh=new THREE.InstancedMesh(makeNaturalTreeGeometry(),new THREE.MeshLambertMaterial({vertexColors:true}),plantMax);plantMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);surfaceGroup.add(plantMesh);const plantDummy=new THREE.Object3D();",
+  "document.body.dataset.surfaceTreeStyle='trunk-crown-v1';"
+].join('\n  '));
+
+// Rivers become shallow lit ribbons instead of one-pixel line segments. Each old
+// segment expands to two triangles with a tiny overlap at its ends, which hides
+// most grid-joint gaps while keeping the amount of geometry proportional to the
+// already-generated river network. Width scales with view span instead of asking
+// WebGL for unsupported wide lines.
+const riverMeshMarker = "const riverGeom=new THREE.BufferGeometry(),riverLines=new THREE.LineSegments(riverGeom,new THREE.LineBasicMaterial({color:0x62c8ea,transparent:true,opacity:.92}));riverLines.renderOrder=3;surfaceGroup.add(riverLines);";
+if (!source.includes(riverMeshMarker)) {
+  throw new Error('Lite surface river geometry contract missing from generated app source');
+}
+source = source.replace(riverMeshMarker, [
+  "function updateNaturalRiverRibbons(segments){const count=Math.floor(segments.length/6),expanded=new Float32Array(count*18),halfWidth=clamp(.025*Math.sqrt(620/Math.max(70,surfaceSpanKm)),.006,.032);let o=0;for(let i=0;i+5<segments.length;i+=6){let ax=segments[i],ay=segments[i+1]+.004,az=segments[i+2],bx=segments[i+3],by=segments[i+4]+.004,bz=segments[i+5],dx=bx-ax,dz=bz-az,len=Math.hypot(dx,dz);if(len<1e-5)continue;const ux=dx/len,uz=dz/len,cap=Math.min(halfWidth*.7,len*.08),nx=-uz*halfWidth,nz=ux*halfWidth;ax-=ux*cap;az-=uz*cap;bx+=ux*cap;bz+=uz*cap;expanded.set([ax+nx,ay,az+nz,ax-nx,ay,az-nz,bx-nx,by,bz-nz,ax+nx,ay,az+nz,bx-nx,by,bz-nz,bx+nx,by,bz+nz],o);o+=18}const positions=o===expanded.length?expanded:expanded.slice(0,o);riverGeom.setAttribute('position',new THREE.BufferAttribute(positions,3));if(o){riverGeom.computeVertexNormals();riverGeom.computeBoundingSphere()}else riverGeom.boundingSphere=new THREE.Sphere(new THREE.Vector3(),0)}",
+  "const riverGeom=new THREE.BufferGeometry(),riverLines=new THREE.Mesh(riverGeom,new THREE.MeshPhongMaterial({color:0x55b9d9,transparent:true,opacity:.92,shininess:90,depthWrite:false,side:THREE.DoubleSide}));riverLines.renderOrder=3;surfaceGroup.add(riverLines);",
+  "document.body.dataset.surfaceRiverStyle='ribbon-v1';"
+].join('\n  '));
+const riverUpdateMarker = "riverGeom.setAttribute('position',new THREE.Float32BufferAttribute(riverPositions,3));riverGeom.computeBoundingSphere();riverLines.visible=activeLayer==='terrain'||activeLayer==='moisture';";
+if (!source.includes(riverUpdateMarker)) {
+  throw new Error('Lite surface river update contract missing from generated app source');
+}
+source = source.replace(
+  riverUpdateMarker,
+  "updateNaturalRiverRibbons(riverPositions);riverLines.visible=activeLayer==='terrain'||activeLayer==='moisture';",
+);
+document.body.dataset.surfaceNaturalism = 'tree-ribbon-v1';
+
 // Seamless Planetary Zoom keeps the user in surface mode while the presentation
 // continuously hands off from the local tangent reconstruction to the existing
 // globe. The geographic center stays authoritative throughout the handoff, so
