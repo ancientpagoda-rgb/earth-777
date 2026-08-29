@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          node --test test/free-earth.test.js test/simplified-ui.test.js 2>&1 | tee earth-777-unit-tests.log
+          node --test test/free-earth.test.js test/simplified-ui.test.js test/lite-acceptance-spec.test.js 2>&1 | tee earth-777-unit-tests.log
           TEST_STATUS=${PIPESTATUS[0]}
           set -e
           exit "$TEST_STATUS"
@@ -143,12 +143,25 @@ jobs:
             exit "$LITE_STATUS"
           fi
 
-      - name: Upload interaction playtest report
+          set +e
+          node test/cdp-lite-acceptance.mjs "$WS_ENDPOINT" --profile=ci 2>&1 | tee -a earth-777-playtest.log
+          ACCEPTANCE_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$ACCEPTANCE_STATUS" -ne 0 ]; then
+            cat /tmp/earth-777-preview.log
+            cat /tmp/earth-777-chrome.log
+            exit "$ACCEPTANCE_STATUS"
+          fi
+
+      - name: Upload interaction and acceptance reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: earth-777-playtest-${{ github.run_id }}
-          path: earth-777-playtest.log
+          path: |
+            earth-777-playtest.log
+            earth-777-lite-acceptance.json
+            earth-777-lite-acceptance.md
           if-no-files-found: ignore
           retention-days: 14
 
