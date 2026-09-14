@@ -10,8 +10,12 @@ import { createSurfacePlanetFarField } from "./SurfacePlanetFarField.js";
 export { SURFACE_NAVIGATION_POLICY };
 
 const SURFACE_MAX_DISTANCE_KM = 420;
-const REGIONAL_STREAM_RADIUS = 2;
-const REGIONAL_STREAM_SEGMENTS = 12;
+const SURFACE_PERFORMANCE_BANDS = Object.freeze({
+  regional: Object.freeze({ radius: 2, segments: 12 }),
+  landscape: Object.freeze({ radius: 2, segments: 16 }),
+  ecology: Object.freeze({ radius: 2, segments: 14 }),
+  ground: Object.freeze({ radius: 2, segments: 18 })
+});
 
 export function surfaceNearClipKm(distanceKm, {
   minimumKm = 0.00005,
@@ -32,9 +36,6 @@ export function surfaceNearClipKm(distanceKm, {
 export function createSurfacePresentation(canvas) {
   const surface = createBaseSurfacePresentation(canvas);
 
-  // Surface mode can still pull back into the broad 420 km aerial view, but the
-  // expensive local mesh is now only the near-detail cap. The planetary far field
-  // fills everything beyond it, so there is no reason to keep 81 local chunks alive.
   surface.controls.maxDistance = SURFACE_MAX_DISTANCE_KM;
   surface.camera.far = 4000;
   surface.camera.updateProjectionMatrix();
@@ -45,18 +46,16 @@ export function createSurfacePresentation(canvas) {
     heightSegments: 32
   });
 
-  // Emergency anti-lag profile: regional mode drops from a 9x9 local window to
-  // the original 5x5 footprint and cuts each chunk from 18 to 12 base segments.
-  // That is roughly 69% fewer chunks and ~53% fewer vertices per regional chunk;
-  // the curved far-field sphere preserves the continuous planetary horizon.
+  // Emergency anti-lag profile: keep only a 5x5 local working set at every
+  // scale and lower base tessellation. The reconstruction inputs are unchanged;
+  // only the amount of simultaneously meshed geometry is reduced.
   const scaleController = surface.terrain.surfaceScaleController;
   if (scaleController) {
     const baseConfigureTerrain = scaleController._configureTerrain.bind(scaleController);
-    scaleController._configureTerrain = (band) => baseConfigureTerrain(
-      band?.id === "regional"
-        ? { ...band, radius: REGIONAL_STREAM_RADIUS, segments: REGIONAL_STREAM_SEGMENTS }
-        : band
-    );
+    scaleController._configureTerrain = (band) => {
+      const profile = SURFACE_PERFORMANCE_BANDS[band?.id];
+      return baseConfigureTerrain(profile ? { ...band, ...profile } : band);
+    };
 
     const baseConfigureAtmosphere = scaleController._configureAtmosphere.bind(scaleController);
     scaleController._configureAtmosphere = (band) => {
@@ -68,9 +67,6 @@ export function createSurfacePresentation(canvas) {
     };
   }
 
-  // Bend the rendered regional terrain onto Earth's mean sphere while keeping
-  // science, hydrology and streaming coordinates deterministic in their tangent
-  // frame. The far field supplies the rest of that same sphere beyond the detail.
   let curvatureDiagnostics = Object.freeze({
     policy: SURFACE_CURVATURE_POLICY,
     strength: 1,
@@ -91,12 +87,7 @@ export function createSurfacePresentation(canvas) {
       const setter = material?.userData?.setPlanetCurvature;
       if (typeof setter !== "function" || materials.has(material)) continue;
       materials.add(material);
-      setter({
-        centerX: 0,
-        centerZ: 0,
-        strength: 1,
-        radiusKm: EARTH_MEAN_RADIUS_KM
-      });
+      setter({ centerX: 0, centerZ: 0, strength: 1, radiusKm: EARTH_MEAN_RADIUS_KM });
     }
     curvatureDiagnostics = Object.freeze({
       policy: SURFACE_CURVATURE_POLICY,
@@ -143,9 +134,8 @@ export function createSurfacePresentation(canvas) {
     planetaryFarField: planetaryFarField.diagnostics(),
     surfaceZoom: Object.freeze({
       maxDistanceKm: SURFACE_MAX_DISTANCE_KM,
-      regionalStreamRadius: REGIONAL_STREAM_RADIUS,
-      regionalStreamSegments: REGIONAL_STREAM_SEGMENTS,
-      regionalStreamingSpanKm: surface.terrain.chunkSizeKm * (REGIONAL_STREAM_RADIUS * 2 + 1)
+      performanceBands: SURFACE_PERFORMANCE_BANDS,
+      regionalStreamingSpanKm: surface.terrain.chunkSizeKm * (SURFACE_PERFORMANCE_BANDS.regional.radius * 2 + 1)
     })
   });
 
