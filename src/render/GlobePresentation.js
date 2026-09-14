@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-function createStars(count = 700) {
+function createStars(count = 320) {
   const positions = new Float32Array(count * 3);
   let state = 0x777001;
   const random = () => {
@@ -20,7 +20,7 @@ function createStars(count = 700) {
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   return new THREE.Points(
     geometry,
-    new THREE.PointsMaterial({ color: 0xc7d1d9, size: 0.035, transparent: true, opacity: 0.66, sizeAttenuation: true })
+    new THREE.PointsMaterial({ color: 0xc7d1d9, size: 0.035, transparent: true, opacity: 0.60, sizeAttenuation: true })
   );
 }
 
@@ -46,36 +46,34 @@ export function createGlobePresentation(canvas) {
     emissive: 0x020304,
     emissiveIntensity: 0.08
   });
-  const earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 64, 40), earthMaterial);
+  // The raster supplies almost all visible detail. Halving mesh density removes
+  // thousands of startup vertices with no meaningful loss at normal globe scale.
+  const earth = new THREE.Mesh(new THREE.SphereGeometry(1.42, 48, 30), earthMaterial);
   earth.rotation.y = -0.35;
   scene.add(earth);
 
-  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xf4f7f8, transparent: true, opacity: 0.2, depthWrite: false });
-  const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 40, 28), cloudMaterial);
+  // Clouds begin invisible; the raster worker only enables them on a genuinely
+  // high-quality device/tier. This prevents a decorative layer competing with the
+  // first Earth texture during startup.
+  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xf4f7f8, transparent: true, opacity: 0, depthWrite: false });
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.438, 24, 16), cloudMaterial);
   clouds.rotation.y = 0.2;
   scene.add(clouds);
 
   const atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(1.55, 40, 28),
-    new THREE.MeshBasicMaterial({ color: 0x4d8fbd, side: THREE.BackSide, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false })
+    new THREE.SphereGeometry(1.55, 24, 16),
+    new THREE.MeshBasicMaterial({ color: 0x4d8fbd, side: THREE.BackSide, transparent: true, opacity: 0.11, blending: THREE.AdditiveBlending, depthWrite: false })
   );
   scene.add(atmosphere);
 
-  // Keep one damping model for the entire gesture. Switching damping off on a
-  // wheel/pinch start can flush OrbitControls' remaining rotational delta in a
-  // single update, which makes the globe appear to jump sideways on first zoom.
-  // EarthView already keeps rendering through the interaction settle window, so
-  // damping can stay enabled without sacrificing responsiveness.
-
   const marker = new THREE.Mesh(
-    new THREE.RingGeometry(0.025, 0.04, 24),
+    new THREE.RingGeometry(0.025, 0.04, 16),
     new THREE.MeshBasicMaterial({ color: 0xb7cfdb, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
   );
   marker.visible = false;
   scene.add(marker);
   scene.add(createStars());
 
-  // Neutral daylight preserves the raster's own colors instead of adding a green/yellow cast.
   scene.add(new THREE.AmbientLight(0xe8f0f5, 0.9));
   scene.add(new THREE.HemisphereLight(0xdcecf5, 0x1c252b, 1.05));
 
@@ -94,7 +92,8 @@ export function textureFromRaster(message) {
   const texture = new THREE.DataTexture(new Uint8Array(message.buffer), message.width, message.height, THREE.RGBAFormat, THREE.UnsignedByteType);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.flipY = true;
-  texture.anisotropy = 4;
+  // Anisotropy is expensive and unnecessary on the initial globe view.
+  texture.anisotropy = 1;
   texture.needsUpdate = true;
   return texture;
 }
