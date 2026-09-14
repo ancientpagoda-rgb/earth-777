@@ -10,7 +10,8 @@ import { createSurfacePlanetFarField } from "./SurfacePlanetFarField.js";
 export { SURFACE_NAVIGATION_POLICY };
 
 const SURFACE_MAX_DISTANCE_KM = 420;
-const REGIONAL_STREAM_RADIUS = 4;
+const REGIONAL_STREAM_RADIUS = 2;
+const REGIONAL_STREAM_SEGMENTS = 12;
 
 export function surfaceNearClipKm(distanceKm, {
   minimumKm = 0.00005,
@@ -31,29 +32,29 @@ export function surfaceNearClipKm(distanceKm, {
 export function createSurfacePresentation(canvas) {
   const surface = createBaseSurfacePresentation(canvas);
 
-  // Surface mode is allowed to pull back into a broad aerial view without
-  // forcing a return to the globe. Keep the camera, sky and clip plane large
-  // enough that the extra zoom range remains a normal surface presentation.
+  // Surface mode can still pull back into the broad 420 km aerial view, but the
+  // expensive local mesh is now only the near-detail cap. The planetary far field
+  // fills everything beyond it, so there is no reason to keep 81 local chunks alive.
   surface.controls.maxDistance = SURFACE_MAX_DISTANCE_KM;
   surface.camera.far = 4000;
   surface.camera.updateProjectionMatrix();
   surface.sky?.scale?.setScalar?.(5000);
 
-  // The local reconstruction is only the high-detail foreground. Continue it
-  // with the same georeferenced Earth used by globe mode, tangent beneath the
-  // selection, so distant terrain reaches a curved planetary horizon.
-  const planetaryFarField = createSurfacePlanetFarField(surface.scene);
+  const planetaryFarField = createSurfacePlanetFarField(surface.scene, {
+    widthSegments: 64,
+    heightSegments: 32
+  });
 
-  // A larger camera range needs a wider coarse terrain window or the user would
-  // simply reveal the edge of the local map. Expand only the regional band from
-  // 5x5 to 9x9 chunks; the landscape/ecology/ground bands retain their existing
-  // smaller radii and costs. Concentric LOD still keeps the outer chunks coarse.
+  // Emergency anti-lag profile: regional mode drops from a 9x9 local window to
+  // the original 5x5 footprint and cuts each chunk from 18 to 12 base segments.
+  // That is roughly 69% fewer chunks and ~53% fewer vertices per regional chunk;
+  // the curved far-field sphere preserves the continuous planetary horizon.
   const scaleController = surface.terrain.surfaceScaleController;
   if (scaleController) {
     const baseConfigureTerrain = scaleController._configureTerrain.bind(scaleController);
     scaleController._configureTerrain = (band) => baseConfigureTerrain(
       band?.id === "regional"
-        ? { ...band, radius: REGIONAL_STREAM_RADIUS }
+        ? { ...band, radius: REGIONAL_STREAM_RADIUS, segments: REGIONAL_STREAM_SEGMENTS }
         : band
     );
 
@@ -61,8 +62,8 @@ export function createSurfacePresentation(canvas) {
     scaleController._configureAtmosphere = (band) => {
       baseConfigureAtmosphere(band);
       if (band?.id === "regional" && surface.scene.fog) {
-        surface.scene.fog.near = 300;
-        surface.scene.fog.far = 980;
+        surface.scene.fog.near = 220;
+        surface.scene.fog.far = 760;
       }
     };
   }
@@ -128,11 +129,6 @@ export function createSurfacePresentation(canvas) {
     terrain: surface.terrain
   });
 
-  // The app already has a legacy globe gamepad driver whose left stick means
-  // orbit. Surface mode uses the same physical controller for translation, so
-  // expose one tiny ownership hook that lets that older driver stand down while
-  // the surface controls are active. Prewarmed-but-inactive surface runtimes do
-  // not claim the gamepad because controls.enabled is still false.
   const previousGamepadOwnership = globalThis.__earth777SurfaceOwnsGamepad;
   globalThis.__earth777SurfaceOwnsGamepad = () => {
     const diagnostics = navigation.diagnostics();
@@ -148,6 +144,7 @@ export function createSurfacePresentation(canvas) {
     surfaceZoom: Object.freeze({
       maxDistanceKm: SURFACE_MAX_DISTANCE_KM,
       regionalStreamRadius: REGIONAL_STREAM_RADIUS,
+      regionalStreamSegments: REGIONAL_STREAM_SEGMENTS,
       regionalStreamingSpanKm: surface.terrain.chunkSizeKm * (REGIONAL_STREAM_RADIUS * 2 + 1)
     })
   });
