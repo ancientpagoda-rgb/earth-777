@@ -1,6 +1,7 @@
 import { textureFromRaster } from "./GlobePresentation.js";
 
 const RASTER_APPLY_RETRY_MS = 80;
+const CLOUD_MIN_VISUAL_QUALITY = 0.80;
 
 function applyWhenViewSettles(view, versionKey, version, apply) {
   const tryApply = () => {
@@ -39,10 +40,29 @@ export function requestEarthRaster(view, state) {
 }
 
 export function requestCloudRaster(view, state) {
+  const quality = view.performanceController.settings(view.spatialDetail);
+
+  // Clouds are decorative and used to compete with the scientifically important
+  // Earth raster during first load. Keep them completely out of the worker/GPU
+  // path unless the renderer has reached the top visual tier on a non-mobile device.
+  if (view.mobileProfile || quality.quality < CLOUD_MIN_VISUAL_QUALITY) {
+    view.cloudVersion += 1;
+    view.cloudBuildInFlight = false;
+    view.lastCloudRefreshMs = performance.now();
+    view.lastCloudYear = state.yearBP;
+    if (view.cloudMaterial) {
+      view.cloudMaterial.map?.dispose?.();
+      view.cloudMaterial.map = null;
+      view.cloudMaterial.opacity = 0;
+      view.cloudMaterial.needsUpdate = true;
+    }
+    if (view.clouds) view.clouds.visible = false;
+    return;
+  }
+
   const version = ++view.cloudVersion;
   view.cloudBuildInFlight = true;
   view.lastCloudRefreshMs = performance.now();
-  const quality = view.performanceController.settings(view.spatialDetail);
   view.rasterWorker.buildClouds(state, quality.cloudScale).then((message) => {
     if (version !== view.cloudVersion || message.type === "error") return;
     applyWhenViewSettles(view, "cloudVersion", version, () => {
@@ -52,6 +72,7 @@ export function requestCloudRaster(view, state) {
       view.cloudMaterial.color.setHex(0xffffff);
       view.cloudMaterial.opacity = 0.58;
       view.cloudMaterial.needsUpdate = true;
+      view.clouds.visible = true;
       view.lastCloudYear = state.yearBP;
       view.invalidate();
     });
