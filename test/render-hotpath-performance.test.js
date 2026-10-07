@@ -47,6 +47,20 @@ test("interaction prioritizes smooth frames before rebuilding all surface detail
   assert.match(earthView, /SURFACE_PUMP_ACTIVE_MS = 0\.9/);
   assert.match(earthView, /SURFACE_PUMP_IDLE_MS = 2\.3/);
   assert.match(earthView, /this\.interacting \? SURFACE_PUMP_ACTIVE_MS : SURFACE_PUMP_IDLE_MS/);
+  assert.match(earthView, /setInteractionActive\?\.\(true\)/);
+  assert.match(earthView, /setPresentationInteractionQuality\?\.\(INTERACTION_AERIAL_DETAIL\)/);
+  assert.match(earthView, /MOBILE_RUNTIME_QUALITY_SCALE = 0\.70/);
+});
+
+test("surface LOD changes wait until a touch or drag gesture settles", () => {
+  const scaleController = readFileSync(new URL("../src/render/SurfaceScaleController.js", import.meta.url), "utf8");
+  const pointerRaycast = readFileSync(new URL("../src/render/PointerRaycast.js", import.meta.url), "utf8");
+  assert.match(scaleController, /interactionActive/);
+  assert.match(scaleController, /pendingBand/);
+  assert.match(scaleController, /deferBandSwitch/);
+  assert.match(pointerRaycast, /pointerdown/);
+  assert.match(pointerRaycast, /isTapGesture/);
+  assert.doesNotMatch(pointerRaycast, /addEventListener\("click"/);
 });
 
 test("mouse-wheel zoom follows the conventional direction in globe and surface views", () => {

@@ -225,6 +225,8 @@ class SurfaceScaleController {
     this.earthLayers = earthLayers;
     this.earthLayerInspectionEnabled = false;
     this.band = null;
+    this.pendingBand = null;
+    this.interactionActive = false;
     this.distanceKm = 0;
     this.lastConfigurationSignature = "";
     this.waterPolicy = Object.freeze({ visible: false, spanFraction: 0, presentation: "hidden", reason: "unresolved" });
@@ -245,9 +247,17 @@ class SurfaceScaleController {
     return this.setEarthLayerInspection(!this.earthLayerInspectionEnabled);
   }
 
+  setInteractionActive(active) {
+    this.interactionActive = Boolean(active);
+    return this.interactionActive;
+  }
+
   apply(cameraPosition) {
     this.distanceKm = cameraDistanceKm(cameraPosition, this.controls?.target);
-    const nextBand = surfaceScaleBandForDistanceStable(this.distanceKm, this.band);
+    const candidateBand = surfaceScaleBandForDistanceStable(this.distanceKm, this.band);
+    const deferBandSwitch = this.interactionActive && this.band && candidateBand.id !== this.band.id;
+    const nextBand = deferBandSwitch ? this.band : candidateBand;
+    this.pendingBand = deferBandSwitch ? candidateBand : null;
     this.band = nextBand;
     this._configureTerrain(nextBand);
     this._configureAtmosphere(nextBand);
@@ -401,6 +411,8 @@ export function installSurfaceScaleController({ scene, terrain, controls, water,
     streamingSpanKm: controller.band ? surfaceStreamingSpanKm(controller.band) : 0,
     defaultRegionalPresentation: "buffered-continuous-landscape",
     earthLayerInspectionEnabled: controller.earthLayerInspectionEnabled,
+    interactionActive: controller.interactionActive,
+    pendingViewScaleBand: controller.pendingBand?.id ?? null,
     waterPresentation: Object.freeze({ ...controller.waterPolicy }),
     earthLayers: earthLayers?.diagnostics?.() ?? Object.freeze({ visible: false })
   });

@@ -23,6 +23,9 @@ const SURFACE_HIGH_SPEED_REFRESH_YEARS = 2_000;
 const SURFACE_HIGH_SPEED_REFRESH_INTERVAL_MS = 6_000;
 const HIGH_SPEED_PIXEL_RATIO_MULTIPLIER = 0.78;
 const MOBILE_PIXEL_RATIO_MULTIPLIER = 0.88;
+const MOBILE_RUNTIME_QUALITY_SCALE = 0.70;
+const INTERACTION_AERIAL_DETAIL = 0.20;
+const INTERACTION_DETAIL_RESTORE_MS = 180;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const EMPTY_TERRAIN_DIAGNOSTICS = Object.freeze({ loaded: false, loadedChunks: 0, queuedChunks: 0, radius: 0, segments: 0 });
 
@@ -65,6 +68,7 @@ export class EarthView {
     this.terrain = null;
     this.surfaceWater = null;
     this.surfacePlanetaryFarField = null;
+    this.interactionDetailRestoreHandle = null;
     this.continuousUntilMs = 0;
     this.lastRenderMs = 0;
     this.lastFrameDeltaMs = 16.7;
@@ -93,7 +97,7 @@ export class EarthView {
     Object.assign(this, globe);
     this._wireControls(this.controls, "globe");
 
-    wireGlobePicking(canvas, () => this.camera, () => this.earth, (hit) => {
+    this.pickDispose = wireGlobePicking(canvas, () => this.camera, () => this.earth, (hit) => {
       if (this.mode === "globe") this._applySelection(hit);
     });
     this.resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => this.resize()) : null;
@@ -106,6 +110,14 @@ export class EarthView {
   _wireControls(controls, mode) {
     controls.addEventListener("start", () => {
       if (this.mode !== mode) return;
+      if (this.interactionDetailRestoreHandle != null) {
+        clearTimeout(this.interactionDetailRestoreHandle);
+        this.interactionDetailRestoreHandle = null;
+      }
+      if (mode === "surface") {
+        this.terrain?.surfaceScaleController?.setInteractionActive?.(true);
+        this.terrain?.setPresentationInteractionQuality?.(INTERACTION_AERIAL_DETAIL);
+      }
       this.interacting = true;
       this.continuousUntilMs = performance.now() + INTERACTION_SETTLE_MS;
       this.invalidate();
@@ -113,6 +125,13 @@ export class EarthView {
     controls.addEventListener("change", () => { if (this.mode === mode) this.invalidate(); });
     controls.addEventListener("end", () => {
       if (this.mode !== mode) return;
+      if (mode === "surface") {
+        this.terrain?.surfaceScaleController?.setInteractionActive?.(false);
+        this.interactionDetailRestoreHandle = setTimeout(() => {
+          this.interactionDetailRestoreHandle = null;
+          if (!this.interacting) this.terrain?.setPresentationInteractionQuality?.(1);
+        }, INTERACTION_DETAIL_RESTORE_MS);
+      }
       this.interacting = false;
       this.continuousUntilMs = performance.now() + INTERACTION_SETTLE_MS;
       this.invalidate();
@@ -390,7 +409,7 @@ export class EarthView {
     this.clouds.visible = settings.quality >= 0.55;
     this.atmosphere.visible = settings.quality >= 0.55;
     this.terrain?.configure?.({ radius: effectiveTerrainRadius, segments: effectiveTerrainSegments });
-    this.terrain?.setRuntimeQualityScale?.(highSpeed ? 0.72 : this.mobileProfile ? 0.86 : 1);
+    this.terrain?.setRuntimeQualityScale?.(highSpeed ? 0.72 : this.mobileProfile ? MOBILE_RUNTIME_QUALITY_SCALE : 1);
     this.diagnosticsCacheAt = -Infinity;
     return true;
   }
@@ -498,7 +517,12 @@ export class EarthView {
       clearTimeout(this.surfacePrewarmHandle);
       this.surfacePrewarmHandle = null;
     }
+    if (this.interactionDetailRestoreHandle != null) {
+      clearTimeout(this.interactionDetailRestoreHandle);
+      this.interactionDetailRestoreHandle = null;
+    }
     this.resizeObserver?.disconnect();
+    this.pickDispose?.();
     this.rasterWorker.dispose();
     if (this.terrain) this.terrain.onPlanetaryRebase = null;
     this.surfacePlanetaryFarField = null;

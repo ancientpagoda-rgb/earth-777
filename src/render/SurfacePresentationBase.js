@@ -91,6 +91,9 @@ export function createSurfacePresentation(canvas) {
   // world-coordinate fragment material adds continuous sub-kilometer texture
   // without exposing chunk borders or pretending modern satellite imagery exists.
   const aerialMaterial = createRegionalAerialMaterial();
+  terrain.setPresentationInteractionQuality = (detail = 1) => {
+    aerialMaterial.userData.setInteractionQuality?.(detail);
+  };
   const baseMeshFromResult = terrain._meshFromResult.bind(terrain);
   terrain._meshFromResult = (result, candidate) => {
     const mesh = baseMeshFromResult(result, candidate);

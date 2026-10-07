@@ -44,6 +44,9 @@ test("regional detail smoothly blends before its finite square border and raster
   const rasterRefresh = readFileSync(new URL("../src/render/RasterRefresh.js", import.meta.url), "utf8");
   assert.match(aerial, /aerialDetailCoverage/);
   assert.match(aerial, /aerialCurvatureBlend = smoothstep\(110\.0, 300\.0/);
+  assert.match(aerial, /uAerialDetail/);
+  assert.match(aerial, /setInteractionQuality/);
+  assert.match(aerial, /if \(uAerialDetail < 0\.5\)/);
   assert.match(aerial, /diffuseColor\.a \*= aerialDetailCoverage/);
   assert.doesNotMatch(aerial, /aerialDither/);
   assert.match(aerial, /"#include <alphatest_fragment>",[\s\S]*diffuseColor\.a \*= aerialDetailCoverage/);

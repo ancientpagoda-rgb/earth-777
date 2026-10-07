@@ -19,9 +19,11 @@
 
 * { box-sizing: border-box; }
 html, body, .app-shell { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+html, body { min-height: 100%; overscroll-behavior: none; }
 body { color: var(--text); }
 button, input, select { font: inherit; }
 button, select { color: inherit; }
+button, input, select { -webkit-tap-highlight-color: transparent; }
 
 #earth { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
 
@@ -144,6 +146,7 @@ button, select { color: inherit; }
 .primary-button { width: 100%; padding: 8px 9px; border-radius: 7px; color: #08100d; background: var(--jade); font: 8px "JetBrains Mono", monospace; letter-spacing: 0.05em; }
 .primary-button:disabled { cursor: default; opacity: 0.34; }
 .quiet-button:hover { border-color: rgba(120, 168, 143, 0.55); background: rgba(120, 168, 143, 0.14); }
+.primary-button:focus-visible, .quiet-button:focus-visible, .play-button:focus-visible, .close-button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
 .timeline {
   left: 50%;
@@ -237,7 +240,7 @@ body.gamepad-active .center-reticle {
 .source-item p { margin: 6px 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .source-item a { color: var(--amber); font: 9px "JetBrains Mono", monospace; text-decoration: none; }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (pointer: coarse) {
   .topbar { left: 8px; right: 8px; grid-template-columns: 1fr auto; }
   .brand__mark { display: none; }
   .epoch { min-width: 122px; padding-inline: 8px; }
@@ -257,6 +260,17 @@ body.gamepad-active .center-reticle {
     text-align: center;
     transform: translateX(-50%);
   }
+}
+
+@media (max-width: 760px), (pointer: coarse) {
+  .drawer-panel > summary { min-height: 46px; }
+  .primary-button, .quiet-button { min-height: 44px; }
+  .play-button { width: 44px; height: 44px; }
+  .speed-select select { min-height: 44px; }
+  input[type="range"] { height: 18px; }
+  input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; }
+  input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; border: 2px solid var(--bg); border-radius: 50%; background: var(--amber); }
+  .modal__card { max-height: min(760px, 92dvh); }
 }
 
 @media (max-width: 520px) {
