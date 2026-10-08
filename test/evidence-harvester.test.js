@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bedrockElevationAt } from "../src/data/generated/etopo-2022.generated.js";
 import {
   EVIDENCE_RELATIONS,
   harvestEvidence,
@@ -18,6 +17,7 @@ import {
   normalizeTopographyEvidenceRecord,
   TOPOGRAPHY_EVIDENCE_HARVEST_POLICY
 } from "../src/reconstruction/TopographyEvidenceHarvester.js";
+import { interpolatedEtopoBedrockElevationAt } from "../src/reconstruction/ModernTerrainAnchorSelector.js";
 
 function close(actual, expected, tolerance = 1e-9) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
@@ -39,7 +39,7 @@ test("direct target evidence outranks otherwise comparable modern/model evidence
 });
 
 test("nearby paleo evidence is ranked but cannot alter 777 ka until transformed", () => {
-  const modern = bedrockElevationAt(40, -120);
+  const modern = interpolatedEtopoBedrockElevationAt(40, -120);
   const evidence = [{
     sourceId: "nearby-787ka-core",
     field: "bedrockElevationMeters",
@@ -60,7 +60,7 @@ test("nearby paleo evidence is ranked but cannot alter 777 ka until transformed"
 });
 
 test("explicit target transformation makes a hindcast eligible without relabeling it as direct paleo observation", () => {
-  const modern = bedrockElevationAt(40, -120);
+  const modern = interpolatedEtopoBedrockElevationAt(40, -120);
   const evidence = [{
     sourceId: "physical-hindcast",
     field: "bedrockElevationMeters",
@@ -80,7 +80,7 @@ test("explicit target transformation makes a hindcast eligible without relabelin
 });
 
 test("process calibration remains provenance and never becomes an elevation estimate", () => {
-  const modern = bedrockElevationAt(40, -120);
+  const modern = interpolatedEtopoBedrockElevationAt(40, -120);
   const evidence = [{
     sourceId: "terrace-uplift-rate",
     field: "rockUpliftRate",

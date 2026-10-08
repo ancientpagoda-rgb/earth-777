@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bedrockElevationAt } from "../src/data/generated/etopo-2022.generated.js";
 import { EVIDENCE_RELATIONS, harvestEvidence } from "../src/reconstruction/EvidenceHarvester.js";
+import { interpolatedEtopoBedrockElevationAt } from "../src/reconstruction/ModernTerrainAnchorSelector.js";
 import { normalizeTopographyEvidenceRecord } from "../src/reconstruction/TopographyEvidenceHarvester.js";
 import { terrain777BedrockSampleFromEvidence } from "../src/reconstruction/TerrainReconstruction777.js";
 
@@ -29,7 +29,7 @@ test("Spratt-Lisiecki source normalization keeps sea level separate from bedrock
 test("sea-level evidence cannot numerically move reconstructed bedrock through the terrain harvester", () => {
   const latitude = 10;
   const longitude = 20;
-  const modern = bedrockElevationAt(latitude, longitude);
+  const modern = interpolatedEtopoBedrockElevationAt(latitude, longitude);
   const sample = terrain777BedrockSampleFromEvidence(latitude, longitude, [{
     sourceId: "spratt-lisiecki-2016",
     ageBP: 777_000,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bedrockElevationAt } from "../src/data/generated/etopo-2022.generated.js";
+import { interpolatedEtopoBedrockElevationAt } from "../src/reconstruction/ModernTerrainAnchorSelector.js";
 import {
   reconstructedBedrockElevation777At,
   terrain777BedrockSample,
@@ -14,7 +14,7 @@ function close(actual, expected, tolerance = 1e-9) {
 test("default terrain reconstruction uses ETOPO as the unresolved global fallback", () => {
   const latitude = 38.9;
   const longitude = -95.2;
-  const modern = bedrockElevationAt(latitude, longitude);
+  const modern = interpolatedEtopoBedrockElevationAt(latitude, longitude);
   const sample = terrain777BedrockSample(latitude, longitude);
   assert.equal(sample.policy, TERRAIN_777_RECONSTRUCTION_POLICY);
   close(sample.modernElevationMeters, modern);
@@ -32,7 +32,7 @@ test("default terrain reconstruction uses ETOPO as the unresolved global fallbac
 test("an explicit hindcast correction changes the target-epoch terrain estimate without inventing complete uncertainty", () => {
   const latitude = 46;
   const longitude = 8;
-  const modern = bedrockElevationAt(latitude, longitude);
+  const modern = interpolatedEtopoBedrockElevationAt(latitude, longitude);
   const sample = terrain777BedrockSample(latitude, longitude, {
     hindcastCorrection: {
       value: -42,
@@ -49,7 +49,7 @@ test("an explicit hindcast correction changes the target-epoch terrain estimate 
 test("paleo target evidence fuses only when local modern-anchor uncertainty is explicitly supplied", () => {
   const latitude = 10;
   const longitude = 20;
-  const modern = bedrockElevationAt(latitude, longitude);
+  const modern = interpolatedEtopoBedrockElevationAt(latitude, longitude);
   const transformedValue = modern + 30;
   const paleoValue = transformedValue + 20;
   const modernSigma = 4;
@@ -70,7 +70,7 @@ test("paleo target evidence fuses only when local modern-anchor uncertainty is e
 test("historical calibration does not directly move terrain without a process hindcast", () => {
   const latitude = -30;
   const longitude = 120;
-  const modern = bedrockElevationAt(latitude, longitude);
+  const modern = interpolatedEtopoBedrockElevationAt(latitude, longitude);
   const sample = terrain777BedrockSample(latitude, longitude, {
     historicalCalibration: [{ parameter: "uplift-rate", value: 0.2, sigma: 0.05, sourceId: "historical-test" }]
   });

@@ -9,7 +9,8 @@ test("adaptive performance controller reduces visual LOD under sustained frame p
     changed = controller.sample(34, 100 + i * 120) || changed;
   }
   assert.equal(changed, true);
-  assert.equal(controller.diagnostics().visualLod, "high");
+  assert.equal(controller.diagnostics().visualLod, "low");
+  assert.match(controller.diagnostics().lastReason, /^frame pressure /);
 });
 
 test("adaptive performance controller settings combine visual and scientific detail", () => {

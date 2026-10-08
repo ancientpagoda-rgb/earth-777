@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { bedrockElevationAt } from "../src/data/generated/etopo-2022.generated.js";
 import {
   gebcoTidMeasurementQuality,
   MODERN_TERRAIN_ANCHOR_POLICY,
+  interpolatedEtopoBedrockElevationAt,
   selectModernTerrainAnchor
 } from "../src/reconstruction/ModernTerrainAnchorSelector.js";
 import { terrain777BedrockSample } from "../src/reconstruction/TerrainReconstruction777.js";
@@ -18,7 +18,7 @@ test("ETOPO remains the deterministic global fallback when no higher-resolution 
   const selected = selectModernTerrainAnchor(lat, lon, []);
   assert.equal(selected.policy, MODERN_TERRAIN_ANCHOR_POLICY);
   assert.equal(selected.selected.sourceId, "etopo-2022");
-  assert.equal(selected.selected.value, bedrockElevationAt(lat, lon));
+  assert.equal(selected.selected.value, interpolatedEtopoBedrockElevationAt(lat, lon));
   assert.equal(selected.replacementUsed, false);
 });
 

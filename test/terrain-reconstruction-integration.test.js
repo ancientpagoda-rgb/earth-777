@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { checkpointState } from "../src/data/checkpoint-777.js";
-import { bedrockElevationAt } from "../src/data/generated/etopo-2022.generated.js";
 import { dynamicSurfaceElevationMeters } from "../src/sim/GeneralAtmosphereCirculation.js";
+import { interpolatedEtopoBedrockElevationAt } from "../src/reconstruction/ModernTerrainAnchorSelector.js";
 import { reconstructedBedrockElevation777At } from "../src/reconstruction/TerrainReconstruction777.js";
 
 function close(actual, expected, tolerance = 1e-9) {
@@ -15,7 +15,7 @@ test("checkpoint atmosphere resolves elevation through the reconstruction servic
   const latitude = 35;
   const longitude = -110;
   close(dynamicSurfaceElevationMeters(state, latitude, longitude), reconstructedBedrockElevation777At(latitude, longitude));
-  close(reconstructedBedrockElevation777At(latitude, longitude), bedrockElevationAt(latitude, longitude));
+  close(reconstructedBedrockElevation777At(latitude, longitude), interpolatedEtopoBedrockElevationAt(latitude, longitude));
 });
 
 test("post-checkpoint tectonic evolution is added after the reconstructed checkpoint base", () => {
