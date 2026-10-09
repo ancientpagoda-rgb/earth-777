@@ -20,6 +20,7 @@ import {
 } from "./AggregateFaunaEcology.js";
 import { advanceHomininLineages, initializeHomininLineages } from "./HomininLineages.js";
 import { createRandom, gaussian } from "./random.js";
+import { WorldMemory } from "./WorldMemory.js";
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const positive = (value, floor = 1e-9) => Math.max(floor, Number(value) || 0);
@@ -56,6 +57,9 @@ export class FreeEarthEngine {
     initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
+    this._pendingWorldEvents = [];
+    this.worldMemory = new WorldMemory();
+    this.worldMemory.record(this.state);
   }
 
   _resetRandomStreams() {
@@ -80,6 +84,9 @@ export class FreeEarthEngine {
     initializeHomininLineages(this.state, this.seed);
     this.state.stage = stageForYearBP(this.state.yearBP);
     this.events = [];
+    this._pendingWorldEvents = [];
+    this.worldMemory = new WorldMemory();
+    this.worldMemory.record(this.state);
     return this.snapshot();
   }
 
@@ -201,6 +208,10 @@ export class FreeEarthEngine {
         state.magneticStrength = Math.max(0.04, relax(state.magneticStrength, 1, subDt, 4_500) + secularNoise);
       }
     });
+
+    const worldEvents = this._pendingWorldEvents;
+    this._pendingWorldEvents = [];
+    this.worldMemory.record(this.state, worldEvents);
   }
 
   _recordLineageEvents(animalLineagesBefore, homininLineagesBefore) {
@@ -228,6 +239,7 @@ export class FreeEarthEngine {
     const duplicate = this.events.at(-1);
     if (duplicate?.text === text && Math.abs(duplicate.yearBP - this.state.yearBP) < 1_000) return;
     this.events.push({ yearBP: Math.round(this.state.yearBP), text });
+    this._pendingWorldEvents.push({ yearBP: Math.round(this.state.yearBP), text });
     if (this.events.length > 40) this.events.shift();
   }
 
@@ -281,7 +293,9 @@ export class FreeEarthEngine {
       speciesLineages,
       homininLineages,
       carbonFluxes: Object.freeze({ ...this.state.carbonFluxes }), methaneFluxes: Object.freeze({ ...this.state.methaneFluxes }),
-      nitrogenFluxes: Object.freeze({ ...this.state.nitrogenFluxes }), events: Object.freeze(this.events.map((event) => Object.freeze({ ...event })))
+      nitrogenFluxes: Object.freeze({ ...this.state.nitrogenFluxes }),
+      events: Object.freeze(this.events.map((event) => Object.freeze({ ...event }))),
+      worldMemory: this.worldMemory.snapshot()
     });
   }
 }

@@ -31,6 +31,7 @@ Version 0.2 establishes:
 - multiscale time controls from 1 to 1,000 simulated years per real second;
 - a scientific source ledger visible inside the application;
 - automated tests for checkpoint integrity, determinism, backward seeking, physical bounds, adaptive fidelity, terrain ingestion, climate/vegetation assets, water conservation, soil fidelity, and river-network closure.
+- bounded hierarchical world memory that keeps recent simulation samples detailed while compacting older periods into deterministic summaries.
 
 The canonical orbit comes from the Vavrus et al. CCSM4 experiment. Its values differ slightly from the nominal La2004 row at 777 ka, so the simulator applies La2004 anomalies to that checkpoint and tapers the offset over the paper's 2.3 kyr dating-uncertainty window. After that window, the orbital forcing is the direct La2004 series. Sea level uses the continuous five-record Spratt–Lisiecki stack as a reconstructed reference; Free Earth branches can diverge from it through modeled ice-volume feedback.
 
